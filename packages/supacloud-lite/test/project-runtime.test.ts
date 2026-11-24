@@ -210,7 +210,6 @@ describe('project runtime', () => {
       projectDir, memory: true, includeFunctions: false, includeWebhooks: false,
       startRuntimeServices: false, log: () => {},
     }
-    await expect(createProjectBackend(options)).rejects.toThrow('PG_GRAPHQL_NOT_INSTALLED')
     await writeFile(join(projectDir, 'supabase', 'config.toml'),
       '[lite.graphql]\nenabled = true\n[lite.identity]\nmodule = "missing-identity.ts"\n')
     const maintenance = await createProjectBackend({

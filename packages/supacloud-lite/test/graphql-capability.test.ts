@@ -6,37 +6,72 @@ import { createBackend } from '../src/runtime/index.js'
 import { GraphqlHandler, LITE_GRAPHQL_CONTRACT, inspectGraphql } from '../src/runtime/graphql.js'
 import { readJson, record } from './support/contracts.js'
 
-test('Lite GraphQL stays pg_graphql and is not the hosted Hasura contract', () => {
+test('Lite GraphQL uses the hosted Hasura read contract and records the gaps', () => {
   expect(LITE_GRAPHQL_CONTRACT).toEqual({
     path: '/graphql/v1',
-    dialect: 'pg_graphql',
+    dialect: 'postrust-hasura',
     hostedDialect: 'postrust-hasura',
-    interchangeableWithHosted: false,
+    interchangeableWithHosted: true,
+    limits: [
+      'mutations-not-implemented',
+      'aggregates-not-implemented',
+      'subscriptions-not-implemented',
+      'relationship-filters-not-implemented',
+      'db-pre-request-not-applied',
+      'relay-documents-rejected',
+    ],
   })
+  expect(LITE_GRAPHQL_CONTRACT.dialect).toBe(LITE_GRAPHQL_CONTRACT.hostedDialect)
 })
 
-test('PGlite truthfully reports missing pg_graphql and rejects required startup', async () => {
-  const backend = await createBackend({ startRuntimeServices: false })
+test('PGlite serves Hasura reads under GRANT and RLS without pg_graphql', async () => {
+  const backend = await createBackend({ startRuntimeServices: false, graphql: { enabled: true } })
   try {
-    expect(backend.graphql).toEqual({ status: 'unsupported', extension: 'pg_graphql', reason: 'PG_GRAPHQL_NOT_INSTALLED' })
-    const response = await backend.fetch('http://local/graphql/v1', {
-      method: 'POST', headers: { apikey: backend.anonKey }, body: '{}',
-    })
-    expect(response.status).toBe(501)
-    expect(await readJson(response)).toMatchObject({
-      errors: [{ extensions: { code: 'PG_GRAPHQL_NOT_INSTALLED' } }],
-    })
-    await backend.db.exec('create schema graphql; create function graphql.resolve(text, jsonb, text, jsonb) returns jsonb language sql as $$ select \'{}\'::jsonb $$')
-    expect((await inspectGraphql(backend.db.engine)).status).toBe('unsupported')
+    expect(backend.graphql).toEqual({ status: 'supported', extension: 'postrust-hasura', dialect: 'postrust-hasura' })
+    expect(await inspectGraphql()).toEqual(backend.graphql)
+    await backend.db.exec(`
+      create table public.authors (id int primary key, name text not null);
+      create table public.notes (
+        id int primary key,
+        author_id int references public.authors(id),
+        owner text not null
+      );
+      alter table public.notes enable row level security;
+      create policy notes_read on public.notes for select to authenticated
+        using (owner = coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb ->> 'sub');
+      grant select on public.authors, public.notes to anon, authenticated;
+      insert into public.authors values (1, 'Alice'), (2, 'Bob');
+      insert into public.notes values (1, 1, 'alice'), (2, 2, 'bob');
+    `)
+    const handler = new GraphqlHandler(backend.db, backend.graphql)
+    const send = (query: string, role: string, sub?: string) => handler.handle(new Request('http://local/graphql/v1', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query }),
+    }), { role, claims: { role, ...(sub ? { sub } : {}) } })
+    const alice = record(await readJson(await send(
+      '{ notes(where: { owner: { _eq: "alice" } }, order_by: [{ id: asc }], limit: 10) { id owner author { name } } }',
+      'authenticated',
+      'alice',
+    )))
+    expect(alice['errors']).toBeUndefined()
+    expect(alice['data']).toEqual({ notes: [{ id: 1, owner: 'alice', author: { name: 'Alice' } }] })
+    const anon = record(await readJson(await send('{ notes { id } }', 'anon')))
+    expect(anon['data']).toEqual({ notes: [] })
+    const relay = record(await readJson(await send('{ notesCollection(first: 1) { edges { node { id } } } }', 'authenticated', 'alice')))
+    expect(relay['data']).toBeNull()
+    expect(JSON.stringify(relay['errors'])).toContain('notesCollection')
+    const mutation = record(await readJson(await send('mutation { insert_notes(objects: [{ id: 9 }]) { affected_rows } }', 'authenticated', 'alice')))
+    expect(JSON.stringify(mutation['errors'])).toContain('not implemented')
+    expect(mutation['data']).toBeUndefined()
   } finally { await backend.close() }
-  await expect(createBackend({ graphql: { enabled: true }, startRuntimeServices: false })).rejects.toThrow('PG_GRAPHQL_NOT_INSTALLED')
 })
 
 test('GraphQL adapter rejects malformed and oversized requests before database execution', async () => {
   const backend = await createBackend({ startRuntimeServices: false })
   try {
     // Transport-only tests; this does not claim a fake extension is compatible.
-    const handler = new GraphqlHandler(backend.db, { status: 'supported', extension: 'pg_graphql' }, { maxRequestBodyBytes: 80 })
+    const handler = new GraphqlHandler(backend.db, { status: 'supported', extension: 'postrust-hasura', dialect: 'postrust-hasura' }, { maxRequestBodyBytes: 80 })
     const request = (body: string, type = 'application/json') => new Request('http://local/graphql/v1', {
       method: 'POST', headers: { 'content-type': type }, body,
     })
@@ -47,25 +82,6 @@ test('GraphQL adapter rejects malformed and oversized requests before database e
       expect((await handler.handle(request(body), ctx)).status).toBe(400)
     }
     expect((await handler.handle(request(JSON.stringify({ query: 'x'.repeat(100) })), ctx)).status).toBe(413)
-    // Validate a malformed resolver payload without advertising it as a real extension.
-    await backend.db.exec(`
-      create schema graphql;
-      create function graphql.resolve(text,jsonb,text,jsonb) returns jsonb
-        language sql as $$ select '42'::jsonb $$;
-      grant usage on schema graphql to anon;
-      grant execute on all functions in schema graphql to anon;
-    `)
-    for (const payload of ['42', '{"data":42}', '{"errors":[{}]}', '{"data":null,"extensions":[]}']) {
-      await backend.db.exec(`
-        create or replace function graphql.resolve(text,jsonb,text,jsonb) returns jsonb
-          language sql as $$ select '${payload}'::jsonb $$;
-      `)
-      const malformed = await handler.handle(request('{"query":"{ __typename }"}'), ctx)
-      expect(malformed.status).toBe(500)
-      expect(await readJson(malformed)).toMatchObject({
-        errors: [{ extensions: { code: 'GRAPHQL_EXECUTION_FAILED' } }],
-      })
-    }
   } finally { await backend.close() }
 })
 
@@ -75,16 +91,9 @@ test('GraphQL adapter emits sanitized duration metrics for slow requests', async
   try {
     const handler = new GraphqlHandler(
       backend.db,
-      { status: 'supported', extension: 'pg_graphql' },
+      { status: 'supported', extension: 'postrust-hasura', dialect: 'postrust-hasura' },
       { slowQueryThresholdMs: 1, onRequest: (metric) => metrics.push({ ...metric }) },
     )
-    await backend.db.exec(`
-      create schema graphql;
-      create function graphql.resolve(text,jsonb,text,jsonb) returns jsonb
-        language sql as $$ select '{"data":{"__typename":"Query"}}'::jsonb $$;
-      grant usage on schema graphql to anon;
-      grant execute on all functions in schema graphql to anon;
-    `)
     const response = await handler.handle(new Request('http://local/graphql/v1', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -125,20 +134,6 @@ test('doctor reports unverified capability without initializing state and fails 
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-test('catalog membership alone does not advertise a missing extension library', async () => {
-    const engine = {
-      query: async (sql: string) => {
-        if (sql.includes('pg_extension e')) return { rows: [{ extversion: 'test', resolver: true }] }
-        throw new Error('private dynamic library path')
-      },
-    }
-    expect(await inspectGraphql(engine)).toEqual({
-      status: 'unsupported', extension: 'pg_graphql', version: 'test', reason: 'PG_GRAPHQL_RESOLVER_FAILED',
-    })
-})
-
-test('invalid catalog records cannot advertise GraphQL support', async () => {
-  for (const row of [null, [], { extversion: '1.6.1', resolver: 'true' }, { extversion: 1, resolver: true }]) {
-    expect((await inspectGraphql({ query: async () => ({ rows: [row] }) })).reason).toBe('PG_GRAPHQL_INVALID_CATALOG')
-  }
+test('GraphQL support does not depend on a pg_graphql catalog row', async () => {
+  expect(await inspectGraphql()).toEqual({ status: 'supported', extension: 'postrust-hasura', dialect: 'postrust-hasura' })
 })

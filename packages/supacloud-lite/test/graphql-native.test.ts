@@ -53,12 +53,8 @@ nativeGraphql('real pg_graphql: role-scoped schema, nested RLS, mutation denial 
     backend = await createBackend({
       engine, startRuntimeServices: false, log: () => {},
     })
-    expect(backend.graphql.reason).toBe('PG_GRAPHQL_NOT_INSTALLED')
+    expect(backend.graphql).toEqual({ status: 'supported', extension: 'postrust-hasura', dialect: 'postrust-hasura' })
     await backend.migrate([{ name: '100_graphql', sql: `
-        create extension pg_graphql;
-        grant usage on schema graphql to anon, authenticated, service_role;
-        grant execute on all functions in schema graphql to anon, authenticated, service_role;
-        comment on schema public is '@graphql({"inflect_names": true, "introspection": true})';
         create table public.customers(id int primary key, tenant text not null, name text not null);
         create table public.orders(id int primary key, tenant text not null, customer_id int references public.customers(id));
         revoke all on public.customers, public.orders from public, anon, authenticated;
@@ -72,7 +68,6 @@ nativeGraphql('real pg_graphql: role-scoped schema, nested RLS, mutation denial 
       ` }])
     expect(backend.graphql.status).toBe('supported')
     expect(backend.graphql.reason).toBeUndefined()
-    expect(backend.graphql.version).toBeTruthy()
     const credential = (tenant: string) => signJwt({ role: 'authenticated', tenant_id: tenant,
       sub: '00000000-0000-0000-0000-000000000001', exp: Math.floor(Date.now() / 1000) + 60 }, current().jwtSecret)
     const tokens = { a: await credential('a'), b: await credential('b') }
@@ -83,7 +78,7 @@ nativeGraphql('real pg_graphql: role-scoped schema, nested RLS, mutation denial 
       })
       return { status: response.status, body: record(await readJson(response)) }
     }
-    const query = '{ ordersCollection(orderBy: [{id: AscNullsLast}]) { edges { node { id customer { name } } } } }'
+    const query = '{ orders(order_by: [{id: asc}]) { id customer { name } } }'
     const a = await graphql(query, tokens.a)
     expect(a.status).toBe(200)
     expect(a.body['errors']).toBeUndefined()
@@ -97,7 +92,7 @@ nativeGraphql('real pg_graphql: role-scoped schema, nested RLS, mutation denial 
     const schema = join(work, 'schema.graphql')
     await pullGraphqlSchema({ url: 'http://127.0.0.1', output: schema, accessToken: tokens.a, fetch: backend.fetch })
     await mkdir(join(work, 'src'))
-    await writeFile(join(work, 'src/orders.graphql'), 'query OrderList($id: Int!) { ordersCollection(filter: {id: {eq: $id}}) { edges { node { id customer { name } } } } }')
+    await writeFile(join(work, 'src/orders.graphql'), 'query OrderList($id: Int!) { orders(where: { id: { _eq: $id } }) { id customer { name } } }')
     const compilation = await compileProject({ rootDir: join(work, 'src'), outDir: join(work, 'generated'), graphql: { schema } })
     expect(compilation.diagnostics).toEqual([])
     const client = record(await callExport(pathToFileURL(join(work, 'generated/graphql.ts')).href, 'createGraphqlClient',
@@ -106,9 +101,10 @@ nativeGraphql('real pg_graphql: role-scoped schema, nested RLS, mutation denial 
     expect(orderNodes(await callMethod(client, 'OrderList', { id: 2 }))).toEqual([])
     const introspection = '{ __schema { queryType { fields { name } } mutationType { fields { name } } } }'
     expect((await graphql(introspection, tokens.a)).body['errors']).toBeUndefined()
+    expect(JSON.stringify((await graphql(introspection, tokens.a)).body)).toContain('query_root')
     expect(JSON.stringify((await graphql(introspection)).body)).not.toContain('ordersCollection')
-    expect(JSON.stringify((await graphql(introspection, tokens.a)).body)).not.toContain('updateOrdersCollection')
-    expect((await graphql('mutation { deleteFromOrdersCollection(filter: {id: {eq: 1}}) { affectedCount } }', tokens.a)).body['errors']).toBeTruthy()
+    expect(JSON.stringify((await graphql(introspection, tokens.a)).body)).not.toContain('insert_orders')
+    expect((await graphql('mutation { delete_orders(where: {id: {_eq: 1}}) { affected_rows } }', tokens.a)).body['errors']).toBeTruthy()
     expect((await backend.db.query<unknown>('select count(*)::int as count from public.orders')).rows).toEqual([{ count: 3 }])
     for (const result of await Promise.all(Array.from({ length: 6 }, (_, index) => graphql(query, index % 2 ? tokens.a : tokens.b)))) {
       expect(result.body['errors']).toBeUndefined()
@@ -122,13 +118,9 @@ nativeGraphql('real pg_graphql: role-scoped schema, nested RLS, mutation denial 
     engine = await buildWireEngine({ connect })
     backend = await createBackend({ engine, jwtSecret: secret, graphql: { enabled: true }, startRuntimeServices: false, log: () => {} })
     expect((await graphql(query)).body['errors']).toBeTruthy()
-    expect(JSON.stringify((await graphql(introspection, tokens.a)).body)).not.toContain('updateOrdersCollection')
+    expect(JSON.stringify((await graphql(introspection, tokens.a)).body)).toContain('"orders"')
     expect(orderNodes((await graphql(query, tokens.b)).body['data'])).toHaveLength(1)
-    console.log(`Verified real pg_graphql ${backend.graphql.version} on PostgreSQL 18`)
-    await backend.migrate([{ name: '101_remove_graphql', sql: 'drop extension pg_graphql cascade' }])
-    expect(backend.graphql.status).toBe('unsupported')
-    expect(backend.graphql.version).toBeUndefined()
-    expect((await graphql(query, tokens.a)).status).toBe(501)
+    console.log('Verified Lite Hasura reads on PostgreSQL 18')
   } finally {
     try {
       if (backend) await backend.close()

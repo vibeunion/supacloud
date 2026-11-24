@@ -184,11 +184,8 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
   }
 
   const graphqlCapability: GraphqlCapability = config.graphql?.enabled === false
-    ? { status: 'disabled', extension: 'pg_graphql' }
-    : await inspectGraphql(db.engine).catch(failStartup)
-  if (config.graphql?.enabled === true && graphqlCapability.status !== 'supported') {
-    await failStartup(new Error(`${graphqlCapability.reason}: GraphQL requires an installed pg_graphql extension with graphql.resolve; PGlite and stock native binaries do not bundle it`))
-  }
+    ? { status: 'disabled', extension: 'postrust-hasura', dialect: 'postrust-hasura', reason: 'GRAPHQL_DISABLED' }
+    : await inspectGraphql().catch(failStartup)
   const graphql = await Promise.resolve().then(() => new GraphqlHandler(db, graphqlCapability, config.graphql, config.dbSchemas)).catch(failStartup)
 
   const pgredis = await PgredisCache.create(db).catch(failStartup)
@@ -571,7 +568,7 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
     migrate: async (migrations, seedSql) => {
       const applied = await db.runMigrations(migrations, seedSql)
       if (config.graphql?.enabled !== false) {
-        const capability = await inspectGraphql(db.engine)
+        const capability = await inspectGraphql()
         delete graphqlCapability.version
         delete graphqlCapability.reason
         Object.assign(graphqlCapability, capability)

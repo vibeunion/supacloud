@@ -30,11 +30,16 @@ export async function callMethod(object: Record<string, unknown>, name: string, 
 }
 
 export function orderNodes(data: unknown): Array<{ id: number; customer: { name: string } | null }> {
-  return array(record(record(data)['ordersCollection'])['edges']).map((edge) => {
-    const node = record(record(edge)['node'])
-    const id = node['id']
+  const root = record(data)
+  const direct = root['orders']
+  const nodes = Array.isArray(direct)
+    ? direct
+    : array(record(root['ordersCollection'])['edges']).map((edge) => record(edge)['node'])
+  return nodes.map((node) => {
+    const row = record(node)
+    const id = row['id']
     assert(typeof id === 'number' && Number.isSafeInteger(id), 'invalid order id')
-    const customer = node['customer']
+    const customer = row['customer']
     if (customer === null) return { id, customer: null }
     const name = record(customer)['name']
     assert(typeof name === 'string', 'invalid customer name')

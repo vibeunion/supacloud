@@ -84,7 +84,7 @@ This repository does not ship a supabase-js GraphQL adapter. Callers post a Hasu
 
 - GraphQL does not call `PGRST_DB_PRE_REQUEST`. Upstream documents that setting as REST-only. Singular `request.jwt.claim.*` stays unset. `auth.uid()` in the CI fixture succeeds because the function falls back to `request.jwt.claims`. REST `search_path` is not applied.
 - Postrust v3.4.0 GraphQL subscriptions stay on paths this gateway keeps closed, including `/v1/graphql/ws` and `/admin`. Publishing those paths is not how this route gains subscriptions.
-- Lite `/graphql/v1` still executes real `pg_graphql` through `graphql.resolve`. `LITE_GRAPHQL_CONTRACT.interchangeableWithHosted` is false. The same contract would need a real Hasura executor on PostgreSQL `GRANT` and RLS. Lite does not simulate that executor and does not embed Postrust.
+- Lite `/graphql/v1` executes the same read shape as SQL in the caller's transaction: `query_root`, `where`, `order_by`, `limit`, and foreign-key fields named the way Postrust v3.4.0 names them (`notes` for the child table, `author` for `author_id`). `LITE_GRAPHQL_CONTRACT.interchangeableWithHosted` is true for that read contract. Mutations, aggregates, subscriptions, and relationship filters are rejected. Lite does not call `db-pre-request` and does not embed Postrust.
 - Postrust's Hasura conformance harness was not replayed here.
 - The catalog does not emit GraphQL SDL or `GRANT`.
 - No production host was upgraded, retagged, or deployed for this cutover.

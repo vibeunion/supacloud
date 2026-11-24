@@ -168,7 +168,7 @@ sso_domains = ["acme.example"]
 
 Lite 支持平铺 SQL 与 `时间戳目录/migration.sql`，执行前检查重复版本和已应用 SQL 的内容漂移；目标绑定复用 `@supacloud/db`，`migrate --json` 可输出不含参数值的校验记录。`--runtime-mode strict` 对齐函数默认限制并拒绝无效配置、缺失函数和未声明的后台任务。`max_heap_bytes` 接受与生产 Edge Runtime 相同的 1 字节到 512 MiB 声明；strict 模式拒绝非法值。Lite 在进程内执行函数，不按该预算采样堆或回收进程。
 
-`/graphql/v1` 使用真正的 `pg_graphql` 扩展和调用者的数据库角色/RLS，不模拟扩展。默认 PGlite 和标准 native 下载包均不包含该扩展；native 可通过 `--postgres-dir` 选择已经安装匹配扩展的 PostgreSQL。配置 `[lite.graphql] enabled = true` 会在运行时启动前验证扩展，`doctor --json` 区分已支持、缺失与尚未验证。
+`/graphql/v1` executes Hasura-shaped reads as SQL under the caller role and RLS. It does not require `pg_graphql`. Mutations, aggregates, subscriptions, and Relay documents are rejected. See the English GraphQL paragraph below.
 
 `doctor --production` 在能力报告之外检查单机生产阻断项和运维义务：strict 运行时、非内存存储、外部身份同源代理、公开地址、数据库/存储目录隔离、状态目录位置和快照新鲜度。阻断项使命令以非零退出码结束；警告项表示必须由部署方承担的运维责任（例如 S3 对象不在快照内、PGlite 容量验证、TLS 必须由反代终止）。
 
@@ -957,16 +957,14 @@ invalid declarations, missing functions and undeclared background work.
 is rejected when invalid in strict mode. Lite does not sample or retire on
 that budget, because functions run in-process.
 
-`/graphql/v1` requires real `pg_graphql` and uses the caller's role/RLS. Hosted
-project `/graphql/v1` is the Postrust Hasura dialect. Lite does not serve that
-dialect: `LITE_GRAPHQL_CONTRACT.interchangeableWithHosted` is false, and a Lite
-document is not a hosted document. Aligning them needs a real Hasura executor
-on PostgreSQL `GRANT` and RLS. Lite does not simulate that executor and does
-not embed Postrust. Neither
-bundled PGlite nor stock native downloads include the extension. Native can use
-an operator-managed installation selected with `--postgres-dir`. Required
-GraphQL fails startup when missing; `doctor --json` reports actual or unverified
-capability. External SupAuth can reuse the shared Elysia verifier through
+`/graphql/v1` serves Hasura-shaped reads (`query_root`, `where`, `order_by`,
+`limit`, and foreign-key fields) as SQL in the caller's transaction, so
+PostgreSQL `GRANT` and RLS apply. A hosted read document of that shape is a
+Lite document. Mutations, aggregates, subscriptions, relationship filters, and
+Relay `*Collection` documents are rejected. Lite does not embed Postrust and
+does not require the `pg_graphql` extension for this route. `doctor --json`
+reports the route as supported once the database is open, and unverified
+before that. External SupAuth can reuse the shared Elysia verifier through
 `createSupAuthLiteIdentity` and an explicit application-owned local user mapping.
 
 When the browser application and the identity service have different origins and
