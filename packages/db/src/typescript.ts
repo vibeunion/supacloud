@@ -55,8 +55,11 @@ export class Program implements AsyncDisposable {
   }
   static async load(native: NativeProgram, api: API, owned = false, snapshot?: Snapshot): Promise<Program> {
     const sources = new Map<string, SourceFile>();
-    // Let the native client batch independent AST requests into one RPC round trip.
-    const loaded = await Promise.all((await native.getSourceFileNames()).map(async path =>
+    // Default lib.*.d.ts files stay on the type server. Pulling every AST, especially
+    // lib.dom.d.ts, into one batched RPC stalls the client under CI load and never
+    // reaches the caller's semantic gate.
+    const names = (await native.getSourceFileNames()).filter((path) => !isDefaultTypeScriptLibrary(path));
+    const loaded = await Promise.all(names.map(async path =>
       [path, await native.getSourceFile(path)] as const));
     for (const [path, source] of loaded) {
       if (source) sources.set(resolve(path), source);
@@ -78,12 +81,34 @@ export class Program implements AsyncDisposable {
     return await resolver.resolveModuleName(name, dirname(containingFile));
   }
   async [Symbol.asyncDispose](): Promise<void> {
-    if (this.owned) {
-      try { await this.native.dispose(); }
-      finally { try { await this.snapshot?.dispose(); } finally { await this.api.close(); } }
+    if (!this.owned) return;
+    // A type server that stops answering must not pin the caller until the test
+    // runner kills it. Closing stdin lets the process leave its read loop.
+    try { await withDeadline(this.native.dispose(), PROGRAM_RELEASE_MS); }
+    finally {
+      try { await withDeadline(this.snapshot?.dispose() ?? Promise.resolve(), PROGRAM_RELEASE_MS); }
+      finally { await this.api.close(); }
     }
   }
 }
+
+const PROGRAM_RELEASE_MS = 2_000;
+
+function withDeadline(operation: Promise<unknown>, timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, timeoutMs);
+    operation.then(() => { clearTimeout(timer); resolve(); }, () => { clearTimeout(timer); resolve(); });
+  });
+}
+
+/** TypeScript's bundled lib.*.d.ts files. Project and package declarations are not libraries. */
+function isDefaultTypeScriptLibrary(fileName: string): boolean {
+  const normalized = fileName.replaceAll("\\", "/");
+  if (!/\/lib\.[^/]+\.d\.ts$/.test(normalized)) return false;
+  return normalized.includes("/node_modules/typescript/lib/")
+    || normalized.includes("/@typescript/typescript-");
+}
+
 export interface ProgramInputs {
   cwd?: string;
   sources?: ReadonlyMap<string, string>;
