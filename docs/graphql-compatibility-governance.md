@@ -103,7 +103,10 @@ in the metric payload.
 
 The hosted Supabase-compatible route remains `/graphql/v1`, with the existing
 `apikey`, Bearer token, `Accept-Profile: graphql_public` and
-`Content-Profile: graphql_public` behavior.
+`Content-Profile: graphql_public` behavior. The compiler data catalog may record
+that this route and PostgREST-compatible REST share one ZenStack schema. That
+record does not generate a GraphQL schema and does not move this route. See
+[ZenStack data catalog](zenstack-data-catalog.md).
 
 ## Studio Entry
 

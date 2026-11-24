@@ -6,6 +6,7 @@ import { renderGraphql } from "./graphql";
 import { writeFileIfChanged } from "./generate";
 import { assertGraphqlOptions } from "./graphql-options";
 import { parseDatabaseContractManifest, type DatabaseContractManifest } from "./database-contract-manifest";
+import { compileDataCatalog, parseDataCatalogConfig, renderDataCatalog, type DataCatalogConfig } from "./data-catalog";
 import type { GraphqlOptions } from "./types";
 
 export interface DatabaseContractsOptions {
@@ -21,6 +22,11 @@ export interface DatabaseContractsOptions {
   role: string;
   /** Role-scoped pg_graphql snapshot exported by graphql-schema. Omit when GraphQL is unused. */
   graphql?: GraphqlOptions;
+  /**
+   * ZenStack ZModel that owns REST and GraphQL.
+   * REST execution is not the schema owner. Public GraphQL stays `/graphql/v1`.
+   */
+  catalog?: DataCatalogConfig;
   /** Registry emitted by application or database code generation. Tracked for contract freshness. */
   rpcRegistry?: string;
   /** Generated or exported RPC catalog. Tracked for contract freshness. */
@@ -39,7 +45,7 @@ function importPath(out: string, path: string): string {
 
 export function parseDatabaseContractsOptions(value: unknown, directory: string): DatabaseContractsOptions {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Expected database contracts configuration");
-  const allowed = ["rootDir", "outDir", "postgrestTypes", "modelSchema", "modelPolicy", "role", "graphql", "rpcRegistry", "rpcCatalog", "migrations"];
+  const allowed = ["rootDir", "outDir", "postgrestTypes", "modelSchema", "modelPolicy", "role", "graphql", "catalog", "rpcRegistry", "rpcCatalog", "migrations"];
   if (Object.keys(value).some((name) => !allowed.includes(name))) throw new TypeError("Unknown database contracts option");
   const field = (name: string) => {
     const result: unknown = Reflect.get(value, name);
@@ -56,8 +62,9 @@ export function parseDatabaseContractsOptions(value: unknown, directory: string)
   const rpcRegistry = optionalPath("rpcRegistry");
   const rpcCatalog = optionalPath("rpcCatalog");
   const graphqlPresent = Object.hasOwn(value, "graphql");
-  if (!postgrestTypes && !modelSchema && !modelPolicy && !graphqlPresent) {
-    throw new TypeError("Database contracts require postgrestTypes, modelSchema, or graphql");
+  const catalog = Object.hasOwn(value, "catalog") ? parseDataCatalogConfig(Reflect.get(value, "catalog"), directory) : undefined;
+  if (!postgrestTypes && !modelSchema && !modelPolicy && !graphqlPresent && !catalog) {
+    throw new TypeError("Database contracts require postgrestTypes, modelSchema, modelPolicy, graphql, or catalog");
   }
   let graphql: GraphqlOptions | undefined;
   if (graphqlPresent) {
@@ -76,6 +83,7 @@ export function parseDatabaseContractsOptions(value: unknown, directory: string)
     ...(modelPolicy ? { modelPolicy: resolve(directory, modelPolicy) } : {}),
     role: field("role"),
     ...(graphql ? { graphql } : {}),
+    ...(catalog ? { catalog } : {}),
     ...(rpcRegistry ? { rpcRegistry: resolve(directory, rpcRegistry) } : {}),
     ...(rpcCatalog ? { rpcCatalog: resolve(directory, rpcCatalog) } : {}),
     migrations: migrations.map((file) => resolve(directory, file)),
@@ -102,8 +110,11 @@ export async function generateDatabaseContracts(options: DatabaseContractsOption
   const postgrestTypes = options.postgrestTypes ? resolve(rootDir, options.postgrestTypes) : undefined;
   const modelSchema = options.modelSchema ? resolve(rootDir, options.modelSchema) : undefined;
   const modelPolicy = options.modelPolicy ? resolve(rootDir, options.modelPolicy) : undefined;
-  if (!postgrestTypes && !modelSchema && !modelPolicy && !options.graphql) {
-    throw new TypeError("Database contracts require postgrestTypes, modelSchema, or graphql");
+  if (!postgrestTypes && !modelSchema && !modelPolicy && !options.graphql && !options.catalog) {
+    throw new TypeError("Database contracts require postgrestTypes, modelSchema, modelPolicy, graphql, or catalog");
+  }
+  if (options.catalog && modelPolicy && resolve(rootDir, modelPolicy) !== resolve(rootDir, options.catalog.schema)) {
+    throw new Error("catalog.schema is the ZenStack schema owner; modelPolicy must be that same file");
   }
   if (postgrestTypes) await assertPostgrestSnapshot(postgrestTypes);
   const artifacts = options.graphql ? await renderGraphql({ rootDir, outDir, graphql: options.graphql }) : { diagnostics: [], files: {} };
@@ -128,6 +139,18 @@ export async function generateDatabaseContracts(options: DatabaseContractsOption
     }
   }
   if (options.graphql) await addInput(resolve(rootDir, options.graphql.schema));
+  let catalogDocument;
+  if (options.catalog) {
+    const schemaPath = resolve(rootDir, options.catalog.schema);
+    const schemaRelative = relative(rootDir, schemaPath).replaceAll("\\", "/");
+    if (!schemaRelative || schemaRelative.startsWith("..")) throw new Error("catalog.schema must stay inside rootDir");
+    catalogDocument = await compileDataCatalog({
+      source: await readFile(schemaPath, "utf8"),
+      schemaPath: schemaRelative,
+      restExecution: options.catalog.restExecution,
+    });
+    await addInput(schemaPath);
+  }
   if (options.rpcRegistry) await addInput(options.rpcRegistry);
   if (options.rpcCatalog) await addInput(options.rpcCatalog);
   let policyRls: string | undefined;
@@ -158,8 +181,12 @@ export async function generateDatabaseContracts(options: DatabaseContractsOption
   }
   if (modelSchema) barrel.push(`export type ModelSchema = typeof import(${JSON.stringify(importPath(outDir, modelSchema))});`);
   if (options.graphql) barrel.push('export * from "./graphql";');
+  if (catalogDocument) {
+    barrel.push("// ZenStack data catalog: data-catalog.json. Schema owner is ZenStack. Public GraphQL remains /graphql/v1 (pg_graphql).");
+  }
   barrel.push("");
   const files: Record<string, string> = { ...artifacts.files, "database.ts": barrel.join("\n") };
+  if (catalogDocument) files["data-catalog.json"] = renderDataCatalog(catalogDocument);
   if (policyRls !== undefined) files["rls.sql"] = policyRls;
   const manifest = {
     version: 1, role: options.role,

@@ -248,5 +248,19 @@ export type {
   GraphqlSchemaDiff,
 } from "./graphql-governance";
 export { generateDatabaseContracts, parseDatabaseContractsOptions, runDatabaseContractsFile, type DatabaseContractsOptions } from "./database-contracts";
+export {
+  CLUSTER_LOGIN_ROLES,
+  DATA_CATALOG_GAPS,
+  DATA_CATALOG_VERSION,
+  DATA_PLANE_ROLES,
+  DataCatalogError,
+  PUBLIC_GRAPHQL_CONTRACT,
+  REST_EXECUTION_SURFACES,
+  compileDataCatalog,
+  parseDataCatalogConfig,
+  parseDataCatalogDocument,
+  renderDataCatalog,
+} from "./data-catalog";
+export type { CompileDataCatalogInput, DataCatalogConfig, DataCatalogDocument, RestExecutionSurface } from "./data-catalog";
 export { parseDatabaseContractManifest } from "./database-contract-manifest";
 export type { DatabaseContractManifest } from "./database-contract-manifest";

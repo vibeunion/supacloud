@@ -145,7 +145,7 @@ test("uses only the protocols named in the configuration", async () => {
     });
     expect(() => parseDatabaseContractsOptions({
       rootDir: ".", outDir: "generated", role: "authenticated", migrations: [],
-    }, root)).toThrow("postgrestTypes, modelSchema, or graphql");
+    }, root)).toThrow("postgrestTypes, modelSchema, modelPolicy, graphql, or catalog");
 
     const postgrest = parseDatabaseContractsOptions({
       rootDir: ".", outDir: "generated", role: "authenticated", migrations: [],
