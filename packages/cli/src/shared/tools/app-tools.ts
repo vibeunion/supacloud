@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import type { ApplicationDeployRequest } from "@supacloud/delivery";
@@ -393,9 +393,9 @@ async function generateScaffold(args: AppToolArguments): Promise<ToolResult> {
                 ? project.result.graph.modules.find((module) => module.name === inference.rootModuleCandidates[0])
                 : undefined;
             if (rootModule !== undefined) {
-                registerIn = rootModule.file;
+                registerIn = projectRelativeSourcePath(project.root, project.sourceDir, rootModule.file);
                 inferredRegistration = {
-                    target: rootModule.file,
+                    target: registerIn,
                     evidence: ["exactly one top-level application module was found"],
                 };
             }
@@ -568,6 +568,18 @@ function formatDiagnostics(diagnostics: Diagnostic[]): string {
 function parseInclude(include: string | undefined): string[] | undefined {
     const patterns = include?.split(",").map((entry) => entry.trim()).filter(Boolean);
     return patterns && patterns.length > 0 ? patterns : undefined;
+}
+
+/** Convert compiler source-relative files back to the project-root contract used by scaffolding. */
+function projectRelativeSourcePath(root: string, sourceDir: string, file: string): string {
+    const normalized = file.replaceAll("\\", "/");
+    if (isAbsolute(file)) return relative(root, file).replaceAll("\\", "/");
+    const sourcePrefix = relative(root, resolve(root, sourceDir)).replaceAll("\\", "/");
+    if (!sourcePrefix || sourcePrefix === "."
+        || normalized === sourcePrefix || normalized.startsWith(`${sourcePrefix}/`)) {
+        return normalized;
+    }
+    return `${sourcePrefix}/${normalized}`;
 }
 
 function sourceRoot(args: AppToolArguments, root: string, configured: string | undefined): string | undefined {
