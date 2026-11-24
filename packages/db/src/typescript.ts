@@ -55,15 +55,14 @@ export class Program implements AsyncDisposable {
   }
   static async load(native: NativeProgram, api: API, owned = false, snapshot?: Snapshot): Promise<Program> {
     const sources = new Map<string, SourceFile>();
-    // Default lib.*.d.ts files stay on the type server. Pulling every AST, especially
-    // lib.dom.d.ts, into one batched RPC stalls the client under CI load and never
-    // reaches the caller's semantic gate.
-    const names = (await native.getSourceFileNames()).filter((path) => !isDefaultTypeScriptLibrary(path));
-    const loaded = await Promise.all(names.map(async path =>
-      [path, await native.getSourceFile(path)] as const));
-    for (const [path, source] of loaded) {
-      if (source) sources.set(resolve(path), source);
-    }
+    const names = await native.getSourceFileNames();
+    // One batched RPC of every library AST stalls under CI load. Leaving those
+    // files unloaded deadlocks a later semantic request that has to fetch a
+    // library node on the same connection. lib.dom.d.ts travels on its own.
+    const heavy = names.filter((path) => isDomLibrary(path));
+    const light = names.filter((path) => !isDomLibrary(path));
+    await loadSourceChunks(native, sources, light, 8);
+    await loadSourceChunks(native, sources, heavy, 1);
     return new Program(native, api, sources, owned, snapshot);
   }
   getSourceFiles(): SourceFile[] { return [...this.sources.values()]; }
@@ -101,12 +100,23 @@ function withDeadline(operation: Promise<unknown>, timeoutMs: number): Promise<v
   });
 }
 
-/** TypeScript's bundled lib.*.d.ts files. Project and package declarations are not libraries. */
-function isDefaultTypeScriptLibrary(fileName: string): boolean {
-  const normalized = fileName.replaceAll("\\", "/");
-  if (!/\/lib\.[^/]+\.d\.ts$/.test(normalized)) return false;
-  return normalized.includes("/node_modules/typescript/lib/")
-    || normalized.includes("/@typescript/typescript-");
+function isDomLibrary(fileName: string): boolean {
+  return fileName.replaceAll("\\", "/").endsWith("/lib.dom.d.ts");
+}
+
+async function loadSourceChunks(
+  native: NativeProgram,
+  sources: Map<string, SourceFile>,
+  names: readonly string[],
+  size: number,
+): Promise<void> {
+  for (let index = 0; index < names.length; index += size) {
+    const chunk = names.slice(index, index + size);
+    const loaded = await Promise.all(chunk.map(async (path) => [path, await native.getSourceFile(path)] as const));
+    for (const [path, source] of loaded) {
+      if (source) sources.set(resolve(path), source);
+    }
+  }
 }
 
 export interface ProgramInputs {
