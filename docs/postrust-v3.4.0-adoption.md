@@ -36,7 +36,7 @@ supabase-js bulk insert sends `columns="task","is_complete"`. Postrust treats th
 
 - Authorization remains GRANT plus RLS. The connection user stays the per-project `authenticator_*` role, and Postrust runs `SET LOCAL ROLE` from the JWT `role` claim. `anon`, `authenticated`, and `service_role` are unchanged. `supabase_auth_admin` and `supabase_admin` are unchanged.
 - GoTrue still issues the JWT. `auth.uid()` still reads `request.jwt.claim.sub` and falls back to `request.jwt.claims`. `db-pre-request = "public.set_request_context"` is still passed through.
-- Project GraphQL remains `/graphql/v1` proxied to `pg_graphql` through `/rpc/graphql`. Postrust's Hasura-dialect routes are not added to the public gateway.
+- Project GraphQL remains `/graphql/v1` proxied to `pg_graphql` through `/rpc/graphql`. The public gateway does not publish Postrust's `/api/graphql`, `/v1/graphql`, or `/v1alpha1/graphql`. A default-off evaluation route is described in [Postrust GraphQL evaluation](./postrust-graphql-evaluation.md).
 - Isolation remains one database per project.
 
 ## SDK parity evidence
@@ -55,7 +55,7 @@ The CI container log for the pinned image records this startup, and v3.4.0 has n
 - `/_` is the custom-route and health surface (`/_/health`).
 - `/api/graphql` and GraphQL subscriptions start even when `PGRST_GRAPHQL_FEDERATION` is left false. That flag only adds Apollo Federation fields. The subscription broker then retries DNS for its notification listener, which is a new log and CPU source on a host that has no such name.
 
-The public gateway still forwards project GraphQL to `pg_graphql` at `/graphql/v1` → `/rpc/graphql`. A request under `/rest/v1` whose path, after the prefix strip, is `/admin` (including `/admin/openapi.json`, `/swagger`, `/scalar`, and `/graphql`), `/_`, `/api/graphql`, `/v1/graphql`, or `/v1alpha1/graphql` is answered with 404 before that strip. The project REST proxy refuses the same suffixes. v3.4.0 cannot turn the handlers off without a different build, and this repository does not ship a fork of the image.
+The public gateway still forwards project GraphQL to `pg_graphql` at `/graphql/v1` → `/rpc/graphql`. A request under `/rest/v1` whose path, after the prefix strip, is `/admin` (including `/admin/openapi.json`, `/swagger`, `/scalar`, and `/graphql`), `/_`, `/api/graphql`, `/v1/graphql`, or `/v1alpha1/graphql` is answered with 404 before that strip. The project REST proxy refuses the same suffixes. v3.4.0 cannot turn the handlers off without a different build, and this repository does not ship a fork of the image. A default-off evaluation route is described in [Postrust GraphQL evaluation](./postrust-graphql-evaluation.md). It does not retarget `/graphql/v1`.
 
 The host tenant process binds `127.0.0.1`. Caddy on that host dials `127.0.0.1`, which is also where the Management API proxy and health checks connect. Compose and Podman do not publish the container port; the image still listens on `0.0.0.0` inside its own network namespace so the gateway container can reach it. The CI service publishes `127.0.0.1:3000` only.
 

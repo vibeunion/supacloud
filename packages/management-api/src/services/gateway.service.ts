@@ -25,6 +25,12 @@ import {
     isBlockedPostrustUpstreamPath,
 } from "./postrust-rest-guard";
 import {
+    POSTRUST_GRAPHQL_EVALUATION_PATHS,
+    POSTRUST_GRAPHQL_EVALUATION_ROUTE_KIND,
+    POSTRUST_GRAPHQL_UPSTREAM_URI,
+    postrustGraphqlEvaluationEnabled,
+} from "./postrust-graphql-evaluation";
+import {
     FRONTEND_GATEWAY_DURABILITY_UNKNOWN_CODE,
     FRONTEND_RELEASE_POINTER_PATH,
     FRONTEND_RELEASE_POINTER_SCHEMA,
@@ -400,6 +406,7 @@ const CADDY_PROJECT_ROUTE_KINDS = [
     "rest-openapi",
     "rest-blocked",
     "rest",
+    POSTRUST_GRAPHQL_EVALUATION_ROUTE_KIND,
     "graphql",
     "auth-domain-auth",
     "auth-domain-gotrue-well-known",
@@ -2093,6 +2100,16 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 // address, which would publish the listener again.
                 this.makeRoute({ id: caddyRouteId(projectRef, "rest"), hosts, path: "/rest/v1*", upstream: `127.0.0.1:${pgrstPort}`, projectRef, stripPrefix: "/rest/v1", rewriteColumns: true, corsOrigins, encodeResponses: true }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "graphql"), hosts, path: "/graphql/v1*", upstream: `127.0.0.1:${pgrstPort}`, projectRef, rewriteUri: "/rpc/graphql", headers: ["Content-Profile:graphql_public", "Accept-Profile:graphql_public"], corsOrigins, encodeResponses: true }),
+                ...(postrustGraphqlEvaluationEnabled() ? [this.makeRoute({
+                    id: caddyRouteId(projectRef, POSTRUST_GRAPHQL_EVALUATION_ROUTE_KIND),
+                    hosts,
+                    path: [...POSTRUST_GRAPHQL_EVALUATION_PATHS],
+                    upstream: `127.0.0.1:${pgrstPort}`,
+                    projectRef,
+                    rewriteUri: POSTRUST_GRAPHQL_UPSTREAM_URI,
+                    corsOrigins,
+                    encodeResponses: true,
+                })] : []),
                 this.makeRoute({
                     id: caddyRouteId(projectRef, "auth"),
                     hosts,
@@ -2180,6 +2197,9 @@ export class CaddyGatewayProvider implements GatewayProvider {
             ];
 
             for (const route of routes) this.routesById.set(String(route["@id"]), route);
+            if (!postrustGraphqlEvaluationEnabled()) {
+                this.routesById.delete(caddyRouteId(projectRef, POSTRUST_GRAPHQL_EVALUATION_ROUTE_KIND));
+            }
             if (externalAuthUpstream) {
                 this.routesById.delete(caddyRouteId(projectRef, "opaque-auth"));
                 if (!sharedAuthProxy) this.routesById.delete(caddyRouteId(projectRef, "auth-admin"));
@@ -2245,7 +2265,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
     private async addProjectDomainsUnlocked(projectRef: string, apiDomains: string[], studioDomains: string[]): Promise<boolean> {
         await this.hydrateFromDiskIfUninitialized();
-        const existingKinds = ["opaque-rest", "opaque-graphql", "opaque-auth", "auth-admin-user-delete", "auth-admin", "rest", "graphql", "auth", "gotrue-well-known", "functions", "storage", "realtime-api", "realtime", "management", "app-mcp", "acme"];
+        const existingKinds = ["opaque-rest", "opaque-graphql", "opaque-auth", "auth-admin-user-delete", "auth-admin", "rest", POSTRUST_GRAPHQL_EVALUATION_ROUTE_KIND, "graphql", "auth", "gotrue-well-known", "functions", "storage", "realtime-api", "realtime", "management", "app-mcp", "acme"];
         for (const kind of existingKinds) {
             const route = this.routesById.get(caddyRouteId(projectRef, kind));
             const matches = Array.isArray(route?.["match"]) ? route["match"] as Record<string, unknown>[] : [];
