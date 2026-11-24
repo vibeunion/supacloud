@@ -10,6 +10,8 @@ ContainerName=supacloud-postgrest
 Network=supacloud.network
 NetworkAlias=postgrest
 Environment=PGRST_COMPAT_MODE=true
+Environment=PGRST_DB_CHANNEL=pgrst
+Environment=PGRST_DB_CHANNEL_ENABLED=true
 EnvironmentFile=/etc/supacloud/postgrest.env
 
 [Service]

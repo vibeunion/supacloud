@@ -190,14 +190,18 @@ postrust_env_name_for_key() {
 }
 
 postrust_decode_config_value() {
-    local raw="$1" inner="" out="" hex="" decoded=""
+    local raw="$1" inner="" out="" hex="" decoded="" char=""
+    local backslash quote slash
     local -i index=0 length=0
+    printf -v backslash '\\'
+    quote='"'
+    slash='/'
     if [[ "$raw" =~ ^\"(.*)\"$ ]]; then
         inner="${BASH_REMATCH[1]}"
         length=${#inner}
         while (( index < length )); do
-            local char="${inner:index:1}"
-            if [[ "$char" != '\' ]]; then
+            char="${inner:index:1}"
+            if [[ "$char" != "$backslash" ]]; then
                 out+="$char"
                 index=$((index + 1))
                 continue
@@ -205,22 +209,27 @@ postrust_decode_config_value() {
             index=$((index + 1))
             (( index < length )) || return 1
             char="${inner:index:1}"
-            case "$char" in
-                '"'|'\\'|'/') out+="$char" ;;
-                b) out+=$'\b' ;;
-                f) out+=$'\f' ;;
-                n) out+=$'\n' ;;
-                r) out+=$'\r' ;;
-                t) out+=$'\t' ;;
-                u)
-                    hex="${inner:index+1:4}"
-                    [[ "$hex" =~ ^[0-9a-fA-F]{4}$ ]] || return 1
-                    printf -v decoded '%b' "\\u${hex}"
-                    out+="$decoded"
-                    index=$((index + 4))
-                    ;;
-                *) return 1 ;;
-            esac
+            if [[ "$char" == "$quote" || "$char" == "$backslash" || "$char" == "$slash" ]]; then
+                out+="$char"
+            elif [[ "$char" == "b" ]]; then
+                out+=$'\b'
+            elif [[ "$char" == "f" ]]; then
+                out+=$'\f'
+            elif [[ "$char" == "n" ]]; then
+                out+=$'\n'
+            elif [[ "$char" == "r" ]]; then
+                out+=$'\r'
+            elif [[ "$char" == "t" ]]; then
+                out+=$'\t'
+            elif [[ "$char" == "u" ]]; then
+                hex="${inner:index+1:4}"
+                [[ "$hex" =~ ^[0-9a-fA-F]{4}$ ]] || return 1
+                printf -v decoded '%b' "\\u${hex}"
+                out+="$decoded"
+                index=$((index + 4))
+            else
+                return 1
+            fi
             index=$((index + 1))
         done
     elif [[ "$raw" =~ ^[A-Za-z0-9._:+/-]+$ ]]; then

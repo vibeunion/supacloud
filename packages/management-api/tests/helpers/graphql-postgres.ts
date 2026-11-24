@@ -109,6 +109,7 @@ export async function startGraphqlPostgres() {
                 "-p", "127.0.0.1::3000", "-e", "PGRST_DB_URI", "-e", "PGRST_JWT_SECRET",
                 "-e", "PGRST_DB_SCHEMAS=public,graphql_public", "-e", "PGRST_DB_ANON_ROLE=anon",
                 "-e", "PGRST_DB_EXTRA_SEARCH_PATH=public", "-e", "PGRST_COMPAT_MODE=true",
+                "-e", "PGRST_DB_CHANNEL=pgrst", "-e", "PGRST_DB_CHANNEL_ENABLED=true",
                 "docker.io/postrust/postrust:v3.4.0@sha256:4de17b6c68403317a33c0a8ab78edb347e6b3131e9784c25b5c700554ac61809"], {
                 PGRST_DB_URI: `postgres://authenticator:${password}@${name}:5432/${dbName}`,
                 PGRST_JWT_SECRET: secret,

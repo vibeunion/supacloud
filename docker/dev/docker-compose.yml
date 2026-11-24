@@ -84,6 +84,8 @@ services:
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: ${JWT_SECRET}
       PGRST_COMPAT_MODE: "true"
+      PGRST_DB_CHANNEL: pgrst
+      PGRST_DB_CHANNEL_ENABLED: "true"
     networks:
       - supacloud-dev
 

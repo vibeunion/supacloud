@@ -28,6 +28,8 @@ Postrust's default REST prefix is `/api`, and its default RPC body is wrapped. E
 
 The launcher maps the existing keys (`db-uri`, `db-schemas`, `db-anon-role`, `jwt-secret`, `db-pre-request`, `db-channel`, and the other keys the management API already writes) onto Postrust's `PGRST_*` variables. When `db-channel` is set and `db-channel-enabled` is not, it sets `PGRST_DB_CHANNEL_ENABLED=true`, which matches PostgREST's default LISTEN behavior. Unknown keys fail closed.
 
+Shared Compose, Podman, CI, and pilot containers have no per-tenant config file. They set `PGRST_DB_CHANNEL=pgrst` and `PGRST_DB_CHANNEL_ENABLED=true` so a `NOTIFY pgrst` from the existing DDL trigger reloads the schema cache. Postrust leaves that listener off unless it is set.
+
 ## What stays the same
 
 - Authorization remains GRANT plus RLS. The connection user stays the per-project `authenticator_*` role, and Postrust runs `SET LOCAL ROLE` from the JWT `role` claim. `anon`, `authenticated`, and `service_role` are unchanged. `supabase_auth_admin` and `supabase_admin` are unchanged.
