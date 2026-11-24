@@ -1733,7 +1733,7 @@ jobs:
             "$SUPACLOUD_POSTRUST_BINARY_AMD64_SHA256" \
             amd64 \
             "$RUNNER_TEMP/postrust"
-          "$RUNNER_TEMP/postrust" --version || true
+          test -x "$RUNNER_TEMP/postrust"
 
       - name: Run the evaluation-route RLS fixture through the pinned binary
         working-directory: packages/management-api
