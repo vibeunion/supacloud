@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.2](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.43.1...supacloud-lite-v0.43.2) (2026-11-24)
+
+
+### Bug Fixes
+
+* **lite:** restore the start banner sentinel and fail fast when it moves ([#2793](https://github.com/vibeunion/supacloud/issues/2793)) ([963389a](https://github.com/vibeunion/supacloud/commit/963389a9c73708fd68fa5c40b0288e118b34ba6b))
+
 ## [0.43.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.43.0...supacloud-lite-v0.43.1) (2026-11-24)
 
 
