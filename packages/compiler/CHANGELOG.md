@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.66.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.65.0...compiler-v0.66.0) (2026-11-24)
+
+
+### Features
+
+* serve public /graphql/v1 with Postrust GraphQL ([ce7b167](https://github.com/vibeunion/supacloud/commit/ce7b167a57b4d22971865e8b07e7e55187be1033))
+
 ## [0.65.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.64.0...compiler-v0.65.0) (2026-11-24)
 
 
