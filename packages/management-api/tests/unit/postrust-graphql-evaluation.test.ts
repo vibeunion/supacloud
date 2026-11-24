@@ -74,13 +74,6 @@ function rewriteUri(route: LoadedRoute | undefined): string | undefined {
     return typeof rewrite?.["uri"] === "string" ? rewrite["uri"] : undefined;
 }
 
-function upstreamDial(route: LoadedRoute | undefined): string | undefined {
-    const proxy = route?.handle?.find((handler) => handler["handler"] === "reverse_proxy");
-    const upstreams = proxy?.["upstreams"];
-    const first = Array.isArray(upstreams) ? upstreams[0] as { dial?: string } | undefined : undefined;
-    return first?.dial;
-}
-
 function requestHeaders(route: LoadedRoute | undefined): Record<string, unknown> {
     const proxy = route?.handle?.find((handler) => handler["handler"] === "reverse_proxy");
     const headers = proxy?.["headers"];
@@ -130,47 +123,26 @@ test("the default project gateway still sends /graphql/v1 to pg_graphql and does
     }
 });
 
-test("the flag opens only the documented evaluation path and leaves /graphql/v1 on pg_graphql", async () => {
+test("the flag does not publish Postrust GraphQL on the project host", async () => {
     process.env[POSTRUST_GRAPHQL_EVALUATION_ENV] = "true";
     const routes = await renderProject();
     const graphql = routes.find((route) => route["@id"] === "route-project-evalref-graphql");
-    const rest = routes.find((route) => route["@id"] === "route-project-evalref-rest");
-    const evaluation = routes.filter((route) => route["@id"] === "route-project-evalref-postrust-graphql");
-    expect(evaluation).toHaveLength(1);
-    expect(evaluation[0]?.match?.[0]?.path).toEqual([...POSTRUST_GRAPHQL_EVALUATION_PATHS]);
-    expect(rewriteUri(evaluation[0])).toBe(POSTRUST_GRAPHQL_UPSTREAM_URI);
-    expect(upstreamDial(evaluation[0])).toBe(upstreamDial(rest));
-    expect(upstreamDial(evaluation[0])).toBe(upstreamDial(graphql));
+    expect(routes.some((route) => route["@id"] === "route-project-evalref-postrust-graphql")).toBe(false);
     expect(rewriteUri(graphql)).toBe("/rpc/graphql");
     expect(requestHeaders(graphql)["Accept-Profile"]).toEqual(["graphql_public"]);
-    const evaluationHeaders = requestHeaders(evaluation[0]);
-    expect(evaluationHeaders["Accept-Profile"]).toBeUndefined();
-    expect(evaluationHeaders["Content-Profile"]).toBeUndefined();
-    expect(evaluationHeaders["X-Hasura-Admin-Secret"]).toBeUndefined();
-    const matchPaths = routes.flatMap((route) => route.match ?? []).flatMap((match) => match.path ?? []);
-    for (const path of PUBLISHED_POSTRUST_PATHS) {
-        expect(matchPaths).not.toContain(path);
-        expect(matchPaths.some((candidate) => candidate.startsWith(`${path}*`) || candidate.startsWith(`${path}/`))).toBe(false);
+    const serialized = JSON.stringify(routes);
+    for (const path of [...PUBLISHED_POSTRUST_PATHS, ...POSTRUST_GRAPHQL_EVALUATION_PATHS, POSTRUST_GRAPHQL_UPSTREAM_URI]) {
+        expect(serialized).not.toContain(path);
     }
-    const rewrites = routes.map((route) => rewriteUri(route)).filter((uri): uri is string => uri !== undefined);
-    expect(rewrites.filter((uri) => uri === POSTRUST_GRAPHQL_UPSTREAM_URI)).toEqual([POSTRUST_GRAPHQL_UPSTREAM_URI]);
-    expect(rewrites).not.toContain("/api/graphql");
-    expect(rewrites).not.toContain("/v1alpha1/graphql");
 });
 
-test("rendering again with the flag unset removes the evaluation route", async () => {
+test("a second project render still leaves the evaluation path off the project host", async () => {
     const calls: Array<{ url: string; method: string; body: unknown }> = [];
     const restore = captureFetch(calls);
     try {
         const provider = new CaddyGatewayProvider();
         process.env[POSTRUST_GRAPHQL_EVALUATION_ENV] = "true";
         expect((await provider.setupUpstream("evalref", 3000, 9999)).success).toBe(true);
-        expect(await provider.addProjectDomains("evalref", ["extra.example.com"], [])).toBe(true);
-        const enabled = loadedRoutes(calls);
-        const enabledEvaluation = enabled.find((route) => route["@id"] === "route-project-evalref-postrust-graphql");
-        expect(enabledEvaluation?.match?.[0]?.path).toEqual([...POSTRUST_GRAPHQL_EVALUATION_PATHS]);
-        expect(JSON.stringify(enabledEvaluation?.match?.[0])).toContain("extra.example.com");
-        expect(rewriteUri(enabled.find((route) => route["@id"] === "route-project-evalref-graphql"))).toBe("/rpc/graphql");
         delete process.env[POSTRUST_GRAPHQL_EVALUATION_ENV];
         expect((await provider.setupUpstream("evalref", 3000, 9999)).success).toBe(true);
         const routes = loadedRoutes(calls);
@@ -182,10 +154,15 @@ test("rendering again with the flag unset removes the evaluation route", async (
     }
 });
 
-test("the management API GraphQL proxy still targets pg_graphql and does not open the evaluation path", async () => {
+test("the management listener opens the evaluation path only for a project service_role credential", async () => {
     const forwarded: Array<{ url: string; headers: Headers }> = [];
     spies.push(spyOn(sdkProxyInternals, "resolveProjectRefFromApiKey").mockResolvedValue("evalref"));
-    spies.push(spyOn(sdkProxyInternals, "resolveProjectApiKey").mockResolvedValue(null));
+    spies.push(spyOn(sdkProxyInternals, "resolveProjectApiKey").mockImplementation(async (candidate: string) => (
+        candidate === "service-key"
+            ? { ref: "evalref", role: "service_role", kind: "service_role", upstreamKey: "legacy-service-jwt" }
+            : null
+    )));
+    spies.push(spyOn(sdkProxyInternals, "resolveProjectServiceRoleKey").mockResolvedValue("legacy-service-jwt"));
     setSdkProxySqlForTests(async () => [{ config: { postgrest_port: 7361, gotrue_port: 8361 } }]);
     setSdkProxyFetchForTests((async (input: string | URL | Request, init?: RequestInit) => {
         forwarded.push({
@@ -198,16 +175,40 @@ test("the management API GraphQL proxy still targets pg_graphql and does not ope
     const headers = { apikey: "fixture", "content-type": "application/json" };
     const body = JSON.stringify({ query: "query { __typename }" });
 
-    const publicGraphql = await app.handle(new Request("http://localhost/graphql/v1", { method: "POST", headers, body }));
+    const publicGraphql = await app.handle(new Request("http://127.0.0.1/graphql/v1", { method: "POST", headers, body }));
     expect(publicGraphql.status).toBe(200);
     expect(forwarded.map((call) => call.url)).toEqual(["http://127.0.0.1:7361/rpc/graphql"]);
     expect(forwarded[0]?.headers.get("accept-profile")).toBe("graphql_public");
     expect(forwarded[0]?.headers.get("content-profile")).toBe("graphql_public");
 
     forwarded.length = 0;
+    const closed = await app.handle(new Request("http://127.0.0.1/internal/postrust/graphql", { method: "POST", headers, body }));
+    expect(closed.status).toBe(404);
+    expect(forwarded).toEqual([]);
+
+    process.env[POSTRUST_GRAPHQL_EVALUATION_ENV] = "true";
     for (const path of ["/internal/postrust/graphql", "/v1/graphql", "/api/graphql"]) {
-        const response = await app.handle(new Request(`http://localhost${path}`, { method: "POST", headers, body }));
-        expect(response.status).toBe(404);
+        const response = await app.handle(new Request(`http://127.0.0.1${path}`, {
+            method: "POST",
+            headers: { ...headers, authorization: "Bearer user.jwt" },
+            body,
+        }));
+        expect(response.status).toBe(path === "/internal/postrust/graphql" ? 401 : 404);
     }
     expect(forwarded).toEqual([]);
+
+    const opened = await app.handle(new Request("http://127.0.0.1/internal/postrust/graphql", {
+        method: "POST",
+        headers: {
+            apikey: "service-key",
+            authorization: "Bearer user.jwt",
+            "content-type": "application/json",
+        },
+        body,
+    }));
+    expect(opened.status).toBe(200);
+    expect(forwarded.map((call) => call.url)).toEqual(["http://127.0.0.1:7361/v1/graphql"]);
+    expect(forwarded[0]?.headers.get("authorization")).toBe("Bearer user.jwt");
+    expect(forwarded[0]?.headers.get("accept-profile")).toBeNull();
+    expect(forwarded[0]?.headers.get("content-profile")).toBeNull();
 });

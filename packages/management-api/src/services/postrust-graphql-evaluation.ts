@@ -6,7 +6,7 @@ export const POSTRUST_GRAPHQL_EVALUATION_ENV = "SUPACLOUD_POSTRUST_GRAPHQL";
 
 export const POSTRUST_GRAPHQL_EVALUATION_ROUTE_KIND = "postrust-graphql";
 
-/** Project-host paths. The trailing slash is the same route, not a second API. */
+/** Management-listener paths. The trailing slash is the same route, not a second API. */
 export const POSTRUST_GRAPHQL_EVALUATION_PATHS = [
     "/internal/postrust/graphql",
     "/internal/postrust/graphql/",

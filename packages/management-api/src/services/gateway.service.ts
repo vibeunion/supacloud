@@ -24,12 +24,7 @@ import {
     POSTRUST_COLUMNS_QUERY_REPLACE,
     isBlockedPostrustUpstreamPath,
 } from "./postrust-rest-guard";
-import {
-    POSTRUST_GRAPHQL_EVALUATION_PATHS,
-    POSTRUST_GRAPHQL_EVALUATION_ROUTE_KIND,
-    POSTRUST_GRAPHQL_UPSTREAM_URI,
-    postrustGraphqlEvaluationEnabled,
-} from "./postrust-graphql-evaluation";
+import { POSTRUST_GRAPHQL_EVALUATION_ROUTE_KIND } from "./postrust-graphql-evaluation";
 import {
     FRONTEND_GATEWAY_DURABILITY_UNKNOWN_CODE,
     FRONTEND_RELEASE_POINTER_PATH,
@@ -2100,16 +2095,6 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 // address, which would publish the listener again.
                 this.makeRoute({ id: caddyRouteId(projectRef, "rest"), hosts, path: "/rest/v1*", upstream: `127.0.0.1:${pgrstPort}`, projectRef, stripPrefix: "/rest/v1", rewriteColumns: true, corsOrigins, encodeResponses: true }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "graphql"), hosts, path: "/graphql/v1*", upstream: `127.0.0.1:${pgrstPort}`, projectRef, rewriteUri: "/rpc/graphql", headers: ["Content-Profile:graphql_public", "Accept-Profile:graphql_public"], corsOrigins, encodeResponses: true }),
-                ...(postrustGraphqlEvaluationEnabled() ? [this.makeRoute({
-                    id: caddyRouteId(projectRef, POSTRUST_GRAPHQL_EVALUATION_ROUTE_KIND),
-                    hosts,
-                    path: [...POSTRUST_GRAPHQL_EVALUATION_PATHS],
-                    upstream: `127.0.0.1:${pgrstPort}`,
-                    projectRef,
-                    rewriteUri: POSTRUST_GRAPHQL_UPSTREAM_URI,
-                    corsOrigins,
-                    encodeResponses: true,
-                })] : []),
                 this.makeRoute({
                     id: caddyRouteId(projectRef, "auth"),
                     hosts,
@@ -2197,9 +2182,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
             ];
 
             for (const route of routes) this.routesById.set(String(route["@id"]), route);
-            if (!postrustGraphqlEvaluationEnabled()) {
-                this.routesById.delete(caddyRouteId(projectRef, POSTRUST_GRAPHQL_EVALUATION_ROUTE_KIND));
-            }
+            // A previous render of this branch published the evaluation path on
+            // the project host. Every render removes it. The flag does not
+            // put it back; the management listener owns that path.
+            this.routesById.delete(caddyRouteId(projectRef, POSTRUST_GRAPHQL_EVALUATION_ROUTE_KIND));
             if (externalAuthUpstream) {
                 this.routesById.delete(caddyRouteId(projectRef, "opaque-auth"));
                 if (!sharedAuthProxy) this.routesById.delete(caddyRouteId(projectRef, "auth-admin"));
