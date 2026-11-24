@@ -100,7 +100,7 @@ export function liteCapabilities(
     ? 'native-postgresql'
     : 'pglite-bundled'
   const common = {
-    graphql: { status: 'unverified', extension: 'pg_graphql', reason: 'DATABASE_NOT_INSPECTED' } satisfies GraphqlCapability,
+    graphql: { status: 'unverified', extension: 'postrust-hasura', dialect: 'postrust-hasura', reason: 'DATABASE_NOT_INSPECTED' } satisfies GraphqlCapability,
     runtime_mode: 'development' as const,
     identity: {
       mode: 'local' as const,

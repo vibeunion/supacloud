@@ -1,9 +1,10 @@
 # GraphQL Compatibility & Governance
 
-SupaCloud keeps the Supabase GraphQL wire contract and delegates schema
-reflection and execution to the real `pg_graphql` extension. The governance
+Hosted `/graphql/v1` is Postrust GraphQL in the Hasura dialect. The governance
 layer validates application documents and exported role snapshots; it does not
-replace `graphql.resolve`, PostgREST, PostgreSQL grants or RLS.
+replace Postrust, PostgreSQL grants, or RLS. Lite `/graphql/v1` executes the
+same Hasura read shape and rejects the operations listed on
+`LITE_GRAPHQL_CONTRACT`. A Relay snapshot is not a hosted snapshot.
 
 ## Compatibility Check
 
@@ -71,12 +72,17 @@ optional fields and types are reported as non-breaking.
 
 ## Feature Matrix
 
-The matrix is derived from the actual snapshot. It reports the presence of
-queries, mutations, subscriptions, Connection types, collection/filter/order
-shapes, aggregates, `byPk` fields and query-root functions. It is a capability
+The matrix is derived from the actual snapshot. It reports queries, mutations,
+subscriptions, Relay connection types, Hasura `where` and `order_by` arguments,
+a `query_root` query type, aggregates, and `byPk` fields. It is a capability
 report, not an implementation of those features.
 
-The integration fixture remains the source of truth for real behavior:
+`scripts/check_graphql_pilot.ts` remains the `pg_graphql` behavior fixture. It
+is not the hosted Postrust route. Hosted RLS evidence is the
+`postrust-graphql-rls` CI job described in
+[Postrust GraphQL](postrust-graphql-evaluation.md).
+
+The `pg_graphql` pilot:
 
 ```sh
 bun run scripts/check_graphql_pilot.ts
@@ -101,11 +107,11 @@ receives operation name, HTTP status, duration and a slow flag. Query text,
 variables, authorization headers and database exception text are never included
 in the metric payload.
 
-The hosted Supabase-compatible route remains `/graphql/v1`, with the existing
-`apikey`, Bearer token, `Accept-Profile: graphql_public` and
-`Content-Profile: graphql_public` behavior. The compiler data catalog may record
+The hosted route remains `/graphql/v1`, with the existing `apikey` and Bearer
+token behavior. The gateway rewrites it to Postrust `/v1/graphql` and does not
+set `Accept-Profile` or `Content-Profile`. The compiler data catalog records
 that this route and PostgREST-compatible REST share one ZenStack schema. That
-record does not generate a GraphQL schema and does not move this route. See
+record does not generate a GraphQL schema. See
 [ZenStack data catalog](zenstack-data-catalog.md).
 
 ## Studio Entry

@@ -16,12 +16,12 @@ Scenario: Migration identity survives an upgrade
   Then duplicate versions and changed applied SQL fail before pending SQL executes
   And binding values and project targets are validated by @supacloud/db
 
-Scenario: GraphQL uses a real extension
-  Given a database with the pg_graphql extension and graphql.resolve installed
-  When a caller sends a query to /graphql/v1
+Scenario: GraphQL reads use the hosted Hasura shape
+  Given an open Lite database and tables the caller can read
+  When a caller sends a Hasura read to /graphql/v1
   Then execution uses that caller's database role and verified claims
-  And nested reads, introspection and mutations obey database grants and RLS
-  And a missing extension is reported rather than emulated or silently skipped
+  And where, order_by, limit, and foreign-key fields follow PostgreSQL GRANT and RLS
+  And mutations, aggregates, subscriptions, and Relay documents are rejected
 
 Scenario: External identity cannot grant local privilege
   Given a SupAuth context verifier and an explicit local subject mapping
@@ -114,9 +114,9 @@ environment = "local"
 project_ref = "local"
 ```
 
-All sections are optional. Do not enable GraphQL on an engine without
-`pg_graphql`. An omitted GraphQL setting auto-detects the installed extension;
-`enabled = true` requires it at runtime startup, and `false` disables the route.
+All sections are optional. GraphQL reads do not require `pg_graphql`. An omitted
+GraphQL setting enables the Hasura read route once a database is open;
+`enabled = false` disables the route.
 Maintenance commands can still initialize the database and apply the extension
 migration before the application is started.
 
@@ -138,54 +138,28 @@ services; configured identity verification and required GraphQL checks still
 apply to `backend.fetch`. Database-only maintenance explicitly selects
 `includeIdentity: false` and `graphql: { enabled: false }`.
 
-### Real pg_graphql
+### Hasura reads
 
-Lite does not emulate GraphQL, translate GraphQL into hand-written SQL, or
-silently proxy to another project. It checks the installed `pg_graphql` version
-and the extension-owned, security-invoker
-`graphql.resolve(text,jsonb,text,jsonb)` function.
+Lite does not embed Postrust and does not call `pg_graphql` or
+`graphql.resolve` for `/graphql/v1`. The route executes Hasura-shaped reads
+(`query_root`, `where`, `order_by`, `limit`, and foreign-key field names) as
+SQL in the caller's transaction, so PostgreSQL `GRANT` and RLS apply. A hosted
+read document of that shape is a Lite document. Mutations, aggregates,
+subscriptions, relationship filters, and Relay `*Collection` documents are
+rejected. `db-pre-request` does not run. Those limits are
+`LITE_GRAPHQL_CONTRACT`.
 
-- Bundled PGlite does not contain `pg_graphql` and cannot load native PostgreSQL
-  shared libraries.
-- Stock downloadable native PostgreSQL does not bundle `pg_graphql` either.
-- Native Lite can use an operator-managed PostgreSQL installation with an
-  ABI-compatible `pg_graphql` extension. Select its installation prefix with
-  `--postgres-dir` or `SUPACLOUD_LITE_POSTGRES_DIR`. Lite still owns its own data
-  directory, private socket and child process; this is not a connection to a
-  shared production database.
+`/graphql/v1` accepts POST JSON, applies the caller's role and verified JWT
+claims in one transaction, and reflects tables the role can read. Request-body
+limits apply to streamed bodies too. Transport and database failures use
+sanitized errors. GET and batched request arrays are not supported. Generated
+query clients and schema snapshot export use POST. Enabling the HTTP route
+does not enable introspection in production.
 
-For example, on a Linux host where PostgreSQL 18 and its matching extension are
-already installed:
-
-```sh
-export SUPACLOUD_LITE_POSTGRES_DIR=/usr/lib/postgresql/18
-supacloud-lite migrate --engine native
-supacloud-lite doctor --engine native --json
-supacloud-lite start --engine native
-```
-
-Add a reviewed application migration:
-
-```sql
-create extension if not exists pg_graphql;
-grant usage on schema graphql to anon, authenticated, service_role;
-grant execute on function graphql.resolve(text, jsonb, text, jsonb)
-  to anon, authenticated, service_role;
-```
-
-Tables, columns, RLS policies and mutation privileges remain application-owned.
-The extension determines the reflected schema. `/graphql/v1` accepts POST JSON,
-binds variables as SQL parameters, applies the caller's role and verified JWT
-claims in one transaction, and limits the search path to the configured API
-schemas (default `public`). Request-body limits apply to streamed bodies too.
-GraphQL errors returned by the extension retain the GraphQL envelope; transport
-and database failures use sanitized errors. GET and batched request arrays are
-not supported. Generated query clients and schema snapshot export use POST.
-Schema export also requires explicitly enabled introspection in the selected
-development database, for example the schema comment
-`@graphql({"inflect_names":true,"introspection":true})`. Preserve any other
-application-owned schema directives when changing that comment. Enabling the
-HTTP route does not enable introspection in production.
+PGlite serves this route without a native GraphQL extension. An operator
+PostgreSQL is still required for extensions Lite does not bundle, including
+`pg_cron`. Creating `pg_graphql` remains an application migration and is not
+how this route executes.
 
 Changing the PostgreSQL major version of an existing data directory is rejected.
 Use a logical migration with separately validated binaries/extensions; do not

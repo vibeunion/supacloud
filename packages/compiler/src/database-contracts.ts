@@ -20,7 +20,7 @@ export interface DatabaseContractsOptions {
   modelPolicy?: string;
   /** Explicit identity/role label for reviewing snapshot provenance. Not an authorization proof. */
   role: string;
-  /** Role-scoped pg_graphql snapshot exported by graphql-schema. Omit when GraphQL is unused. */
+  /** Role-scoped snapshot exported from public /graphql/v1. Hosted projects export Postrust Hasura. Omit when GraphQL is unused. */
   graphql?: GraphqlOptions;
   /**
    * ZenStack ZModel that owns REST and GraphQL.
@@ -182,7 +182,7 @@ export async function generateDatabaseContracts(options: DatabaseContractsOption
   if (modelSchema) barrel.push(`export type ModelSchema = typeof import(${JSON.stringify(importPath(outDir, modelSchema))});`);
   if (options.graphql) barrel.push('export * from "./graphql";');
   if (catalogDocument) {
-    barrel.push("// ZenStack data catalog: data-catalog.json. Schema owner is ZenStack. Public GraphQL remains /graphql/v1 (pg_graphql).");
+    barrel.push("// ZenStack data catalog: data-catalog.json. Schema owner is ZenStack. Public GraphQL is /graphql/v1 (Postrust Hasura).");
   }
   barrel.push("");
   const files: Record<string, string> = { ...artifacts.files, "database.ts": barrel.join("\n") };

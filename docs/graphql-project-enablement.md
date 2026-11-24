@@ -4,8 +4,10 @@
 
 An operator enabling `pg_graphql` must get a callable, role-scoped
 `graphql_public.graphql` entrypoint, not only a row in `pg_extension`.
-This repair supports selective typed GraphQL reads; it does not migrate all APIs
-to GraphQL or use performance as an adoption criterion.
+Hosted `/graphql/v1` does not use that entrypoint. It is Postrust Hasura, as
+described in [Postrust GraphQL](postrust-graphql-evaluation.md). This repair
+still supports the opt-in extension and the REST RPC. It does not migrate all
+APIs to GraphQL or use performance as an adoption criterion.
 
 `pg_graphql` remains opt-in. The repair does not install host packages, grant
 table access, alter RLS, enable introspection, expose the internal `graphql`
@@ -123,8 +125,9 @@ included or hidden by this fix.
 The opt-in test runs alone and calls the real `ExtensionService.enableExtension`
 and real database mapping. Its disposable PostgreSQL databases contain synthetic
 projects; no remote URL is accepted. PostgreSQL and HTTP ports bind to loopback.
-The helper starts PostgREST without installing a wrapper, and exercises
-`/rpc/graphql` with the `graphql_public` profile used by `/graphql/v1`.
+The helper starts Postrust without installing a wrapper, and exercises
+`/rpc/graphql` with the `graphql_public` profile. That is the opt-in
+`pg_graphql` RPC, not hosted `/graphql/v1`.
 It does not launch the platform gateway or claim deployed Management HTTP-route
 acceptance. JWT validation, database roles, RLS, function execution, transactions
 and live schema reloads are real. Resources are removed on normal completion.

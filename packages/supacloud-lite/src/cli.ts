@@ -308,7 +308,7 @@ async function main(): Promise<void> {
         ? await createNativeEngine({ dataDir: paths.dataDir, installDir: options.postgresDir, log: quietLog, replication })
         : await createPgliteEngine(paths.dataDir)
       try {
-        report.graphql = await inspectGraphql(engine)
+        report.graphql = await inspectGraphql()
         report.postgres_extensions = {
           engine: paths.databaseEngine,
           ...(await inspectPostgresExtensions(
@@ -324,7 +324,7 @@ async function main(): Promise<void> {
       throw new Error('PowerSync readiness requires an initialized native database; run migrate first')
     }
     report.s3_endpoint = describeS3Endpoint(options, resolvedS3Endpoint)
-    if (config.lite.graphql.enabled === false) report.graphql = { status: 'disabled', extension: 'pg_graphql' }
+    if (config.lite.graphql.enabled === false) report.graphql = { status: 'disabled', extension: 'postrust-hasura', dialect: 'postrust-hasura', reason: 'GRAPHQL_DISABLED' }
     if (options.production) {
       report.production_readiness = productionReadiness({
         engine: paths.databaseEngine,
@@ -735,7 +735,7 @@ async function printDoctor(report: ReturnType<typeof liteCapabilities>): Promise
   const output = Object.entries(report)
     .filter(([, value]) => typeof value !== 'object')
     .map(([name, value]) => `${name}: ${value}`)
-  output.push(`graphql: ${report.graphql.status} (${report.graphql.version ?? report.graphql.reason ?? 'pg_graphql'})`)
+  output.push(`graphql: ${report.graphql.status} (${report.graphql.version ?? report.graphql.reason ?? report.graphql.dialect})`)
   output.push(
     `postgres_extensions: ${report.postgres_extensions.status} ` +
       `(${report.postgres_extensions.source}, ${report.postgres_extensions.available.length} available, ` +

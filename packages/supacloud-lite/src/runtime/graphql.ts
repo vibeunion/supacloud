@@ -1,10 +1,33 @@
 import type { Database } from './db/database.js'
+import { executeHasuraRead } from './graphql-hasura.js'
 import { ApiError, type RequestContext } from './types.js'
 import { errorProperty, isRecord } from './validation.js'
 
+/**
+ * Lite `/graphql/v1` executes Hasura-shaped reads as SQL in the caller's
+ * transaction, so PostgreSQL GRANT and RLS apply. It does not call pg_graphql
+ * and it does not embed Postrust. Mutations, aggregates, subscriptions, and
+ * relationship filters are rejected instead of simulated.
+ */
+export const LITE_GRAPHQL_CONTRACT = {
+  path: '/graphql/v1',
+  dialect: 'postrust-hasura',
+  hostedDialect: 'postrust-hasura',
+  interchangeableWithHosted: true,
+  limits: [
+    'mutations-not-implemented',
+    'aggregates-not-implemented',
+    'subscriptions-not-implemented',
+    'relationship-filters-not-implemented',
+    'db-pre-request-not-applied',
+    'relay-documents-rejected',
+  ],
+} as const
+
 export interface GraphqlCapability {
   status: 'supported' | 'unsupported' | 'disabled' | 'unverified'
-  extension: 'pg_graphql'
+  extension: 'postrust-hasura'
+  dialect: 'postrust-hasura'
   version?: string
   reason?: string
 }
@@ -25,44 +48,8 @@ export interface GraphqlRequestMetric {
   slow: boolean
 }
 
-type GraphqlProbe = { query(sql: string): Promise<{ rows: unknown[] }> }
-
-export async function inspectGraphql(engine: GraphqlProbe): Promise<GraphqlCapability> {
-  const result = await engine.query(`
-    select e.extversion, exists (
-      select 1 from pg_proc p
-      join pg_namespace n on n.oid = p.pronamespace
-      join pg_depend d on d.classid = 'pg_proc'::regclass and d.objid = p.oid
-        and d.refclassid = 'pg_extension'::regclass and d.refobjid = e.oid and d.deptype = 'e'
-      where n.nspname = 'graphql' and p.proname = 'resolve' and not p.prosecdef
-        and p.oid = to_regprocedure('graphql.resolve(text,jsonb,text,jsonb)')
-    ) as resolver from pg_extension e where e.extname = 'pg_graphql'
-  `)
-  const row = result.rows[0]
-  if (row === undefined) {
-    return { status: 'unsupported', extension: 'pg_graphql', reason: 'PG_GRAPHQL_NOT_INSTALLED' }
-  }
-  if (!isRecord(row) || typeof row['extversion'] !== 'string' || !row['extversion'] ||
-    typeof row['resolver'] !== 'boolean' || result.rows.length !== 1) {
-    return { status: 'unsupported', extension: 'pg_graphql', reason: 'PG_GRAPHQL_INVALID_CATALOG' }
-  }
-  const version = row['extversion']
-  if (row['resolver']) {
-    try {
-      // Load the real extension library too; a catalog entry alone cannot prove ABI availability.
-      const probe = await engine.query(`select graphql.resolve('{ __typename }', '{}'::jsonb, null, '{}'::jsonb) as result`)
-      const probeRow = probe.rows[0]
-      if (probe.rows.length !== 1 || !isRecord(probeRow) || !isGraphqlEnvelope(probeRow['result'])) {
-        throw new Error('Invalid GraphQL probe response')
-      }
-    } catch {
-      return { status: 'unsupported', extension: 'pg_graphql', version, reason: 'PG_GRAPHQL_RESOLVER_FAILED' }
-    }
-  }
-  return row['resolver']
-    ? { status: 'supported', extension: 'pg_graphql', version }
-    : { status: 'unsupported', extension: 'pg_graphql',
-        reason: 'PG_GRAPHQL_RESOLVER_UNAVAILABLE' }
+export async function inspectGraphql(): Promise<GraphqlCapability> {
+  return { status: 'supported', extension: 'postrust-hasura', dialect: 'postrust-hasura' }
 }
 
 export class GraphqlHandler {
@@ -93,7 +80,7 @@ export class GraphqlHandler {
     }
     if (this.capability.status !== 'supported') {
       return finish(response(this.capability.status === 'disabled' ? 404 : 501, {
-        errors: [{ message: 'GraphQL requires the real pg_graphql extension and graphql.resolve.',
+        errors: [{ message: 'GraphQL is disabled.',
           extensions: { code: this.capability.reason ?? 'GRAPHQL_DISABLED' } }],
       }))
     }
@@ -109,22 +96,20 @@ export class GraphqlHandler {
         (body["operationName"] != null && typeof body["operationName"] !== 'string')) {
         throw new ApiError(400, { message: 'Invalid GraphQL request' })
       }
-      operationName = body["operationName"] ?? undefined
-      const result = await this.db.withContext(context, async (query) => {
+      const documentSource = body["query"]
+      if (typeof documentSource !== 'string') throw new ApiError(400, { message: 'Invalid GraphQL request' })
+      operationName = typeof body["operationName"] === 'string' ? body["operationName"] : undefined
+      const envelope = await this.db.withContext(context, async (query) => {
         await query<unknown>(`select set_config('statement_timeout', $1, true)`, [String(this.timeoutMs)])
-        await query<unknown>(`select set_config('search_path', $1, true)`, [
-          this.schemas.map((schema) => `"${schema.replaceAll('"', '""')}"`).join(','),
-        ])
-        return query<unknown>(
-          'select graphql.resolve($1::text, $2::jsonb, $3::text, $4::jsonb) as result',
-          [body["query"], JSON.stringify(body["variables"] ?? {}), body["operationName"] ?? null, JSON.stringify(body["extensions"] ?? {})]
-        )
+        return executeHasuraRead({
+          query,
+          schemas: this.schemas,
+          source: documentSource,
+          variableValues: isRecord(body["variables"]) ? body["variables"] : null,
+          ...(operationName === undefined ? {} : { operationName }),
+        })
       })
-      const row = result.rows[0]
-      if (result.rows.length !== 1 || !isRecord(row) || !isGraphqlEnvelope(row['result'])) {
-        throw new Error('Invalid GraphQL resolver response')
-      }
-      return finish(response(200, row['result']))
+      return finish(response(200, envelope))
     } catch (error) {
       if (error instanceof ApiError) return finish(response(error.status, { errors: [{ message: error.message }] }))
       if (error instanceof SyntaxError) return finish(response(400, { errors: [{ message: 'Invalid JSON request' }] }))
@@ -161,17 +146,6 @@ async function boundedBody(request: Request, limit: number): Promise<string> {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
-}
-function isGraphqlEnvelope(value: unknown): boolean {
-  if (!isRecord(value) || (!('data' in value) && !('errors' in value))) return false
-  if ('data' in value && value['data'] !== null && !isRecord(value['data'])) return false
-  if ('extensions' in value && !isRecord(value['extensions'])) return false
-  if ('errors' in value) {
-    const errors: unknown = value['errors']
-    if (!Array.isArray(errors) || errors.length === 0 ||
-      !errors.every((error: unknown) => isRecord(error) && typeof error['message'] === 'string')) return false
-  }
-  return true
 }
 function positive(value: number): number {
   if (!Number.isSafeInteger(value) || value <= 0 || value > 2_147_483_647) throw new Error('GraphQL limits must be positive bounded integers')
