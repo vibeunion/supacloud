@@ -1,6 +1,6 @@
 # GoTrue v2.191.0 to v2.193.0 Historical Upgrade Baseline
 
-This document preserves the historical acceptance baseline for upgrading GoTrue from v2.191.0 through the stock [`supabase/auth` v2.193.0 release](https://github.com/supabase/auth/releases/tag/v2.193.0). SupaCloud no longer uses v2.193.0 as its current pin; see the [platform component upgrade notes](./platform-component-upgrade-notes.md) for the current runtime default. The v2.193.0 release assets accepted by the historical installer were:
+This document preserves the historical acceptance baseline for upgrading GoTrue from v2.191.0 through the stock [`supabase/auth` v2.193.0 release](https://github.com/supabase/auth/releases/tag/v2.193.0). SupaCloud no longer uses v2.193.0 as its current pin. The current pin is v2.198.0; see the [GoTrue v2.198.0 adoption review](./gotrue-v2.198-adoption.md) and the [platform component upgrade notes](./platform-component-upgrade-notes.md). The v2.193.0 release assets accepted by the historical installer were:
 
 | Architecture | Asset SHA256 |
 | --- | --- |
