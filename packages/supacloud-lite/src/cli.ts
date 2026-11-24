@@ -971,7 +971,8 @@ Options:
   -o, --output <p>        output file for gen types
   -f, --file <name>       migration suffix for db diff
   --baseline             db pull: write and record already-present schema as a migration
-      --module-file <p>   database module manifest for db check (default supabase/db/modules.ts)
+      --module-file <p>   database module manifest for start/handoff/complete/db check
+                          (default supabase/db/modules.ts)
       --force             replace non-empty restore targets and retain rollback copies
 `)
 }
