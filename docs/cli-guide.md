@@ -422,9 +422,11 @@ read or rewrite the historical migration directory.
 `db operation-ownership suggest` emits deterministic ownership evidence without
 opening a database connection. `adopt` previews source edits by default and
 `--write` applies only high-confidence suggestions; ambiguous writes require
-`--target`, `--operation` and an explicit `--owner`. Once ambiguous and unknown
-counts reach zero, set `databaseGovernance.ownership` to `"enforce"` to make
-remaining unclassified operations compile errors.
+`--target`, `--operation` and an explicit `--owner`. The `suggest` report adds an
+`enforcement` block (`ready`, `unclassified`, `blocking`, `next`); when `ready`
+is true, set `databaseGovernance.ownership` to `"enforce"` and rerun
+`app check`. The `adopt` report records `sourceHash` plus an `audit` entry list
+for review; neither command accesses a database.
 
 ### AI/Agent Skill
 

@@ -65,6 +65,9 @@ application. See [Application Starter](../../docs/application-starter.md) for th
 full contract.
 
 `app dev` runs the project's `dev` script; `app watch` only compiles and watches.
+`app infer --format json` prints the same structural inference plan consumed by
+generators, `doctor` and AI context. Safe facts may be applied automatically;
+business policy remains explicit.
 `app dev --profile integration` requires a loopback database and a
 `dev:integration` script, verifies database identity and the application role, and
 never automatically migrates or seeds. The command recipe includes a durable host.

@@ -146,6 +146,35 @@ object-specific tests and focused verification commands. Agents should edit
 maintained sources and add forward migrations; they should not scan full schema
 dumps, edit generated files, or rewrite applied migrations.
 
+### Structural inference and operation ownership
+
+`app infer` derives only explainable facts from the compiled application graph:
+a unique root module, route parameter bindings, a module import candidate when
+exactly one module exports an injected token, and Commands without an explicit
+permission. The unique root is `safe`; module imports and unbound parameters are
+`confirm`; permissions, tenant/RLS policy and table operation ownership are
+`never` and are never written automatically. The JSON payload also returns
+`commands` and `next`, so an agent can continue with `context`, `verify-plan`,
+`check` or the ownership commands. See
+[Compiler inference](compiler-inference.md) for readiness rules and the Rust
+boundary manifest.
+
+Table operation ownership is not derived from the application graph. It is
+declared in `db/modules.ts` as `operationOwnership`:
+
+```bash
+supacloud db operation-ownership suggest --module cases   # read-only evidence + enforcement readiness
+supacloud db operation-ownership adopt --module cases     # preview
+supacloud db operation-ownership adopt --module cases --write
+```
+
+`suggest` lists remaining ambiguous/unknown operations in `enforcement.blocking`.
+Only switch `databaseGovernance.ownership` from `"assist"` to `"enforce"` once
+`enforcement.ready` is true, so unclassified operations become compile errors
+instead of compatibility warnings. `adopt` reports an `audit` list of adopted and
+skipped entries plus a `sourceHash` for review. Neither command opens a database
+connection or changes grants or policies.
+
 ## Three golden paths
 
 The minimal default precedes these opt-in recipes; it does not install all three.

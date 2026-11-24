@@ -293,7 +293,51 @@ describe("db governance tools", () => {
         });
         expect(report.suggestions.find((entry: { operation: string }) => entry.operation === "select"))
             .toMatchObject({ module: "suggested", status: "suggested", owner: "postgrest-data-api" });
+        expect(report.enforcement).toMatchObject({
+            ready: false,
+            unclassified: 4,
+            blocking: [
+                "public.suggested.insert: unknown",
+                "public.suggested.update: unknown",
+                "public.suggested.delete: unknown",
+            ],
+        });
+        expect(report.enforcement.next).toEqual(expect.arrayContaining([
+            "supacloud db operation-ownership adopt --module suggested",
+            "supacloud db operation-ownership adopt --module suggested --write",
+            "supacloud db operation-ownership adopt --target <table> --operation <operation> --owner <owner> --write",
+        ]));
+        expect(report.enforcement.next.join(" ")).not.toContain("ownership = \"enforce\"");
         expect(readFileSync(moduleFile, "utf8")).toBe(before);
+    });
+
+    test("operation-ownership suggest reports when enforcement is ready", async () => {
+        const moduleFile = join(root, "db/ownership-ready.ts");
+        writeFileSync(moduleFile, `export default {
+  name: "ready",
+  tables: ["public.ready"],
+  policies: [], functions: [], triggers: [], grants: [],
+  operationOwnership: [
+    { table: "public.ready", operation: "select", owner: "postgrest-data-api" },
+    { table: "public.ready", operation: "insert", owner: "durable-command" },
+    { table: "public.ready", operation: "update", owner: "durable-command" },
+    { table: "public.ready", operation: "delete", owner: "governed-sql-rpc" },
+  ],
+};
+`, "utf8");
+        const result = await db({
+            action: "operation-ownership",
+            operation_action: "suggest",
+            root,
+            module_file: "db/ownership-ready.ts",
+        });
+        const report = JSON.parse(result.content[0].text);
+        expect(report.summary).toEqual({ declared: 4, suggested: 0, ambiguous: 0, unknown: 0, adoptable: 0 });
+        expect(report.enforcement).toMatchObject({ ready: true, unclassified: 0, blocking: [] });
+        expect(report.enforcement.next).toEqual([
+            "# set databaseGovernance.ownership = \"enforce\" in supacloud.config.ts",
+            "supacloud app check --format json",
+        ]);
     });
 
     test("operation-ownership adopt only edits the exported module object", async () => {
@@ -367,6 +411,17 @@ export default {
         });
         const previewReport = JSON.parse(preview.content[0].text);
         expect(previewReport.mode).toBe("preview");
+        expect(previewReport.audit).toEqual({
+            written: false,
+            adopted: 1,
+            skipped: 3,
+            entries: [expect.objectContaining({
+                table: "public.adopt",
+                operation: "select",
+                owner: "postgrest-data-api",
+                source: "suggested",
+            })],
+        });
         expect(previewReport.changes).toEqual([
             expect.objectContaining({
                 table: "public.adopt",
@@ -389,7 +444,10 @@ export default {
             module_file: "db/ownership-adopt.ts",
             write: true,
         });
-        expect(JSON.parse(written.content[0].text).mode).toBe("write");
+        const writtenReport = JSON.parse(written.content[0].text);
+        expect(writtenReport.mode).toBe("write");
+        expect(writtenReport.audit).toMatchObject({ written: true, adopted: 1, skipped: 3 });
+        expect(writtenReport.sourceHash).toMatch(/^[a-f0-9]{64}$/);
         const source = readFileSync(moduleFile, "utf8");
         expect(source).toContain('operationOwnership: [');
         expect(source).toContain('owner: "postgrest-data-api"');

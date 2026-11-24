@@ -264,6 +264,11 @@
       "signature": "export declare function createIncrementalProgramSession(projectRoot: string): IncrementalProgramSession;"
     },
     {
+      "name": "createInferencePlan",
+      "kind": "value",
+      "signature": "export declare function createInferencePlan(graph: ApplicationGraph, options?: InferenceOptions): InferencePlan;"
+    },
+    {
       "name": "createProjectSemanticSnapshot",
       "kind": "value",
       "signature": "export declare function createProjectSemanticSnapshot(graph: ApplicationGraph, rootDir: string, outDir?: string, delivery?: SemanticDeliveryInput): Promise<SemanticSnapshot>;"
@@ -699,6 +704,11 @@
       "signature": "export declare function formatGraph(graph: ApplicationGraph): string;"
     },
     {
+      "name": "formatInferencePlan",
+      "kind": "value",
+      "signature": "export declare function formatInferencePlan(plan: InferencePlan): string;"
+    },
+    {
       "name": "formatMigrationAssessment",
       "kind": "value",
       "signature": "export declare function formatMigrationAssessment(result: MigrationAssessmentResult): string;"
@@ -812,6 +822,26 @@
       "name": "IncrementalProgramSession",
       "kind": "type",
       "signature": "export interface IncrementalProgramSession extends AsyncDisposable {\n    getProgram(): ts.Program;\n    getTypeChecker(): ts.TypeChecker;\n    update(rootNames: string[], changedPaths?: string[]): Promise<ProgramUpdate>;\n    getTraits(): readonly TraitRecord[];\n    getDiagnostics(): Promise<readonly ts.Diagnostic[]>;\n    emit(): Promise<ts.EmitOutput>;\n    reset(): Promise<void>;\n}"
+    },
+    {
+      "name": "InferenceItem",
+      "kind": "type",
+      "signature": "export interface InferenceItem {\n    id: string;\n    field: string;\n    value: unknown;\n    readiness: InferenceReadiness;\n    confidence: \"high\" | \"medium\" | \"low\";\n    evidence: string[];\n    action?: \"apply\" | \"confirm\" | \"manual\";\n    fix?: DiagnosticFix;\n}"
+    },
+    {
+      "name": "InferenceOptions",
+      "kind": "type",
+      "signature": "export interface InferenceOptions {\n    rootDir?: string;\n    sourceDir?: string;\n    generatedDir?: string;\n}"
+    },
+    {
+      "name": "InferencePlan",
+      "kind": "type",
+      "signature": "export interface InferencePlan {\n    version: 1;\n    source: \"application-graph\";\n    rootModule?: string;\n    rootModuleCandidates: string[];\n    items: InferenceItem[];\n    explicitInputs: string[];\n    commands: Record<string, string>;\n    next: string[];\n}"
+    },
+    {
+      "name": "InferenceReadiness",
+      "kind": "type",
+      "signature": "export type InferenceReadiness = \"safe\" | \"confirm\" | \"never\";"
     },
     {
       "name": "inspectRouteContracts",

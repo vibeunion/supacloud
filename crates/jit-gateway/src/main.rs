@@ -7,7 +7,9 @@ use axum::{
 };
 use serde_json::json;
 use std::sync::Arc;
-use supacloud_runtime_core::{health_payload, init_tracing, resolve_socket_addr, shutdown_signal};
+use supacloud_runtime_core::{
+    health_payload, init_tracing, resolve_socket_addr, shutdown_signal, BoundaryManifest,
+};
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
@@ -62,6 +64,7 @@ async fn main() {
     let app = Router::new()
         .route("/healthcheck", get(healthcheck))
         .route("/health", get(healthcheck))
+        .route("/manifest", get(manifest))
         .route("/v1/bindings", post(create_binding).get(list_bindings))
         .route(
             "/v1/bindings/{credential_id}",
@@ -90,6 +93,22 @@ async fn healthcheck() -> impl IntoResponse {
             env!("CARGO_PKG_VERSION"),
         )),
     )
+}
+
+async fn manifest() -> impl IntoResponse {
+    let mut manifest = BoundaryManifest::new(
+        "jit-gateway",
+        env!("CARGO_PKG_VERSION"),
+        "axum-tower",
+    );
+    manifest.capabilities.push("database-gateway".to_owned());
+    manifest.routes.extend([
+        "GET /health".to_owned(),
+        "POST /v1/bindings".to_owned(),
+        "GET /v1/bindings".to_owned(),
+        "DELETE /v1/bindings/:credential_id".to_owned(),
+    ]);
+    Json(manifest)
 }
 
 async fn create_binding(

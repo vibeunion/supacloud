@@ -76,6 +76,8 @@ export type { ReleaseEvidence, ReleaseEvidenceErrorCode } from "./release-eviden
 export type { AppliedDiagnosticFix, ApplyDiagnosticFixOptions } from "./fixes";
 export { createDiagnosticRepairPlan } from "./repair-plan";
 export type { DiagnosticRepair } from "./repair-plan";
+export { createInferencePlan, formatInferencePlan } from "./inference";
+export type { InferenceItem, InferenceOptions, InferencePlan, InferenceReadiness } from "./inference";
 export { checkProject, compileProject } from "./compile";
 export { watchProject } from "./watch";
 export { migrateProject, SUPACLOUD_MIGRATIONS, migrateRouteResponse } from "./migrations";

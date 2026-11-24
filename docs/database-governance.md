@@ -177,6 +177,31 @@ supacloud db operation-ownership adopt \
   --target public.cases --operation insert --owner durable-command --write
 ```
 
+`suggest` 报告还包含迁移就绪信息，便于判断何时可以从兼容模式切到强制模式：
+
+```json
+{
+  "summary": { "declared": 1, "suggested": 1, "ambiguous": 0, "unknown": 2, "adoptable": 1 },
+  "enforcement": {
+    "ready": false,
+    "unclassified": 3,
+    "blocking": ["public.cases.update: unknown", "public.cases.delete: unknown"],
+    "next": [
+      "supacloud db operation-ownership adopt --module cases",
+      "supacloud db operation-ownership adopt --module cases --write",
+      "supacloud db operation-ownership adopt --target <table> --operation <operation> --owner <owner> --write"
+    ]
+  }
+}
+```
+
+`ready` 只有在 `declared` 覆盖全部操作、且没有待采纳建议时才为 `true`；此时
+`next` 会提示把配置改为 `ownership: "enforce"` 并重新运行 `app check`。
+
+`adopt` 的报告包含 `sourceHash` 和 `audit` 字段：`audit` 记录本次预览或写入
+的条目、被跳过的原因和是否真正落盘，可作为人工审查记录；它不包含凭据，也不
+访问数据库。
+
 当 `suggest` 的 `ambiguous` 和 `unknown` 数量归零后，再把配置从
 `ownership: "assist"` 切换为 `ownership: "enforce"`；强制模式会把未分类操作
 作为编译错误，而不是兼容性 warning。

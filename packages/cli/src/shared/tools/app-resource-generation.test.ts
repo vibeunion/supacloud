@@ -119,6 +119,48 @@ test("explicit parent registration uses the existing compiler AST editor", async
     expect(source).toContain("imports: [InventoryModule]");
 });
 
+test("unique root module registration is inferred when no parent flag is supplied", async () => {
+    const root = await fixture();
+    const original = 'import { Module } from "@supacloud/app";\n@Module({ name: "root", imports: [], providers: [] })\nexport class RootModule {}\n';
+    await mkdir(join(root, "src"));
+    await writeFile(join(root, "src/root.module.ts"), original);
+    const result = data(await runAppTool({
+        action: "generate", kind: "resource", name: "inventory", root, format: "json",
+    }));
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(result.inference.registerIn.target).toBe("src/root.module.ts");
+    const source = await readFile(join(root, "src/root.module.ts"), "utf8");
+    expect(source).toContain('from "./features/inventory/inventory.module"');
+    expect(source).toContain("imports: [InventoryModule]");
+});
+
+test("single-file generators infer the unique target module", async () => {
+    const root = await fixture();
+    await mkdir(join(root, "src"));
+    await writeFile(join(root, "src/root.module.ts"), 'import { Module } from "@supacloud/app";\n@Module({ name: "root", imports: [], providers: [] })\nexport class RootModule {}\n');
+    const result = data(await runAppTool({
+        action: "generate", kind: "command", name: "archive", root, format: "json",
+    }));
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(result.inference.module.name).toBe("root");
+    expect(await readFile(join(root, "src/features/root/commands/archive.command.ts"), "utf8"))
+        .toContain('name: "root.archive"');
+});
+
+test("single-file generators keep module selection explicit when roots are ambiguous", async () => {
+    const root = await fixture();
+    await mkdir(join(root, "src"));
+    const moduleSource = (name: string, className: string) =>
+        `import { Module } from "@supacloud/app";\n@Module({ name: "${name}", imports: [], providers: [] })\nexport class ${className} {}\n`;
+    await writeFile(join(root, "src/orders.module.ts"), moduleSource("orders", "OrdersModule"));
+    await writeFile(join(root, "src/billing.module.ts"), moduleSource("billing", "BillingModule"));
+    const result = data(await runAppTool({
+        action: "generate", kind: "command", name: "archive", root, format: "json",
+    }));
+    expect(result).toMatchObject({ ok: false, code: "SCAFFOLD_MODULE_REQUIRED" });
+    expect(result.message).toContain("--module");
+});
+
 test("dynamic parent metadata is rejected before writing a resource", async () => {
     const root = await fixture();
     const original = 'import { Module } from "@supacloud/app";\nconst modules = [];\n@Module({ name: "root", imports: modules })\nexport class RootModule {}\n';
