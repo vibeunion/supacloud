@@ -24,6 +24,7 @@ import {
     POSTRUST_COLUMNS_QUERY_REPLACE,
     isBlockedPostrustUpstreamPath,
 } from "./postrust-rest-guard";
+import { POSTRUST_GRAPHQL_EVALUATION_ROUTE_KIND } from "./postrust-graphql-evaluation";
 import {
     FRONTEND_GATEWAY_DURABILITY_UNKNOWN_CODE,
     FRONTEND_RELEASE_POINTER_PATH,
@@ -400,6 +401,7 @@ const CADDY_PROJECT_ROUTE_KINDS = [
     "rest-openapi",
     "rest-blocked",
     "rest",
+    POSTRUST_GRAPHQL_EVALUATION_ROUTE_KIND,
     "graphql",
     "auth-domain-auth",
     "auth-domain-gotrue-well-known",
@@ -2180,6 +2182,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
             ];
 
             for (const route of routes) this.routesById.set(String(route["@id"]), route);
+            // A previous render of this branch published the evaluation path on
+            // the project host. Every render removes it. The flag does not
+            // put it back; the management listener owns that path.
+            this.routesById.delete(caddyRouteId(projectRef, POSTRUST_GRAPHQL_EVALUATION_ROUTE_KIND));
             if (externalAuthUpstream) {
                 this.routesById.delete(caddyRouteId(projectRef, "opaque-auth"));
                 if (!sharedAuthProxy) this.routesById.delete(caddyRouteId(projectRef, "auth-admin"));
@@ -2245,6 +2251,9 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
     private async addProjectDomainsUnlocked(projectRef: string, apiDomains: string[], studioDomains: string[]): Promise<boolean> {
         await this.hydrateFromDiskIfUninitialized();
+        // The evaluation route kind stays out of this list. A stale
+        // route-project-<ref>-postrust-graphql must not gain API hosts here.
+        // setupUpstream deletes that id.
         const existingKinds = ["opaque-rest", "opaque-graphql", "opaque-auth", "auth-admin-user-delete", "auth-admin", "rest", "graphql", "auth", "gotrue-well-known", "functions", "storage", "realtime-api", "realtime", "management", "app-mcp", "acme"];
         for (const kind of existingKinds) {
             const route = this.routesById.get(caddyRouteId(projectRef, kind));

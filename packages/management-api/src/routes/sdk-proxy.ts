@@ -22,6 +22,11 @@ import {
     isBlockedPostrustUpstreamPath,
     normalizePostgrestColumnsParam,
 } from "../services/postrust-rest-guard";
+import {
+    POSTRUST_GRAPHQL_EVALUATION_PATHS,
+    POSTRUST_GRAPHQL_UPSTREAM_URI,
+    postrustGraphqlEvaluationEnabled,
+} from "../services/postrust-graphql-evaluation";
 
 export { normalizePostgrestColumnsParam };
 
@@ -949,7 +954,30 @@ const functionsHandler = async ({ request }: { request: Request }) => {
     return executeProxy(request, targetUrl, { ref });
 };
 
+const postrustGraphqlEvaluationHandler = async ({ request }: { request: Request }) => {
+    if (!postrustGraphqlEvaluationEnabled()) {
+        return new Response(JSON.stringify({ message: "Not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
+    }
+    const ref = await getProjectRef(request);
+    if (!ref) return new Response(JSON.stringify({ message: "Missing tenant reference" }), { status: 400, headers: { "Content-Type": "application/json" } });
+    if (!(await hasProjectServiceRoleCredential(request, ref))) {
+        return new Response(JSON.stringify({ message: "Project service_role credential required" }), { status: 401, headers: { "Content-Type": "application/json" } });
+    }
+    const ports = await getTenantPorts(ref);
+    if (!ports) return new Response(JSON.stringify({ message: "Tenant backend not active" }), { status: 502, headers: { "Content-Type": "application/json" } });
+    const url = new URL(request.url);
+    const targetUrl = `http://127.0.0.1:${ports.pgrstPort}${POSTRUST_GRAPHQL_UPSTREAM_URI}${url.search}`;
+    return executeProxy(request, targetUrl, {
+        ref,
+        host: resolveProjectApiHost(ref, undefined),
+        timeoutMs: config.restProxyTimeoutMs,
+    });
+};
+
 export const sdkProxyRoutes = sdkProxyRoutesBase
+    .get(POSTRUST_GRAPHQL_EVALUATION_PATHS[0], { detail: { tags: ["sdk-proxy"], summary: "Evaluate Postrust GraphQL" } }, postrustGraphqlEvaluationHandler)
+    .post(POSTRUST_GRAPHQL_EVALUATION_PATHS[0], { detail: { tags: ["sdk-proxy"], summary: "Evaluate Postrust GraphQL" } }, postrustGraphqlEvaluationHandler)
+    .post(POSTRUST_GRAPHQL_EVALUATION_PATHS[1], { detail: { tags: ["sdk-proxy"], summary: "Evaluate Postrust GraphQL" } }, postrustGraphqlEvaluationHandler)
     .get("/graphql/v1", { detail: { tags: ["sdk-proxy"], summary: "Proxy GraphQL request" } }, graphqlHandler)
     .post("/graphql/v1", { detail: { tags: ["sdk-proxy"], summary: "Proxy GraphQL request" } }, graphqlHandler)
     .options("/graphql/v1", graphqlHandler)
