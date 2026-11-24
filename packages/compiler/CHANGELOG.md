@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.65.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.64.0...compiler-v0.65.0) (2026-11-24)
+
+
+### Features
+
+* **app:** complete inference and ownership rollout ([#2776](https://github.com/vibeunion/supacloud/issues/2776)) ([4b48472](https://github.com/vibeunion/supacloud/commit/4b484728eecca66f3e2ae3c3c9949e8324900e16))
+
 ## [0.64.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.63.1...compiler-v0.64.0) (2026-11-23)
 
 
