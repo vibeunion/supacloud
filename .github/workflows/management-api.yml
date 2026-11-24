@@ -1684,3 +1684,48 @@ jobs:
             packages/edge-runtime/dist/*
             packages/pgredis-runtime/dist/*
           retention-days: 7
+
+  postrust-graphql-rls:
+    name: Postrust GraphQL RLS
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install PostgreSQL 16
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-16
+          test -x /usr/lib/postgresql/16/bin/initdb
+
+      - name: Install pinned management API dependencies
+        run: bash scripts/prepare_management_api_dependencies.sh
+
+      - name: Fetch the pinned Postrust v3.4.0 binary
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          source scripts/lib/postgrest_upgrade.sh
+          archive="$(mktemp)"
+          supacloud_download_postrust_artifact \
+            "https://registry-1.docker.io/v2/postrust/postrust/blobs/${SUPACLOUD_POSTRUST_LAYER_AMD64}" \
+            "$archive"
+          echo "${SUPACLOUD_POSTRUST_LAYER_AMD64#sha256:}  ${archive}" | sha256sum -c -
+          extract="$(mktemp -d)"
+          tar -xzf "$archive" -C "$extract" usr/local/bin/postrust
+          echo "${SUPACLOUD_POSTRUST_BINARY_AMD64_SHA256}  ${extract}/usr/local/bin/postrust" | sha256sum -c -
+          install -m 755 "${extract}/usr/local/bin/postrust" "$RUNNER_TEMP/postrust"
+
+      - name: Run public /graphql/v1 RLS through the pinned binary
+        working-directory: packages/management-api
+        env:
+          SUPACLOUD_TEST_POSTRUST_GRAPHQL: "1"
+          POSTRUST_BIN: ${{ runner.temp }}/postrust
+          POSTGRES_BIN: /usr/lib/postgresql/16/bin
+        run: bun test tests/integration/postrust-graphql-rls.local.test.ts

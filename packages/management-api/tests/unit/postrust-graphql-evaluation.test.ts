@@ -107,19 +107,24 @@ test("the evaluation flag is closed unless the value is the exact string true", 
     expect(postrustGraphqlEvaluationEnabled()).toBe(false);
 });
 
-test("the default project gateway still sends /graphql/v1 to pg_graphql and does not publish Postrust GraphQL", async () => {
+function matchPaths(routes: LoadedRoute[]): string[] {
+    return routes.flatMap((route) => (route.match ?? []).flatMap((match) => match.path ?? []));
+}
+
+test("the default project gateway rewrites /graphql/v1 to Postrust GraphQL and does not publish the raw paths", async () => {
     const routes = await renderProject();
     const graphql = routes.find((route) => route["@id"] === "route-project-evalref-graphql");
     const opaque = routes.find((route) => route["@id"] === "route-project-evalref-opaque-graphql");
     expect(graphql?.match?.[0]?.path).toEqual(["/graphql/v1*"]);
-    expect(rewriteUri(graphql)).toBe("/rpc/graphql");
-    expect(requestHeaders(graphql)["Accept-Profile"]).toEqual(["graphql_public"]);
-    expect(requestHeaders(graphql)["Content-Profile"]).toEqual(["graphql_public"]);
+    expect(rewriteUri(graphql)).toBe(POSTRUST_GRAPHQL_UPSTREAM_URI);
+    expect(requestHeaders(graphql)["Accept-Profile"]).toBeUndefined();
+    expect(requestHeaders(graphql)["Content-Profile"]).toBeUndefined();
     expect(opaque?.match?.[0]?.path).toEqual(["/graphql/v1*"]);
+    expect(rewriteUri(opaque)).toBeUndefined();
     expect(routes.some((route) => route["@id"] === "route-project-evalref-postrust-graphql")).toBe(false);
-    const serialized = JSON.stringify(routes);
+    const paths = matchPaths(routes);
     for (const path of [...PUBLISHED_POSTRUST_PATHS, ...POSTRUST_GRAPHQL_EVALUATION_PATHS]) {
-        expect(serialized).not.toContain(path);
+        expect(paths).not.toContain(path);
     }
 });
 
@@ -128,11 +133,11 @@ test("the flag does not publish Postrust GraphQL on the project host", async () 
     const routes = await renderProject();
     const graphql = routes.find((route) => route["@id"] === "route-project-evalref-graphql");
     expect(routes.some((route) => route["@id"] === "route-project-evalref-postrust-graphql")).toBe(false);
-    expect(rewriteUri(graphql)).toBe("/rpc/graphql");
-    expect(requestHeaders(graphql)["Accept-Profile"]).toEqual(["graphql_public"]);
-    const serialized = JSON.stringify(routes);
-    for (const path of [...PUBLISHED_POSTRUST_PATHS, ...POSTRUST_GRAPHQL_EVALUATION_PATHS, POSTRUST_GRAPHQL_UPSTREAM_URI]) {
-        expect(serialized).not.toContain(path);
+    expect(rewriteUri(graphql)).toBe(POSTRUST_GRAPHQL_UPSTREAM_URI);
+    expect(requestHeaders(graphql)["Accept-Profile"]).toBeUndefined();
+    const paths = matchPaths(routes);
+    for (const path of [...PUBLISHED_POSTRUST_PATHS, ...POSTRUST_GRAPHQL_EVALUATION_PATHS]) {
+        expect(paths).not.toContain(path);
     }
 });
 
@@ -147,8 +152,10 @@ test("a second project render still leaves the evaluation path off the project h
         expect((await provider.setupUpstream("evalref", 3000, 9999)).success).toBe(true);
         const routes = loadedRoutes(calls);
         expect(routes.some((route) => route["@id"] === "route-project-evalref-postrust-graphql")).toBe(false);
-        expect(rewriteUri(routes.find((route) => route["@id"] === "route-project-evalref-graphql"))).toBe("/rpc/graphql");
-        expect(JSON.stringify(routes)).not.toContain(POSTRUST_GRAPHQL_UPSTREAM_URI);
+        expect(rewriteUri(routes.find((route) => route["@id"] === "route-project-evalref-graphql"))).toBe(POSTRUST_GRAPHQL_UPSTREAM_URI);
+        for (const path of matchPaths(routes)) {
+            expect(path).not.toBe(POSTRUST_GRAPHQL_UPSTREAM_URI);
+        }
     } finally {
         restore();
     }
@@ -189,8 +196,8 @@ test("setupUpstream deletes a stale project-host Postrust GraphQL route", async 
         const routes = loadedRoutes(calls);
         expect(routes.some((route) => route["@id"] === "route-project-evalref-postrust-graphql")).toBe(false);
         const graphql = routes.find((route) => route["@id"] === "route-project-evalref-graphql");
-        expect(rewriteUri(graphql)).toBe("/rpc/graphql");
-        expect(requestHeaders(graphql)["Accept-Profile"]).toEqual(["graphql_public"]);
+        expect(rewriteUri(graphql)).toBe(POSTRUST_GRAPHQL_UPSTREAM_URI);
+        expect(requestHeaders(graphql)["Accept-Profile"]).toBeUndefined();
         expect(JSON.stringify(routes)).not.toContain("/internal/postrust/graphql");
     } finally {
         restore();
@@ -236,9 +243,9 @@ test("the management listener opens the evaluation path only for a project servi
 
     const publicGraphql = await app.handle(new Request("http://127.0.0.1/graphql/v1", { method: "POST", headers, body }));
     expect(publicGraphql.status).toBe(200);
-    expect(forwarded.map((call) => call.url)).toEqual(["http://127.0.0.1:7361/rpc/graphql"]);
-    expect(forwarded[0]?.headers.get("accept-profile")).toBe("graphql_public");
-    expect(forwarded[0]?.headers.get("content-profile")).toBe("graphql_public");
+    expect(forwarded.map((call) => call.url)).toEqual(["http://127.0.0.1:7361/v1/graphql"]);
+    expect(forwarded[0]?.headers.get("accept-profile")).toBeNull();
+    expect(forwarded[0]?.headers.get("content-profile")).toBeNull();
 
     forwarded.length = 0;
     const closed = await app.handle(new Request("http://127.0.0.1/internal/postrust/graphql", { method: "POST", headers, body }));

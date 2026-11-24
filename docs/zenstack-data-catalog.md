@@ -2,17 +2,17 @@
 
 The compiler and ZenStack own one data catalog. REST and GraphQL are two
 surfaces of that catalog. They share PostgreSQL `GRANT`, row level security,
-and the GoTrue JWT. This document is the contract for that binding. It is not
-a cutover, and it does not claim that either client already consumes a GraphQL
-schema generated from ZenStack.
+and the GoTrue JWT. This document records that binding. It does not claim that
+either client consumes a GraphQL schema generated from ZenStack. Hosted
+`/graphql/v1` is Postrust Hasura; the catalog does not emit that SDL.
 
 ## Ownership
 
 | Piece | Owner | What it is not |
 | --- | --- | --- |
 | Schema the model edits | ZenStack ZModel, through `@supacloud/db-zenstack` | A second policy engine, ledger, or connection router |
-| REST execution | `postgrest`, `postrust`, or `lite` | The schema owner. Postrust serves PostgREST-compatible REST only |
-| Public GraphQL | `pg_graphql` at `/graphql/v1` | Postrust's Hasura-dialect GraphQL, and not a generated SDL file |
+| REST execution | `postgrest`, `postrust`, or `lite` | The schema owner |
+| Public GraphQL | Postrust Hasura at `/graphql/v1` | A generated SDL file, and not the Lite `pg_graphql` route |
 | Enforcement | PostgreSQL `GRANT` and RLS for `anon`, `authenticated`, and `service_role` | A rename of those roles, or of `supabase_auth_admin` / `supabase_admin` |
 | Identity | Verified GoTrue JWT, then the token role inside the transaction | A second auth store |
 | Isolation | One database per project | A schema-per-tenant router |
@@ -37,16 +37,16 @@ These values are fixed by `PUBLIC_GRAPHQL_CONTRACT` in
 | | |
 | --- | --- |
 | Project path | `/graphql/v1` |
-| Upstream rewrite | `/rpc/graphql` |
-| `Accept-Profile` | `graphql_public` |
-| `Content-Profile` | `graphql_public` |
-| Dialect | `pg_graphql` |
+| Upstream rewrite | `/v1/graphql` |
+| `Accept-Profile` | not set |
+| `Content-Profile` | not set |
+| Dialect | `postrust-hasura` |
 | Compiler client and `graphql-schema` export | the same `/graphql/v1` path |
 
-Studio and the management API proxy are not retargeted by this contract.
 `/internal/postrust/graphql` is not a catalog output and is not the public
 GraphQL API. A configuration that sets a GraphQL dialect, a public path, a
-role list, or a Hasura owner on `catalog` is rejected.
+role list, or a Hasura owner on `catalog` is rejected. The dialect is fixed;
+the catalog does not select it.
 
 ## What the compiler writes
 
@@ -68,12 +68,10 @@ role list, or a Hasura owner on `catalog` is rejected.
 `schema` is one self-contained `.zmodel` file inside `rootDir`. Imports are
 not expanded. A `datasource` block, when present, must set provider
 `postgresql`. `restExecution` names the PostgREST-compatible REST process.
-`postgrest` is the process that serves public `/rest/v1` today, so
-`servesPublicRest` is true only for that value. `lite` and `postrust` can be
-recorded, and `servesPublicRest` stays false for both. Recording `postrust`
-does not mean its REST parity has passed. A project may use that binary for
-live `/rest/v1` only after the SDK parity suite is green on it, including
-`from().select().order()`. This catalog does not store that run. The command
+`servesPublicRest` is true only for `postgrest`. `lite` and `postrust` stay
+false in this catalog version. That flag is not the hosted REST deployment
+record: public `/rest/v1` already runs pinned Postrust. Recording `postrust`
+does not store the SDK parity run. The command
 writes `data-catalog.json`
 next to the existing database contract and hashes the ZModel into
 `database.manifest.json`. `--check` fails when that file or the manifest
@@ -109,12 +107,12 @@ every document so a missing key cannot be read as completed work.
 | Gap | Still true |
 | --- | --- |
 | `rest-types-not-generated-from-catalog` | PostgREST `Database` types and OpenAPI still come from their existing snapshots. This catalog does not generate them. |
-| `graphql-sdl-not-generated-from-catalog` | There is no ZModel-to-GraphQL generator. Role-scoped `pg_graphql` snapshots remain an export of the database, not a file this catalog writes. |
+| `graphql-sdl-not-generated-from-catalog` | There is no ZModel-to-GraphQL generator. Role-scoped snapshots remain an export of `/graphql/v1`, not a file this catalog writes. |
 | `grants-not-emitted-from-catalog` | `GRANT` is reviewed SQL. The catalog does not emit it. |
 | `field-level-deny-not-projected` | Field-level `@deny` is not column privilege SQL. |
 | `relation-predicates-not-projected` | Relation predicates are not guessed into subqueries. The projection fails closed and the catalog records `not-projected`. |
-| `public-graphql-remains-pg-graphql` | `/graphql/v1` is still the `pg_graphql` rewrite. Clients are not switched. |
-| `postrust-hasura-graphql-is-not-the-contract` | Postrust Hasura GraphQL is not the schema owner and not the public contract. |
+| `graphql-db-pre-request-not-applied` | GraphQL does not run `db-pre-request`. Singular `request.jwt.claim.*` settings stay unset. `auth.uid()` uses its `request.jwt.claims` fallback. |
+| `lite-graphql-remains-pg-graphql` | Lite `/graphql/v1` still requires `pg_graphql`. It is not the hosted Postrust Hasura dialect. |
 | `generated-typescript-model-not-proven-equal-to-zmodel` | `modelSchema` remains a separate generated TypeScript module. This contract does not prove it matches the ZModel. |
 
 Also unchanged, and not claimed here:

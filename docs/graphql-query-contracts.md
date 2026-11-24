@@ -3,14 +3,15 @@
 ## Database First Only
 
 The only supported server-schema model is **Database First**. ZModel table
-definitions and reviewed SQL governance declarations are applied to PostgreSQL;
-`pg_graphql` reflects the actual database under the intended caller role.
-`graphql/schema.graphql` (or introspection JSON) is an exported, derived snapshot,
-not an independently authored API definition. Change the database declarations,
-apply migrations, then export again. Do not edit the snapshot to make a query pass.
+definitions and reviewed SQL governance declarations are applied to PostgreSQL.
+Hosted `/graphql/v1` is Postrust GraphQL in the Hasura dialect (`query_root`,
+`where`, `order_by`, `limit`). `graphql/schema.graphql` (or introspection JSON)
+is an exported, derived snapshot, not an independently authored API definition.
+Change the database declarations, apply migrations, then export again. Do not
+edit the snapshot to make a query pass.
 
 ```text
-ZModel + SQL grants/policies -> migrated PostgreSQL -> pg_graphql
+ZModel + SQL grants/policies -> migrated PostgreSQL -> Postrust GraphQL (/graphql/v1)
   -> role-scoped local snapshot + authored queries/fragments
   -> validated operation types, typed client and optional TypedDocumentNode
 ```
@@ -18,9 +19,11 @@ ZModel + SQL grants/policies -> migrated PostgreSQL -> pg_graphql
 There is no Code First decorator/resolver mode, handwritten server SDL mode, or
 ZModel-to-GraphQL generator. The ZenStack data catalog binds REST and this
 GraphQL snapshot to one ZModel and records that both still share PostgreSQL
-`GRANT`, RLS, and the GoTrue JWT. It does not emit GraphQL SDL, and the public
-route remains `/graphql/v1` backed by `pg_graphql`. See
-[ZenStack data catalog](zenstack-data-catalog.md). `@Query` in the application
+`GRANT`, RLS, and the GoTrue JWT. It does not emit GraphQL SDL. The public
+route is `/graphql/v1` in the Postrust Hasura dialect. Lite, when GraphQL is
+enabled, still uses `pg_graphql` and is not this contract. See
+[ZenStack data catalog](zenstack-data-catalog.md) and
+[Postrust GraphQL](postrust-graphql-evaluation.md). `@Query` in the application
 framework does not define a GraphQL resolver. SDL and introspection JSON are two snapshot formats, not two
 authoring modes; TypedDocumentNode is an output option, not another schema model.
 Only `schema`, `documents`, `scalars` and `typedDocuments` configure this pipeline.
@@ -88,9 +91,10 @@ Each generated `graphql.manifest.json` also contains `persisted_operations`.
 Every named operation has a SHA-256 hash of its printed, separated operation
 document and its canonical document text. A gateway or release controller may
 publish this list as an operation allowlist and accept the hash as the stable
-operation identity. The generated client continues to send the normal GraphQL
-document, so existing pg_graphql and Supabase-compatible clients are unchanged;
-enforcement is a separate deployment policy, not a second GraphQL runtime.
+operation identity. The generated client continues to send the full GraphQL document to
+`/graphql/v1`. On a hosted project that document must match the Postrust Hasura
+snapshot. A persisted-operation hash is an allowlist identity, not a second
+runtime, and this change does not claim Postrust enforces it.
 
 Subscriptions remain outside this HTTP contract because they require the Realtime
 transport. Mutations are opt-in with `graphql.mutations: true`; the default remains
@@ -171,15 +175,20 @@ opt-in described above.
 Write a named operation in `src/review/reviews.graphql`, for example:
 
 ```graphql
-query ReviewList($first: Int = 20) {
-  reviewCollection(first: $first) {
-    edges { node { id state version } }
+query ReviewList($limit: Int = 20) {
+  reviews(limit: $limit, order_by: [{ id: asc }]) {
+    id
+    state
+    version
   }
 }
 ```
 
-The names must exist in the exported schema. The starter schema is a synthetic
-example and does not provision these tables or serve GraphQL from the memory demo.
+The names must exist in the exported schema. Hosted snapshots use Hasura field
+and argument names. A `pg_graphql` Relay document (`reviewCollection`, `edges`,
+`node`) is the Lite shape and does not match this hosted route. The starter
+schema is a synthetic example and does not provision these tables or serve
+GraphQL from the memory demo.
 
 ```ts
 import { createGraphqlClient } from "./generated/graphql";
@@ -224,8 +233,11 @@ and deletions invalidate the incremental contract snapshot. A schema outside
 ## Security and Deployment
 
 The command reference's query example is a development contract, not a deployment operation.
-Enabling `pg_graphql`, reviewing role grants, enforcing RLS, applying migrations,
-and testing authenticated access remain explicit deployment gates. Keep production
+Reviewing role grants, enforcing RLS, applying migrations, and testing
+authenticated access remain explicit deployment gates. Hosted `/graphql/v1`
+does not run `db-pre-request`; policies should use `auth.uid()` or
+`request.jwt.claims`, not the singular `request.jwt.claim.sub` setting. Lite
+still requires real `pg_graphql` when its GraphQL route is enabled. Keep production
 introspection off when not needed. Use a representative role snapshot and refresh
 it after schema or grant changes; compilation cannot detect an unrefreshed remote
 schema or prove row-level policy correctness.

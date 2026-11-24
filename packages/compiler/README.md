@@ -118,26 +118,28 @@ type entry point while preserving PostgREST, ZModel and GraphQL native types:
 
 Configuration paths are relative to the configuration directory; GraphQL document
 patterns are resolved under `rootDir`. Supply the official PostgREST `Database`
-snapshot and a role-scoped `pg_graphql` schema snapshot. The generated barrel
+snapshot and a role-scoped GraphQL schema snapshot exported from hosted
+`/graphql/v1` (Postrust Hasura). The generated barrel
 exports `Database`, `QueryData`, ZModel schema types and GraphQL contracts.
 Consumers need `@supabase/supabase-js` and their ZenStack dependencies.
 
 Optional `modelPolicy` is the ZModel whose row-level `@@allow` / `@@deny` rules
 are emitted as `rls.sql`. `--check` fails closed when the migration list does not
-contain those statements. Ordinary reads stay on PostgREST. This does not apply
-SQL or replace a command host policy.
+contain those statements. Ordinary reads stay on the PostgREST-compatible REST
+surface. This does not apply SQL or replace a command host policy.
 
 Optional `catalog` names that same ZenStack ZModel as the schema owner for REST
 and GraphQL. `restExecution` is `postgrest`, `postrust`, or `lite`: the process
 that would serve PostgREST-compatible REST. It is not the schema owner. Only
-`postgrest` sets `servesPublicRest`. `postrust` and `lite` stay false until
-separate parity evidence exists; recording `postrust` is not that evidence,
-and Postrust Hasura GraphQL cannot be selected here. The generated
+`postgrest` sets `servesPublicRest`. `postrust` and `lite` stay false in this
+catalog version. That flag is not the hosted REST deployment record. Recording
+`postrust` is not SDK parity evidence,
+and the catalog does not select another GraphQL dialect. The generated
 `data-catalog.json` records one model inventory, GoTrue JWT roles `anon`,
 `authenticated`, and `service_role`, and PostgreSQL `GRANT` plus RLS as the
 shared enforcement. It does not emit REST types, OpenAPI, GraphQL SDL, or
-`GRANT`. Public GraphQL stays `/graphql/v1` (`pg_graphql` via `/rpc/graphql`
-with the `graphql_public` profile). A null row-policy `hash` means
+`GRANT`. Public GraphQL is `/graphql/v1` (Postrust Hasura, rewritten to
+`/v1/graphql`, with no `graphql_public` profile). A null row-policy `hash` means
 `projection-incomplete`, not an empty policy. When `modelPolicy` is also set,
 it must be the same ZModel file. See
 [ZenStack data catalog](../../docs/zenstack-data-catalog.md).
@@ -243,8 +245,8 @@ SupaCloud 应用静态编译器：读取 `@supacloud/app` 装饰器元数据的�
 ## Recommended GraphQL Query Contracts
 
 **Database First is the only server-schema model.** ZModel and SQL declarations
-are migrated to PostgreSQL; `pg_graphql` reflects the actual database, and
-`graphql-schema` exports the intended role's snapshot. Author queries/fragments,
+are migrated to PostgreSQL. Hosted `/graphql/v1` is Postrust Hasura introspection,
+and `graphql-schema` exports the intended role's snapshot. Author queries/fragments,
 not GraphQL resolver classes or a separate server SDL. `graphql.schema` accepts
 only local `.graphql`, `.gql` or `.json` snapshots; executable sources, URLs and
 schema-authoring options such as `autoSchemaFile`, `typePaths`, `resolvers` or

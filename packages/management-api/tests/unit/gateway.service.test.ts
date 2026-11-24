@@ -593,7 +593,9 @@ describe("CaddyGatewayProvider", () => {
         });
         expect(rest?.handle?.find((handler: any) => handler.handler === "reverse_proxy")?.upstreams?.[0]?.dial)
             .toBe("127.0.0.1:3000");
-        expect(graphql?.handle?.find((handler: any) => handler.handler === "rewrite")?.uri).toBe("/rpc/graphql");
+        expect(graphql?.handle?.find((handler: any) => handler.handler === "rewrite")?.uri).toBe("/v1/graphql");
+        expect(graphql?.handle?.find((handler: any) => handler.handler === "reverse_proxy")?.headers?.request?.set?.["Accept-Profile"]).toBeUndefined();
+        expect(graphql?.handle?.find((handler: any) => handler.handler === "reverse_proxy")?.headers?.request?.set?.["Content-Profile"]).toBeUndefined();
         expect(graphql?.handle?.find((handler: any) => handler.handler === "reverse_proxy")?.upstreams?.[0]?.dial)
             .toBe("127.0.0.1:3000");
         expect(restEncode).toEqual({
@@ -669,7 +671,7 @@ describe("CaddyGatewayProvider", () => {
             }
         }
         expect(routes.find((route: any) => route["@id"] === "route-project-testref123-graphql")
-            ?.handle?.some((handler: any) => handler.uri === "/rpc/graphql")).toBe(true);
+            ?.handle?.some((handler: any) => handler.uri === "/v1/graphql")).toBe(true);
         expect(storage?.match?.[0]?.path).toEqual(["/storage/v1*"]);
         expect(findCorsSubroute(storage)).toBeUndefined();
         expect(findCorsSubroute(storageResumable)).toBeUndefined();
