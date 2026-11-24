@@ -2,7 +2,40 @@ use std::env;
 use std::io;
 use std::net::SocketAddr;
 
+use serde::{Deserialize, Serialize};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BoundaryManifest {
+    pub schema: String,
+    pub service: String,
+    pub version: String,
+    pub engine: String,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    #[serde(default)]
+    pub routes: Vec<String>,
+    #[serde(default)]
+    pub resources: Vec<String>,
+}
+
+impl BoundaryManifest {
+    pub fn new(service: impl Into<String>, version: impl Into<String>, engine: impl Into<String>) -> Self {
+        Self {
+            schema: "supacloud.rust-boundary.v1".to_owned(),
+            service: service.into(),
+            version: version.into(),
+            engine: engine.into(),
+            capabilities: Vec::new(),
+            routes: Vec::new(),
+            resources: Vec::new(),
+        }
+    }
+
+    pub fn json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
+}
 
 pub fn init_tracing(default_filter: &str) {
     let filter =
@@ -93,5 +126,18 @@ mod tests {
         .expect_err("invalid host should fail");
 
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn boundary_manifest_is_stable_and_versioned() {
+        let mut manifest = BoundaryManifest::new("jit-gateway", "0.1.0", "axum-tower");
+        manifest.capabilities.push("database-gateway".to_owned());
+        manifest.routes.push("GET /health".to_owned());
+        let json = manifest.json().expect("manifest should serialize");
+        assert!(json.contains("\"schema\": \"supacloud.rust-boundary.v1\""));
+        assert_eq!(
+            serde_json::from_str::<BoundaryManifest>(&json).expect("manifest should parse"),
+            manifest
+        );
     }
 }

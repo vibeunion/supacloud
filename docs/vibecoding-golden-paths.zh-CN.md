@@ -23,6 +23,7 @@ cd orders-api && bun install && bun run check
 supacloud app init --template client --root ./orders-client --name orders-client  # 显式仅客户端
 
 supacloud app context --format json > context.json   # AI 读取已编译的项目图
+supacloud app infer --format json > inference.json   # 只读结构推断与明确输入
 supacloud app doctor --format json > doctor.json     # 可执行诊断 + 修复计划
 supacloud app fix --from-doctor doctor.json --fix-index 0  # 从诊断报告预览一个修复
 ```
@@ -75,7 +76,7 @@ supacloud.config.ts
 
 ```bash
 supacloud app generate --kind module   --name orders
-supacloud app generate --kind controller --module orders
+supacloud app generate --kind controller --module orders  # 唯一顶层模块时可省略 --module
 supacloud app generate --kind command  --module orders --name accept
 supacloud app generate --kind query    --module orders --name list
 supacloud app generate --kind job      --module orders --name sync-orders
@@ -91,13 +92,17 @@ Query、受治理 Command、状态声明、异步任务边界、HTTP 路由、�
 它不生成第二套数据库模型，也不伪造数据库、身份或生产回执。
 数据库版本校验、授权、事务和任务宿主仍须接入；生成测试不代表真实数据库或 E2E 验收。
 
+当项目只有一个顶层模块时，以上单文件生成器可以省略 `--module`，
+`module/resource/feature` 也可以省略 `--register-in`。存在多个根模块时，
+CLI 会停止并要求显式选择，不会按文件顺序猜测。
+
 ## 编译器替开发者做更多判断
 
 编译器提前报告可静态证明的错误：模块依赖、Scope 误用、路由/Schema 不一致、Command 缺少权限/事务/幂等、生成文件漂移、非法跨层引用、Provider 能力未配置。
 
 ## AI 专用上下文
 
-`supacloud app context --format json` 输出已编译的模块图、Provider、路由/Command/Job、诊断与建议命令。`--target <name>` 支持模块名/类名，以及模块拥有的 Provider、Controller、Command、Job 和 Query 名称；结果仍以所属模块的邻域为边界，`subject` 保持规范模块名，版本 1 数据结构不变。存在多个所属模块时会报歧义，要求显式指定模块。AI 读结构化上下文，不接触凭据或真实用户数据。`app check --format json` 与
+`supacloud app infer --format json` 输出可应用的结构事实、需要确认的候选和永远保持显式的业务输入；它不执行代码、不读取凭据、不访问数据库。`supacloud app context --format json` 输出已编译的模块图、Provider、路由/Command/Job、诊断与建议命令。`--target <name>` 支持模块名/类名，以及模块拥有的 Provider、Controller、Command、Job 和 Query 名称；结果仍以所属模块的邻域为边界，`subject` 保持规范模块名，版本 1 数据结构不变。存在多个所属模块时会报歧义，要求显式指定模块。AI 读结构化上下文，不接触凭据或真实用户数据。`app check --format json` 与
 `app doctor --format json` 还会返回 `next` 命令列表，Agent 可以从失败检查或
 preview-ready 修复直接进入下一步验证，不必自行猜测命令。
 
@@ -110,6 +115,29 @@ supacloud db context --root . --module_file db/modules.ts --target public.case_c
 
 输出会指出 ZModel 结构源、SQL 行为源、对象对应的测试和允许的验证命令。AI
 应修改维护源并新增前向 migration，不应扫描完整 schema dump、手改生成物或改写已应用 migration。
+
+### 结构推断与操作所有权闭环
+
+`app infer` 只从已编译的应用图推断可解释的结构事实：唯一根模块、路由参数绑定、
+只有一个模块导出的注入 token 的模块导入候选、Command 缺少的显式权限。唯一根模块
+属于 `safe`，模块导入和未知参数属于 `confirm`，权限、租户/RLS 和表操作所有权
+属于 `never`，不会自动写入。JSON 输出同时给出 `commands` 和 `next`，Agent 可
+直接进入 `context`、`verify-plan`、`check` 或数据库所有权命令。就绪级别和 Rust
+边界清单见[编译器推断](compiler-inference.md)。
+
+表操作所有权不在应用图中推断，而是声明在 `db/modules.ts` 的 `operationOwnership`：
+
+```bash
+supacloud db operation-ownership suggest --module cases   # 只读证据 + enforcement 就绪状态
+supacloud db operation-ownership adopt --module cases     # 默认预览
+supacloud db operation-ownership adopt --module cases --write
+```
+
+`suggest` 的 `enforcement.blocking` 会列出仍为 ambiguous/unknown 的操作；
+`suggest` 的 `enforcement.ready` 为 true 时才把配置从 `ownership: "assist"`
+切到 `"enforce"`，让未分类操作成为编译错误而不是兼容性 warning。`adopt` 的
+`audit` 字段保存本次采纳/跳过的条目和 `sourceHash`，便于人工复核；两条命令都不访问数据库、
+不修改权限策略。
 
 ## 三条黄金路径
 

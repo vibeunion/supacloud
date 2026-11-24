@@ -138,6 +138,7 @@ test("ownership assistance reports warnings and preserves structured evidence", 
   });
   expect(insertWarning).toMatchObject({
     message: expect.stringContaining("ambiguous"),
+    suggestion: expect.stringContaining("supacloud db operation-ownership suggest"),
     evidence: expect.arrayContaining([expect.objectContaining({
       kind: "suggestion", candidates: ["durable-command", "postgrest-data-api"],
     })]),
@@ -160,6 +161,7 @@ test("ownership assistance reports warnings and preserves structured evidence", 
     .filter(item => item.code === "database-operation-ownership");
   expect(errors).toHaveLength(4);
   expect(errors.every(item => item.severity === "error" && item.message.includes("unknown"))).toBe(true);
+  expect(errors.every(item => item.suggestion?.includes("ownership to \"enforce\""))).toBe(true);
 });
 
 test("strict compilation keeps ownership assistance warnings non-blocking", async () => {

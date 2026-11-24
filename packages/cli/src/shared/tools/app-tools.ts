@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import type { ApplicationDeployRequest } from "@supacloud/delivery";
@@ -17,6 +17,8 @@ import {
     createContextPack,
     createExecutionContextPack,
     createDiagnosticRepairPlan,
+    createInferencePlan,
+    formatInferencePlan,
     doctorProject,
     formatDoctorCheck,
     loadSupacloudConfig,
@@ -125,7 +127,7 @@ for (const [name, schema] of Object.entries(REMOTE_APP_SCHEMA)) {
 }
 
 export interface AppToolArguments {
-    action: "init" | "generate" | "dev" | "watch" | "verify-plan" | "compile" | "check" | "graph" | "explain" | "export-tools" | "context" | "lens" | "doctor" | "fix"
+    action: "init" | "generate" | "infer" | "dev" | "watch" | "verify-plan" | "compile" | "check" | "graph" | "explain" | "export-tools" | "context" | "lens" | "doctor" | "fix"
         | "plan" | "build" | "release" | "promote" | keyof typeof REMOTE_APP_ACTIONS;
     ref?: string;
     id?: string;
@@ -376,8 +378,64 @@ async function generateScaffold(args: AppToolArguments): Promise<ToolResult> {
     }
     const root = resolve(args.root || process.cwd());
     const dir = args.dir ?? "src/features";
+    let registerIn = args.register_in;
+    let inferredRegistration: { target: string; evidence: string[] } | undefined;
+    let inferredModule: { name: string; evidence: string[] } | undefined;
+    let existingModuleTarget = false;
+    if (kind === "module" && args.name !== undefined && /^[A-Za-z][A-Za-z0-9_-]*$/.test(args.name.trim())) {
+        try {
+            existingModuleTarget = existsSync(scaffoldPath(
+                root, join(dir, args.name.trim(), `${args.name.trim()}.module.ts`),
+            ));
+        } catch {
+            // Let the normal scaffold path validation report malformed targets.
+        }
+    }
+    if (registerIn === undefined && !existingModuleTarget
+        && (kind === "module" || kind === "resource" || kind === "feature")) {
+        try {
+            const project = await projectCompileConfig({ ...args, action: "check" });
+            const inference = createInferencePlan(project.result.graph, {
+                rootDir: project.root,
+                sourceDir: project.sourceDir,
+                generatedDir: project.outDir,
+            });
+            const rootModule = inference.rootModuleCandidates.length === 1
+                ? project.result.graph.modules.find((module) => module.name === inference.rootModuleCandidates[0])
+                : undefined;
+            if (rootModule !== undefined) {
+                registerIn = projectRelativeSourcePath(project.root, project.sourceDir, rootModule.file);
+                inferredRegistration = {
+                    target: registerIn,
+                    evidence: ["exactly one top-level application module was found"],
+                };
+            }
+        } catch {
+            // Generation remains usable for a new or intentionally incomplete project.
+        }
+    }
+    let moduleName = args.module;
+    if (moduleName === undefined && !["module", "resource", "feature"].includes(kind)) {
+        try {
+            const project = await projectCompileConfig({ ...args, action: "check" });
+            const inference = createInferencePlan(project.result.graph, {
+                rootDir: project.root,
+                sourceDir: project.sourceDir,
+                generatedDir: project.outDir,
+            });
+            if (inference.rootModuleCandidates.length === 1) {
+                moduleName = inference.rootModuleCandidates[0];
+                inferredModule = {
+                    name: moduleName!,
+                    evidence: ["exactly one top-level application module was found"],
+                };
+            }
+        } catch {
+            // Keep the explicit --module contract for new or incomplete projects.
+        }
+    }
     if (dir !== ".") scaffoldPath(root, dir);
-    if (args.register_in !== undefined && kind !== "resource" && kind !== "module" && kind !== "feature") {
+    if (registerIn !== undefined && kind !== "resource" && kind !== "module" && kind !== "feature") {
         throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "--register-in is only supported for a new module, resource or feature");
     }
     if ((kind === "resource" || kind === "feature") && (args.force || args.module !== undefined)) {
@@ -422,27 +480,30 @@ async function generateScaffold(args: AppToolArguments): Promise<ToolResult> {
             writes.push({ path: join(dir, name, file).replaceAll("\\", "/"), content });
         }
     } else {
-        const moduleName = requireIdentifier(args.module, "module");
-        const name = kind === "controller" ? moduleName : requireIdentifier(args.name, "name");
+        if (!moduleName?.trim()) {
+            throw new ScaffoldError("SCAFFOLD_MODULE_REQUIRED", "app generate requires --module; no unique top-level module was inferred");
+        }
+        const targetModule = requireIdentifier(moduleName, "module");
+        const name = kind === "controller" ? targetModule : requireIdentifier(args.name, "name");
         const subdir = kind === "command" ? "commands" : kind === "query" ? "queries" : kind === "job" ? "jobs" : kind === "contract" ? "contracts" : "";
-        const path = join(dir, moduleName, subdir, `${name}.${kind}.ts`).replaceAll("\\", "/");
+        const path = join(dir, targetModule, subdir, `${name}.${kind}.ts`).replaceAll("\\", "/");
         if (kind === "controller" && existsSync(scaffoldPath(root, path))) {
             throw new ScaffoldError("SCAFFOLD_EXISTS", `Controller already exists: ${path}（请手工合并路由到现有 controller）`);
         }
-        const content = kind === "command" ? commandScaffold(moduleName, name)
-            : kind === "query" ? queryScaffold(moduleName, name)
-            : kind === "job" ? jobScaffold(moduleName, name)
-            : kind === "contract" ? contractScaffold(moduleName, name)
-            : controllerScaffold(moduleName);
+        const content = kind === "command" ? commandScaffold(targetModule, name)
+            : kind === "query" ? queryScaffold(targetModule, name)
+            : kind === "job" ? jobScaffold(targetModule, name)
+            : kind === "contract" ? contractScaffold(targetModule, name)
+            : controllerScaffold(targetModule);
         writes.push({ path, content, overwrite: args.force === true });
         if (kind === "contract") contractName = name;
     }
-    if (args.register_in !== undefined && modulePath && moduleSymbol) {
+    if (registerIn !== undefined && modulePath && moduleSymbol) {
         await planScaffoldWrites(root, writes);
         // Reuse the compiler's AST edit; never regex-edit a user's module or
         // execute application code to discover where a new module belongs.
-        const target = scaffoldPath(root, args.register_in);
-        const checked = await planScaffoldWrites(root, [{ path: args.register_in, content: "", overwrite: true }]);
+        const target = scaffoldPath(root, registerIn);
+        const checked = await planScaffoldWrites(root, [{ path: registerIn, content: "", overwrite: true }]);
         const original = checked.writes[0]?.before?.content;
         if (original === undefined) throw new ScaffoldError("SCAFFOLD_REGISTRATION_INVALID", "--register-in must name an existing module file");
         if (new RegExp(`\\b${moduleSymbol}\\b`).test(original)) {
@@ -451,10 +512,10 @@ async function generateScaffold(args: AppToolArguments): Promise<ToolResult> {
         let importPath = relative(dirname(target), resolve(root, modulePath)).replaceAll("\\", "/").replace(/\.ts$/, "");
         if (!importPath.startsWith(".")) importPath = `./${importPath}`;
         const edit = await applyDiagnosticFix({
-            type: "add_module_import", targetFile: args.register_in, module: requireIdentifier(args.name, "name"), importPath, symbol: moduleSymbol,
+            type: "add_module_import", targetFile: registerIn, module: requireIdentifier(args.name, "name"), importPath, symbol: moduleSymbol,
         }, { rootDir: root, dryRun: true });
         if (await readFile(target, "utf8") !== original) throw new ScaffoldError("SCAFFOLD_CHANGED", "Registration source changed during planning");
-        writes.push({ path: args.register_in, content: edit.content, expected: original });
+        writes.push({ path: registerIn, content: edit.content, expected: original });
     }
     const plan = await planScaffoldWrites(root, writes);
     if (!args.dry_run) await applyScaffoldWrites(plan);
@@ -463,14 +524,22 @@ async function generateScaffold(args: AppToolArguments): Promise<ToolResult> {
         action: write.before ? "overwritten" : "created",
         ...(args.dry_run ? { content: write.content } : {}),
     }));
+    const inferenceEvidence = {
+        ...(inferredRegistration ? { registerIn: inferredRegistration } : {}),
+        ...(inferredModule ? { module: inferredModule } : {}),
+    };
     if (args.format === "json") return textResult(JSON.stringify({
         version: 1, ok: true, kind, root: plan.root, written: !args.dry_run, changes,
+        ...(Object.keys(inferenceEvidence).length > 0 ? { inference: inferenceEvidence } : {}),
     }, null, 2));
     const lines = changes.map((change) => `${args.dry_run ? "PREVIEW" : "✅"} ${change.action}: ${join(plan.root, change.path)}`);
     if (args.dry_run) lines.push("No files written. Omit --dry-run to apply this generation.");
+    if (inferredRegistration) lines.push(`Inferred registration: ${inferredRegistration.target} (${inferredRegistration.evidence.join("; ")}).`);
+    if (inferredModule) lines.push(`Inferred module: ${inferredModule.name} (${inferredModule.evidence.join("; ")}).`);
     if (kind === "resource") lines.push(
-        "Service and controller are registered in the generated module. No root module is guessed.",
-        "Use --register-in <module.ts> to add an explicit parent import. Implement the read port before exposing the resource.",
+        "Service and controller are registered in the generated module.",
+        "A unique application root module is registered automatically; use --register-in when the project has multiple roots.",
+        "Implement the read port before exposing the resource.",
         "Run app compile, app check --format json and your tests. No writes, permissions or persistence are inferred.",
     );
     if (kind === "feature") lines.push(
@@ -510,6 +579,18 @@ function formatDiagnostics(diagnostics: Diagnostic[]): string {
 function parseInclude(include: string | undefined): string[] | undefined {
     const patterns = include?.split(",").map((entry) => entry.trim()).filter(Boolean);
     return patterns && patterns.length > 0 ? patterns : undefined;
+}
+
+/** Convert compiler source-relative files back to the project-root contract used by scaffolding. */
+function projectRelativeSourcePath(root: string, sourceDir: string, file: string): string {
+    const normalized = file.replaceAll("\\", "/");
+    if (isAbsolute(file)) return relative(root, file).replaceAll("\\", "/");
+    const sourcePrefix = relative(root, resolve(root, sourceDir)).replaceAll("\\", "/");
+    if (!sourcePrefix || sourcePrefix === "."
+        || normalized === sourcePrefix || normalized.startsWith(`${sourcePrefix}/`)) {
+        return normalized;
+    }
+    return `${sourcePrefix}/${normalized}`;
 }
 
 function sourceRoot(args: AppToolArguments, root: string, configured: string | undefined): string | undefined {
@@ -568,6 +649,7 @@ interface ProjectContextPack {
         peerDependencies: string[];
     };
     commands: Record<string, string>;
+    inference: ReturnType<typeof createInferencePlan>;
     defaults: {
         readTransport: "postgrest-supabase-js";
         writeTransport: {
@@ -703,6 +785,7 @@ async function runContext(args: AppToolArguments): Promise<ToolResult> {
         commands: {
             check: "supacloud app check",
             compile: "supacloud app compile",
+            infer: "supacloud app infer --format json",
             context: "supacloud app context --format json",
             doctor: "supacloud app doctor",
             fix: "supacloud app fix --fix <fix.json>",
@@ -721,6 +804,11 @@ async function runContext(args: AppToolArguments): Promise<ToolResult> {
             externalOutcome: "receipt-reconcile",
             databaseSource: "zmodel-append-only",
         },
+        inference: createInferencePlan(result.graph, {
+            rootDir: root,
+            sourceDir,
+            generatedDir: outDir,
+        }),
     };
     if (args.format === "json") return textResult(JSON.stringify(project, null, 2));
     return textResult([
@@ -737,6 +825,33 @@ async function runContext(args: AppToolArguments): Promise<ToolResult> {
         `  peer dependencies: ${project.allowedDependencies.peerDependencies.join(", ") || "-"}`,
         ...project.diagnostics.map(formatDiagnostic),
     ].join("\n"));
+}
+
+/** Read-only structural inference shared by humans, generators and agents. */
+async function runInference(args: AppToolArguments): Promise<ToolResult> {
+    const { root, sourceDir, outDir, result } = await projectCompileConfig(args);
+    const plan = createInferencePlan(result.graph, {
+        rootDir: root,
+        sourceDir,
+        generatedDir: outDir,
+    });
+    const blocking = result.diagnostics.some((diagnostic) => diagnostic.severity === "error");
+    if (args.format === "json") {
+        return textResult(JSON.stringify({
+            ...plan,
+            diagnostics: result.diagnostics,
+            ready: !blocking,
+        }, null, 2), blocking);
+    }
+    return textResult([
+        formatInferencePlan(plan),
+        "",
+        ...result.diagnostics.map(formatDiagnostic),
+        "",
+        blocking
+            ? "Inference is incomplete because the current graph has blocking diagnostics."
+            : "Inference is read-only. Safe items may be applied by generators or reviewed by an agent.",
+    ].join("\n"), blocking);
 }
 
 /**
@@ -767,12 +882,31 @@ async function runLens(args: AppToolArguments): Promise<ToolResult> {
     return textResult(lines.join("\n"), lens.conflicts.some(conflict => conflict.severity === "error"));
 }
 
-function doctorFixPlan(doctor: ReturnType<typeof doctorProject>) {
-    return createDiagnosticRepairPlan(doctor.diagnostics ?? [])
+function doctorFixPlan(
+    doctor: ReturnType<typeof doctorProject>,
+    inference?: ReturnType<typeof createInferencePlan>,
+) {
+    const diagnostics = createDiagnosticRepairPlan(doctor.diagnostics ?? [])
         .map((repair, index) => ({
             ...repair,
             command: `supacloud app fix --from-doctor <doctor.json> --fix-index ${index}`,
         }));
+    // A compiler diagnostic can already carry the same fix; keep one preview per
+    // target instead of offering an identical repair twice.
+    const existing = new Set(diagnostics.map((repair) => JSON.stringify(repair.fix)));
+    const inferred = (inference?.items ?? [])
+        .filter((item) => item.readiness === "safe" && item.fix !== undefined
+            && !existing.has(JSON.stringify(item.fix)))
+        .map((item, index) => ({
+            code: `inference:${item.id}`,
+            type: item.fix!.type,
+            targetFile: item.fix!.targetFile,
+            fix: item.fix!,
+            readiness: "preview" as const,
+            reason: item.evidence.join("; "),
+            command: `supacloud app fix --from-doctor <doctor.json> --fix-index ${diagnostics.length + index}`,
+        }));
+    return [...diagnostics, ...inferred];
 }
 
 interface UnwiredContract {
@@ -824,7 +958,12 @@ async function findUnwiredContracts(rootDir: string): Promise<UnwiredContract[]>
 }
 
 async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
-    const { root, outDir, result } = await projectCompileConfig(args);
+    const { root, sourceDir, outDir, result } = await projectCompileConfig(args);
+    const inference = createInferencePlan(result.graph, {
+        rootDir: root,
+        sourceDir,
+        generatedDir: outDir,
+    });
     const target = args.target?.trim();
     const context = target ? createContextPack({ ...result.graph, diagnostics: result.diagnostics }, target) : undefined;
     const doctor = doctorProject(root, outDir,
@@ -844,7 +983,10 @@ async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
         doctor.checks.push(database);
         if (!database.ok) doctor.errors += 1;
     }
-    const fixPlan = doctorFixPlan(doctor);
+    const fixPlan = doctorFixPlan(doctor, inference);
+    const inferredSafe = inference.items.filter((item) => item.readiness === "safe");
+    const inferredConfirm = inference.items.filter((item) => item.readiness === "confirm");
+    const inferredNever = inference.items.filter((item) => item.readiness === "never");
     const autoFixable = fixPlan.filter((repair) => repair.readiness === "preview").length;
     const inputRequired = fixPlan.filter((repair) => repair.readiness === "input-required").length;
     const manualFixes = fixPlan.filter((repair) => repair.readiness === "manual").length;
@@ -864,7 +1006,9 @@ async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
     } : undefined;
     if (args.format === "json") {
         return textResult(
-            JSON.stringify({ ok: doctor.errors === 0, next, autoFixable, inputRequired, manualFixes, fixPlan, unwiredContracts,
+            JSON.stringify({ ok: doctor.errors === 0, next, autoFixable, inputRequired, manualFixes, fixPlan,
+                inference: { safe: inferredSafe.length, confirm: inferredConfirm.length, never: inferredNever.length, plan: inference },
+                unwiredContracts,
                 secretGap,
                 ...(scope ? { scope } : {}), ...doctor }, null, 2),
             doctor.errors > 0,
@@ -894,6 +1038,8 @@ async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
     if (unwiredContracts.length > 0) {
         lines.push(`${unwiredContracts.length} unwired contract file(s): ${unwiredContracts.map((contract) => contract.file).join(", ")}. Import their schemas into a controller route or remove them.`);
     }
+    lines.push(`Inference: ${inferredSafe.length} safe, ${inferredConfirm.length} confirm, ${inferredNever.length} explicit/manual.`);
+    if (inferredConfirm.length > 0) lines.push("  Review candidates with `supacloud app infer --format json`.");
     return textResult(lines.join("\n"), doctor.errors > 0);
 }
 
@@ -1932,6 +2078,7 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
             const ready = plan.ready && !result.diagnostics.some(item => item.severity === "error");
             return textResult(JSON.stringify({ ...plan, ready, diagnostics: result.diagnostics }, null, 2), !ready);
         }
+        case "infer": return runInference(request);
         case "dev":
         case "watch": return runAppDev(request, options);
         case "plan":
@@ -1968,14 +2115,14 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
         "Application authoring and delivery. Plan is read-only; build, upload and configure never deploy. Deploy/rollback explicitly activate a release; rollback never downgrades schema.",
         {
             ...REMOTE_APP_SCHEMA,
-            action: withDescription(stringEnum(["init", "generate", "dev", "watch", "verify-plan", "compile", "check", "graph", "explain", "export-tools", "context", "lens", "doctor", "fix",
+            action: withDescription(stringEnum(["init", "generate", "infer", "dev", "watch", "verify-plan", "compile", "check", "graph", "explain", "export-tools", "context", "lens", "doctor", "fix",
                 "plan", "build", "release", "upload", "configure", "transfer-plan", "transfer", "promote-plan", "deploy", "deploy-plan", "diff", "status", "evidence", "rollback", "rollback-plan", "history", "reconcile", "retire", "logs",
                 "preview-plan", "preview", "previews", "preview-list", "preview-create", "preview-status", "preview-cleanup", "preview-pr",
                 "preview-reconcile", "promote", "promote-status", "promote-reconcile"]), "App action; promote obtains and verifies its plan before one mutation request"),
             kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract", "resource", "feature"]), "[generate] Scaffold kind"),
             template: optional(stringEnum(["minimal", "client", "command", "model-command", "app"]), "[init] minimal (default) is the compiler/Effect stack; client is @supabase/supabase-js only; command is the native-SQL reference; model-command adds ZenStack HTTP/worker commands; app is an alias of minimal"),
             name: optional(Type.String(), "[init/generate] Project or object name"),
-            module: optional(Type.String(), "[generate] Target feature module (required for command/query/controller)"),
+            module: optional(Type.String(), "[generate] Target feature module; inferred when the project has one top-level module"),
             permission: optional(Type.String(), "[generate feature] Explicit approval permission; not inferred from name"),
             read_permission: optional(Type.String(), "[generate feature] Explicit read permission; not inferred from name"),
             rpc: optional(Type.String(), "[generate feature] Explicit durable RPC capability; must be registered by the host"),

@@ -146,6 +146,21 @@ permission, new ORM or duplicate validator. Replace the placeholder and its test
 together. The controller tests cover asynchronous success and original-error
 propagation. Mutations belong in a governed Command, not an HTTP after-hook.
 
+## Root and parent inference
+
+When a project has exactly one top-level application module, `app generate`
+infers that module for `command`, `query`, `controller`, `job` and `contract`
+scaffolds, and infers it as the registration target for `module`, `resource` and
+`feature` generation. The JSON result includes the evidence under `inference`.
+This is a structural fact only; it never chooses permissions, tenant/RLS rules,
+database sources or external retry policy.
+
+If more than one top-level module is present, generation keeps the choice
+explicit: pass `--module <name>` for single-file scaffolds and `--register-in
+<module.ts>` for module/resource/feature registration. New or incomplete
+projects also keep the explicit form because there is no reliable graph fact to
+use.
+
 ## Parent registration is explicit
 
 Omit `--register-in` to generate only the internally wired feature. Supply it to

@@ -287,6 +287,13 @@ interface OwnershipSuggestionReport {
         unknown: number;
         adoptable: number;
     };
+    /** Readiness for switching `databaseGovernance.ownership` from assist to enforce. */
+    enforcement: {
+        ready: boolean;
+        unclassified: number;
+        blocking: string[];
+        next: string[];
+    };
 }
 
 interface OwnershipAdoptionEntry {
@@ -311,6 +318,13 @@ interface OwnershipAdoptionReport {
         operation: TableOperation;
         reason: string;
     }>;
+    /** Auditable record of what was previewed or written; contains no credentials. */
+    audit: {
+        written: boolean;
+        adopted: number;
+        skipped: number;
+        entries: OwnershipAdoptionEntry[];
+    };
 }
 
 function moduleForTable(modules: readonly DatabaseModule[], table: string): DatabaseModule | null {
@@ -332,6 +346,15 @@ function ownershipSuggestionReport(
             ...suggestion,
             module: moduleForTable(modules, suggestion.table)?.name ?? null,
         }));
+    const blocking = suggestions
+        .filter((suggestion) => suggestion.status === "ambiguous" || suggestion.status === "unknown")
+        .map((suggestion) => `${suggestion.table}.${suggestion.operation}: ${suggestion.status}`);
+    const adoptable = suggestions.filter((suggestion) =>
+        suggestion.status === "suggested" && suggestion.owner !== null && suggestion.module !== null,
+    ).length;
+    const unclassified = suggestions.filter((suggestion) => suggestion.status !== "declared").length;
+    const scope = selected.map((module) => module.name).join(", ");
+    const moduleFlag = scope ? ` --module ${scope.split(", ")[0]}` : "";
     return {
         version: 1,
         scope: "operation-ownership",
@@ -343,9 +366,21 @@ function ownershipSuggestionReport(
             suggested: suggestions.filter((suggestion) => suggestion.status === "suggested").length,
             ambiguous: suggestions.filter((suggestion) => suggestion.status === "ambiguous").length,
             unknown: suggestions.filter((suggestion) => suggestion.status === "unknown").length,
-            adoptable: suggestions.filter((suggestion) =>
-                suggestion.status === "suggested" && suggestion.owner !== null && suggestion.module !== null,
-            ).length,
+            adoptable,
+        },
+        enforcement: {
+            ready: unclassified === 0,
+            unclassified,
+            blocking,
+            next: [
+                ...(adoptable > 0 ? [`supacloud db operation-ownership adopt${moduleFlag}`, `supacloud db operation-ownership adopt${moduleFlag} --write`] : []),
+                ...(blocking.length > 0
+                    ? [`supacloud db operation-ownership adopt --target <table> --operation <operation> --owner <owner> --write`]
+                    : []),
+                ...(unclassified === 0
+                    ? ["# set databaseGovernance.ownership = \"enforce\" in supacloud.config.ts", "supacloud app check --format json"]
+                    : []),
+            ],
         },
     };
 }
@@ -725,6 +760,12 @@ async function runOperationOwnershipAdopt(args: DbToolArguments, root: string): 
         sourceHash,
         changes,
         skipped,
+        audit: {
+            written: mode === "write" && updated !== original,
+            adopted: changes.length,
+            skipped: skipped.length,
+            entries: changes,
+        },
     };
     return textResult(JSON.stringify(report, null, 2), changes.length === 0 && skipped.length > 0 ? false : undefined);
 }

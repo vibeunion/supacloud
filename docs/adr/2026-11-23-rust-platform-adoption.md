@@ -95,7 +95,7 @@ Rust 服务可以承担：
 
 ### 第三阶段：应用工程
 
-- [ ] 编译器输出依赖图摘要和 capability manifest。
+- [x] 编译器输出依赖图摘要和 inference/capability context；Rust runtime 提供版本化 boundary manifest 模型。
 - [ ] `app init` 提供标准 feature、health、test 和 config 目录。
 - [ ] Lite 复用相同的本地检查和状态诊断入口。
 - [ ] 生成产物 drift 检查覆盖 Rust boundary manifest。

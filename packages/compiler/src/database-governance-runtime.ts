@@ -83,8 +83,11 @@ function ownershipDiagnostic(
     code: "database-operation-ownership",
     message: `Table operation ${object} ownership is ${state}.${candidates}`,
     suggestion: suggestion.status === "suggested"
-      ? `Declare operationOwnership ${object} = ${suggestion.owner} to lock in the suggested owner.`
-      : `Declare exactly one operationOwnership owner for ${object} in its database module.`,
+      ? `Declare operationOwnership ${object} = ${suggestion.owner} to lock in the suggested owner. `
+        + "Preview with `supacloud db operation-ownership adopt`, then apply with `--write`."
+      : `Declare exactly one operationOwnership owner for ${object} in its database module. `
+        + "Use `supacloud db operation-ownership suggest` for evidence and adopt with an explicit --owner; "
+        + "switch databaseGovernance.ownership to \"enforce\" only after unclassified operations reach zero.",
     evidence: [
       ...suggestion.evidence.map(({ kind, detail, role, privilege, source }) => ({
         kind,

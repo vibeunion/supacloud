@@ -382,6 +382,7 @@ EXAMPLES
   ${preferredCommand} app logs --ref abc123 --id orders --environment_id test
   ${preferredCommand} app rollback --ref abc123 --id orders --environment_id test --release_id <old-sha256> --configuration_id <uuid> --activation_id <new-uuid> --expected_activation_id <current-uuid>
   ${preferredCommand} app check --root . --strict
+  ${preferredCommand} app infer --root . --format json
   ${preferredCommand} app graph --root . --format json
   ${preferredCommand} app explain --target CaseService
   ${preferredCommand} app context --root . --format json
