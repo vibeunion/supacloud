@@ -119,6 +119,32 @@ test('ordinary no-release push and explicit npm retry with no new release remain
   assert.deepEqual(resolveReleaseOutputs({ ...input, outcome: 'success', outputs }, f.run), outputs);
 });
 
+test('an ordinary push whose release action failed recovers nothing instead of failing', () => {
+  const f = fixture();
+  // The action can fail while updating its own open release PR branch; the push
+  // itself bumped nothing, so the recovery path must not turn it into a failure.
+  Object.assign(f.previous, f.current);
+  f.prs.length = 0;
+  assert.deepEqual(resolveReleaseOutputs(input, f.run), {});
+  assert.equal(f.writes.length, 0);
+});
+
+test('a changed release without a merged release PR still fails closed', () => {
+  const f = fixture();
+  f.prs.length = 0;
+  assert.throws(() => resolveReleaseOutputs(input, f.run),
+    /Changed release without a merged Release Please PR: packages\/management-api/);
+  assert.equal(f.writes.length, 0);
+});
+
+test('more than one merged release PR for the same commit fails closed', () => {
+  const f = fixture();
+  f.prs.push({ ...f.prs[0], number: 1858 });
+  assert.throws(() => resolveReleaseOutputs(input, f.run),
+    /Expected one merged Release Please PR for the exact commit/);
+  assert.equal(f.writes.length, 0);
+});
+
 test('restores all four outputs only after validating every release and repairs labels once', () => {
   const f = fixture();
   const outputs = resolveReleaseOutputs(input, f.run);
