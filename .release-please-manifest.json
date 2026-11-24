@@ -9,7 +9,7 @@
   "packages/admin": "0.34.0",
   "packages/supacloud": "0.19.25",
   "packages/function-adapter": "0.10.0",
-  "packages/supacloud-lite": "0.43.1",
+  "packages/supacloud-lite": "0.43.2",
   "packages/contracts": "0.16.3",
   "packages/commands": "0.12.1",
   "packages/app-svelte": "0.10.1",
