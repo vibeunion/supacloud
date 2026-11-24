@@ -303,6 +303,6 @@ export function formatInferencePlan(plan: InferencePlan): string {
   }
   lines.push(`  explicit inputs: ${plan.explicitInputs.join("; ")}`);
   lines.push(`  next: ${plan.next.join(" -> ")}`);
-  lines.push(`  ownership: ${plan.commands.ownershipSuggest} -> ${plan.commands.ownershipAdopt}`);
+  lines.push(`  ownership: ${plan.commands["ownershipSuggest"]} -> ${plan.commands["ownershipAdopt"]}`);
   return lines.join("\n");
 }
