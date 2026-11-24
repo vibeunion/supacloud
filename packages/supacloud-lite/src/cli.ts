@@ -420,6 +420,7 @@ async function main(): Promise<void> {
           `${options.s3Endpoint.bucketScope?.length ? `buckets ${options.s3Endpoint.bucketScope.join(',')}` : 'all buckets'})`
         : 'disabled (pass --s3-endpoint to expose S3-compatible clients)'}
 
+  Run "supacloud-lite keys" for the anon key.
   Run "supacloud-lite handoff" or "supacloud-lite start --json" for the agent handoff.
   That JSON contains only the project URL, the anon key, and the next commands.
   The privileged key is operator-only. Do not pass it to an agent or model context.

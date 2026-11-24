@@ -216,33 +216,44 @@ describe('inbound S3-compatible endpoint CLI surface', () => {
   }, testTimeout(60_000))
 })
 
-async function readBanner(server: ReturnType<typeof Bun.spawn>): Promise<string> {
-  const deadline = Date.now() + 45_000
+/**
+ * Reads stdout until `pattern` matches. The read itself is raced against one
+ * deadline: a bare `reader.read()` never returns while the process is idle, so
+ * a banner line that stops matching used to hang the suite until bun killed the
+ * test at 60s with no output. Now it fails with the text that was printed.
+ */
+async function readUntil(server: ReturnType<typeof Bun.spawn>, pattern: RegExp): Promise<string> {
   let buffered = ''
   const reader = (server.stdout as ReadableStream<Uint8Array>).getReader()
   const decoder = new TextDecoder()
-  while (Date.now() < deadline) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buffered += decoder.decode(value, { stream: true })
-    if (/services: disabled|Run "supacloud-lite keys"/.test(buffered)) return buffered
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<'deadline'>((resolve) => {
+    timer = setTimeout(() => resolve('deadline'), 45_000)
+  })
+  try {
+    while (true) {
+      const next = await Promise.race([reader.read(), deadline])
+      if (next === 'deadline') {
+        throw new Error(`start printed no ${pattern} within 45s. stdout:\n${buffered}`)
+      }
+      if (next.done) break
+      buffered += decoder.decode(next.value, { stream: true })
+      if (pattern.test(buffered)) return buffered
+    }
+  } finally {
+    clearTimeout(timer)
+    await reader.cancel().catch(() => {})
   }
-  return buffered
+  throw new Error(`start exited before printing ${pattern}. stdout:\n${buffered}`)
+}
+
+async function readBanner(server: ReturnType<typeof Bun.spawn>): Promise<string> {
+  return readUntil(server, /services: disabled|Run "supacloud-lite keys"/)
 }
 
 async function readStartedUrl(server: ReturnType<typeof Bun.spawn>): Promise<string | null> {
-  const deadline = Date.now() + 45_000
-  let buffered = ''
-  const reader = (server.stdout as ReadableStream<Uint8Array>).getReader()
-  const decoder = new TextDecoder()
-  while (Date.now() < deadline) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buffered += decoder.decode(value, { stream: true })
-    const match = /API URL: (http:\/\/\S+)/.exec(buffered)
-    if (match) return match[1]!
-  }
-  return null
+  const banner = await readUntil(server, /API URL: (http:\/\/\S+)/)
+  return /API URL: (http:\/\/\S+)/.exec(banner)?.[1] ?? null
 }
 
 function encode(value: string): string {
