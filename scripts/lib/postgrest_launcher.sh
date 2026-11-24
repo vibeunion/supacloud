@@ -193,7 +193,7 @@ postrust_decode_config_value() {
     local raw="$1" inner="" out="" hex="" decoded="" char=""
     local backslash quote slash
     local -i index=0 length=0
-    printf -v backslash '\\'
+    printf -v backslash '\134'
     quote='"'
     slash='/'
     if [[ "$raw" =~ ^\"(.*)\"$ ]]; then

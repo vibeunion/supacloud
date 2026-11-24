@@ -30,6 +30,8 @@ The launcher maps the existing keys (`db-uri`, `db-schemas`, `db-anon-role`, `jw
 
 Shared Compose, Podman, CI, and pilot containers have no per-tenant config file. They set `PGRST_DB_CHANNEL=pgrst` and `PGRST_DB_CHANNEL_ENABLED=true` so a `NOTIFY pgrst` from the existing DDL trigger reloads the schema cache. Postrust leaves that listener off unless it is set.
 
+supabase-js bulk insert sends `columns="task","is_complete"`. Postrust treats the quote characters as part of the column name. The project REST proxy strips one pair of surrounding quotes from each name before forwarding. Calls that reach Postrust directly still need unquoted `columns`.
+
 ## What stays the same
 
 - Authorization remains GRANT plus RLS. The connection user stays the per-project `authenticator_*` role, and Postrust runs `SET LOCAL ROLE` from the JWT `role` claim. `anon`, `authenticated`, and `service_role` are unchanged. `supabase_auth_admin` and `supabase_admin` are unchanged.

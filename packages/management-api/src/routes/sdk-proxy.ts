@@ -806,6 +806,17 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: P
     }
 }
 
+/** supabase-js quotes bulk-insert column names. Postrust keeps those quotes in the name. */
+export function normalizePostgrestColumnsParam(value: string): string {
+    return value.split(",").map((part) => {
+        const trimmed = part.trim();
+        if (trimmed.length >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
+            return trimmed.slice(1, -1).replaceAll("\"\"", "\"");
+        }
+        return trimmed;
+    }).join(",");
+}
+
 const sdkProxyRoutesBase = new Elysia({ prefix: "" })
     .group("/auth/v1", (app) => {
         const handler = async ({ request }: { request: Request }) => {
@@ -861,6 +872,10 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
             if (!ports) return new Response(JSON.stringify({ message: 'Tenant backend not active' }), { status: 502, headers: { 'Content-Type': 'application/json' } });
             
             const url = new URL(request.url);
+            const columns = url.searchParams.get("columns");
+            if (columns !== null) {
+                url.searchParams.set("columns", normalizePostgrestColumnsParam(columns));
+            }
             let targetPath = url.pathname.replace(/^\/rest\/v1/, '');
             if (!targetPath || targetPath === '') targetPath = '/';
             const targetUrl = `http://127.0.0.1:${ports.pgrstPort}${targetPath}${url.search}`;
