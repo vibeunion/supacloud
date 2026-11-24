@@ -96,7 +96,22 @@ export function resolveReleaseOutputs(input, run = execute) {
   /** @param {string} command @param {string[]} args */
   const json = (command, args) => JSON.parse(run(command, args));
   const releasePrs = mergedReleasePrs(input.repository, input.sha, run);
-  if (releasePrs.length !== 1) throw new Error('Expected one merged Release Please PR for the exact commit');
+  if (releasePrs.length === 0) {
+    // The release-please action also fails on ordinary pushes, for example when
+    // it cannot force-update its own open release PR branch because the merge
+    // queue just closed it. Such a push released nothing, so there is nothing to
+    // recover: throwing here only paints a healthy main push red. A push that
+    // really did bump versions without a merged release PR is still fail-closed.
+    const changed = changedReleasePaths(input.sha, run);
+    if (changed.length > 0) {
+      throw new Error(`Changed release without a merged Release Please PR: ${changed.join(', ')}`);
+    }
+    // Annotate instead of staying silent: the action did fail, and hiding that
+    // is how the next real failure goes unnoticed.
+    console.log(`::warning::release-please failed on ${input.sha} but no release version changed; nothing to recover`);
+    return {};
+  }
+  if (releasePrs.length > 1) throw new Error('Expected one merged Release Please PR for the exact commit');
   /** @param {string} revision @param {string} file */
   const read = (revision, file) => json('git', ['show', `${revision}:${file}`]);
   const current = read(input.sha, '.release-please-manifest.json');
