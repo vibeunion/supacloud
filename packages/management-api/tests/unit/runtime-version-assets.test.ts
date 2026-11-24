@@ -1311,8 +1311,8 @@ describe("runtime companion version assets", () => {
     expect(runtime).toContain("POSTGREST_VERSION must be a v-prefixed release");
     expect(installer).toContain('source "${SCRIPT_DIR}/scripts/lib/postgrest_upgrade.sh"');
     expect(installer).toContain('supacloud_upgrade_postgrest_binary "$POSTGREST_BIN"');
-    expect(postgrestUpgrade).toContain('SUPACLOUD_POSTGREST_RELEASE_ARCH="linux-static-x86-64"');
-    expect(postgrestUpgrade).toContain('SUPACLOUD_POSTGREST_RELEASE_ARCH="linux-static-aarch64"');
+    expect(postgrestUpgrade).toContain('SUPACLOUD_POSTGREST_RELEASE_ARCH="linux-amd64"');
+    expect(postgrestUpgrade).toContain("publishes no official linux/arm64 image");
     expect(postgrestUpgrade).toContain('supacloud_postgrest_active_units > "$active_units"');
     expect(postgrestUpgrade).toContain('supacloud_stop_postgrest_units "$active_units" "$stopped_units"');
     expect(postgrestUpgrade).toContain('supacloud_restart_postgrest_units "$active_units" "$binary_path" "$target_version"');
@@ -1382,7 +1382,7 @@ describe("runtime companion version assets", () => {
     expect(installer).toContain('CADDY_VERSION:-2.11.9');
     expect(caddyBuilder).toContain('CADDY_VERSION="${CADDY_VERSION:-v2.11.9}"');
 
-    expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v16.6"');
+    expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v3.4.0"');
     expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.198.0"');
     const realtimeDigest =
       "sha256:2843107437cb746edb925155504558683882e65d119c1321fda40fc43d51d847";
@@ -1416,8 +1416,8 @@ describe("runtime companion version assets", () => {
     }
     expect(podmanUnits[0]).toContain("localhost/supacloud-caddy:local");
     expect(podmanUnits[1]).toContain("supabase/gotrue:v2.198.0");
-    expect(podmanUnits[2]).toContain("postgrest/postgrest:v16.6");
-    expect(workflow).toContain("postgrest/postgrest:v16.6");
+    expect(podmanUnits[2]).toContain("docker.io/postrust/postrust:v3.4.0@sha256:4de17b6c68403317a33c0a8ab78edb347e6b3131e9784c25b5c700554ac61809");
+    expect(workflow).toContain("docker.io/postrust/postrust:v3.4.0@sha256:4de17b6c68403317a33c0a8ab78edb347e6b3131e9784c25b5c700554ac61809");
     expect(workflow).toContain("supabase/gotrue:v2.198.0");
     expect(podmanPostgresContainerfile).toContain("FROM postgres:18-bookworm");
     expect(workflow).toContain("SupaCloud deployment remains PostgreSQL 18");
@@ -1440,7 +1440,7 @@ describe("runtime companion version assets", () => {
     expect(readDocumentedComponentVersion(upgradeNotes, "GoTrue")).toBe(
       readShellConstant(gotrueUpgrade, "SUPACLOUD_GOTRUE_DEFAULT_VERSION"),
     );
-    expect(readDocumentedComponentVersion(upgradeNotes, "PostgREST")).toBe(
+    expect(readDocumentedComponentVersion(upgradeNotes, "Postrust")).toBe(
       readShellConstant(tenantRuntime, "POSTGREST_DEFAULT_VERSION"),
     );
     expect(readDocumentedComponentVersion(upgradeNotes, "Realtime")).toBe(

@@ -22,17 +22,35 @@ SUPACLOUD_META_DB="${SUPACLOUD_META_DB:-supacloud_meta}"
 POSTGREST_RTS="${POSTGREST_RTS:--N1 -M256m -I0.5 -A4m}"
 POSTGREST_MEMORY_MAX="${POSTGREST_MEMORY_MAX:-384M}"
 POSTGREST_CPU_WEIGHT="${POSTGREST_CPU_WEIGHT:-40}"
-POSTGREST_DEFAULT_VERSION="v16.6"
-POSTGREST_X86_64_SHA256="335ea29f00145705fb569b1268b9c8e53d062f8f6f9188192e92ea3781d2dca1"
-POSTGREST_ARM64_SHA256="bceeb740e954da0163d9f05fee4355b24af45522ecf9099aacb396400ea8852d"
+POSTGREST_DEFAULT_VERSION="v3.4.0"
+POSTGREST_X86_64_SHA256="f174c84a1b3ac8a24c13a4ef7896adfc029ece8c1b206ee715e3864f5f169b7a"
+# Postrust v3.4.0 publishes no official linux/arm64 image or release binary.
 GOTRUE_DEFAULT_VERSION="v2.198.0"
 
 postgrest_binary_version() {
     local binary_path="$1"
-    local version
-    [ -x "$binary_path" ] || return 1
+    local stamp="${binary_path}.postrust-version" version checksum actual magic
+    [ -x "$binary_path" ] && [ -f "$binary_path" ] && [ ! -L "$binary_path" ] || return 1
+    if [ -f "$stamp" ] && [ ! -L "$stamp" ]; then
+        {
+            IFS= read -r version
+            IFS= read -r checksum
+        } < "$stamp" || return 1
+        if [[ "$version" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?([+-][A-Za-z0-9._-]+)?$ \
+            && "$checksum" =~ ^[0-9a-f]{64}$ ]]; then
+            actual=$(sha256sum "$binary_path" | awk '{print $1}' | tr '[:upper:]' '[:lower:]') || return 1
+            if [ "$actual" = "$checksum" ]; then
+                printf '%s' "$version"
+                return 0
+            fi
+        fi
+    fi
+    # Do not execute an ELF here. Postrust starts its server when given --version.
+    magic=$(od -An -t x1 -N 2 -- "$binary_path" | tr -d ' \n') || return 1
+    [ "$magic" = "2321" ] || return 1
     version=$("$binary_path" --version 2>/dev/null | head -1) || return 1
     version="${version#PostgREST }"
+    version="${version#postrust }"
     version="${version#v}"
     [[ "$version" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?([+-][A-Za-z0-9._-]+)?$ ]] || return 1
     printf 'v%s' "$version"
@@ -722,14 +740,14 @@ ensure_postgrest() {
     fi
     local installed_version
     installed_version=$(postgrest_binary_version "$POSTGREST_BIN") || {
-        echo "ERROR: PostgREST is missing or has no readable version at $POSTGREST_BIN; run the explicit SupaCloud installer/upgrade" >&2
+        echo "ERROR: Postrust is missing or has no readable version at $POSTGREST_BIN; run the explicit SupaCloud installer/upgrade" >&2
         return 1
     }
     if [ "$installed_version" = "$version" ]; then
         return 0
     fi
     if [ "$installed_version" != "$version" ]; then
-        echo "ERROR: PostgREST $installed_version does not match required $version; run the explicit SupaCloud installer/upgrade" >&2
+        echo "ERROR: Postrust $installed_version does not match required $version; run the explicit SupaCloud installer/upgrade" >&2
         return 1
     fi
 }
@@ -993,13 +1011,14 @@ systemd_unit_has_canonical_start_limits() {
 install_systemd_template() {
     local pgrst_unit="/etc/systemd/system/supacloud-pgrst@.service"
     if [ ! -f "$pgrst_unit" ] \
-        || grep -Eq -- '-M30m|MemoryMax=45M|^User=nobody$|^EnvironmentFile=/etc/supabase/tenants/%i\.env$' "$pgrst_unit" \
+        || grep -Eq -- '-M30m|MemoryMax=45M|^User=nobody$|^EnvironmentFile=/etc/supabase/tenants/%i\.env$|GHCRTS=' "$pgrst_unit" \
+        || grep -Fq '+RTS' "$pgrst_unit" \
         || ! grep -Fq 'ExecStart=/usr/local/libexec/supacloud/postgrest-launcher %i' "$pgrst_unit" \
         || ! systemd_unit_has_canonical_start_limits "$pgrst_unit"; then
         cat > "$pgrst_unit" <<EOF
 [Unit]
-Description=SupaCloud PostgREST for tenant %i
-Documentation=https://github.com/supacloud/supacloud
+Description=SupaCloud Postrust REST for tenant %i
+Documentation=https://github.com/postrust/postrust
 After=network.target patroni.service
 Wants=patroni.service
 StartLimitBurst=3
@@ -1009,14 +1028,13 @@ StartLimitIntervalSec=60
 Type=simple
 User=supacloud-%i
 Group=supacloud-%i
-# Keep PostgREST bounded without starving large REST reads/upserts.
-Environment="GHCRTS=${POSTGREST_RTS}"
+# Postrust has no Haskell RTS. MemoryMax is the tenant limit.
 Environment="SUPACLOUD_POSTGREST_BIN=${POSTGREST_BIN}"
 Environment="SUPACLOUD_POSTGREST_CONFIG_DIR=${TENANT_CONFIG_DIR}"
 Environment="SUPACLOUD_POSTGREST_CONFIG_TRUST_ROOT=$(dirname "$TENANT_CONFIG_DIR")"
 Environment="SUPACLOUD_POSTGREST_BINARY_TRUST_ROOT=$(dirname "$(dirname "$POSTGREST_BIN")")"
 Environment="SUPACLOUD_POSTGREST_CONTROL_UID=0"
-ExecStart=/usr/local/libexec/supacloud/postgrest-launcher %i +RTS ${POSTGREST_RTS} -RTS
+ExecStart=/usr/local/libexec/supacloud/postgrest-launcher %i
 Restart=on-failure
 RestartSec=5
 

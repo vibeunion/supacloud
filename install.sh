@@ -4025,12 +4025,12 @@ deploy_jit_gateway_service() {
     # 7a. Upgrade the shared PostgREST binary as one global runtime transaction.
     local POSTGREST_BIN="${POSTGREST_BIN:-/usr/local/bin/postgrest}"
     local POSTGREST_VERSION="${POSTGREST_VERSION:-$SUPACLOUD_POSTGREST_DEFAULT_VERSION}"
-    log_info "Verifying PostgREST ${POSTGREST_VERSION} with staged upgrade and rollback protection..."
+    log_info "Verifying Postrust ${POSTGREST_VERSION} (PostgREST-compatible REST) with staged upgrade and rollback protection..."
     supacloud_upgrade_postgrest_binary "$POSTGREST_BIN" || {
-        log_error "PostgREST ${POSTGREST_VERSION} upgrade failed"
+        log_error "Postrust ${POSTGREST_VERSION} upgrade failed"
         return 1
     }
-    log_info "PostgREST ${POSTGREST_VERSION} is installed; backup: ${SUPACLOUD_POSTGREST_LAST_BACKUP_DIR:-not-required}"
+    log_info "Postrust ${POSTGREST_VERSION} is installed; backup: ${SUPACLOUD_POSTGREST_LAST_BACKUP_DIR:-not-required}"
 
     # 7b. Upgrade GoTrue only from this explicit install/upgrade transaction.
     local GOTRUE_BIN="${GOTRUE_BIN:-/usr/local/bin/gotrue}"
