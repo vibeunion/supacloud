@@ -397,7 +397,9 @@ db-anon-role = "anon"
 jwt-secret = ${quoteTomlBasicString(request.jwtVerifierSecret)}
 ${jwtAudience}
 server-port = ${request.port}
-server-host = "0.0.0.0"
+# Loopback only. Caddy on this host dials 127.0.0.1. Postrust still serves
+# /admin and its GraphQL routes, and v3.4.0 cannot turn them off.
+server-host = "127.0.0.1"
 db-pool = ${request.databasePool}
 db-pool-acquisition-timeout = 10
 log-level = "warn"

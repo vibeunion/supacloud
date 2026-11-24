@@ -46,7 +46,7 @@ export async function startGraphqlPostgres() {
     }
     try {
         await command(["image", "inspect", "supacloud-graphql-test:pg18"]);
-        await command(["image", "inspect", "postgrest/postgrest:v16.6"]);
+        await command(["image", "inspect", "docker.io/postrust/postrust:v3.4.0@sha256:4de17b6c68403317a33c0a8ab78edb347e6b3131e9784c25b5c700554ac61809"]);
         await command(["network", "create", name]);
         networkCreated = true;
         await command(["run", "--pull=never", "-d", "--name", name, "--network", name,
@@ -108,7 +108,9 @@ export async function startGraphqlPostgres() {
             await command(["run", "--pull=never", "-d", "--name", restName, "--network", name,
                 "-p", "127.0.0.1::3000", "-e", "PGRST_DB_URI", "-e", "PGRST_JWT_SECRET",
                 "-e", "PGRST_DB_SCHEMAS=public,graphql_public", "-e", "PGRST_DB_ANON_ROLE=anon",
-                "-e", "PGRST_DB_EXTRA_SEARCH_PATH=public", "postgrest/postgrest:v16.6"], {
+                "-e", "PGRST_DB_EXTRA_SEARCH_PATH=public", "-e", "PGRST_COMPAT_MODE=true",
+                "-e", "PGRST_DB_CHANNEL=pgrst", "-e", "PGRST_DB_CHANNEL_ENABLED=true",
+                "docker.io/postrust/postrust:v3.4.0@sha256:4de17b6c68403317a33c0a8ab78edb347e6b3131e9784c25b5c700554ac61809"], {
                 PGRST_DB_URI: `postgres://authenticator:${password}@${name}:5432/${dbName}`,
                 PGRST_JWT_SECRET: secret,
             });

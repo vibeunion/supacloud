@@ -69,7 +69,7 @@ services:
       GOTRUE_WEBAUTHN_RP_ORIGINS: ${WEBAUTHN_RP_ORIGINS:-${STUDIO_URL}}
 
   postgrest:
-    image: postgrest/postgrest:v16.6
+    image: docker.io/postrust/postrust:v3.4.0@sha256:4de17b6c68403317a33c0a8ab78edb347e6b3131e9784c25b5c700554ac61809
     restart: unless-stopped
     depends_on:
       postgres:
@@ -80,6 +80,10 @@ services:
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: ${JWT_SECRET}
       PGRST_SERVER_PROXY_URI: ${PUBLIC_URL}
+      PGRST_OPENAPI_SERVER_PROXY_URI: ${PUBLIC_URL}/rest/v1
+      PGRST_COMPAT_MODE: "true"
+      PGRST_DB_CHANNEL: pgrst
+      PGRST_DB_CHANNEL_ENABLED: "true"
 
   ferretdb:
     image: ${FERRETDB_IMAGE:-ghcr.io/ferretdb/ferretdb:2.7.0}

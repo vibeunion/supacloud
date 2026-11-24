@@ -160,4 +160,140 @@ else
     exit 1
 fi
 
-exec /usr/bin/env -i "$postgrest_binary" "$config_path" "$@"
+# Postrust v3.4.0 reads environment variables and has no config-file argument.
+# The trusted per-tenant file stays the write contract; this launcher is the
+# only place that turns it into Postrust's environment. Haskell +RTS flags from
+# existing units are ignored. PGRST_COMPAT_MODE stays on so project REST paths
+# and RPC bodies stay PostgREST-shaped.
+postrust_env_name_for_key() {
+    case "$1" in
+        db-uri) printf 'PGRST_DB_URI' ;;
+        db-schemas) printf 'PGRST_DB_SCHEMAS' ;;
+        db-extra-search-path) printf 'PGRST_DB_EXTRA_SEARCH_PATH' ;;
+        db-anon-role) printf 'PGRST_DB_ANON_ROLE' ;;
+        jwt-secret) printf 'PGRST_JWT_SECRET' ;;
+        jwt-aud) printf 'PGRST_JWT_AUD' ;;
+        server-port) printf 'PGRST_SERVER_PORT' ;;
+        server-host) printf 'PGRST_SERVER_HOST' ;;
+        db-pool) printf 'PGRST_DB_POOL' ;;
+        db-pool-acquisition-timeout) printf 'PGRST_DB_POOL_TIMEOUT' ;;
+        log-level) printf 'PGRST_LOG_LEVEL' ;;
+        openapi-mode) printf 'PGRST_OPENAPI_MODE' ;;
+        openapi-server-proxy-uri) printf 'PGRST_OPENAPI_SERVER_PROXY_URI' ;;
+        db-pre-request) printf 'PGRST_DB_PRE_REQUEST' ;;
+        db-max-rows) printf 'PGRST_DB_MAX_ROWS' ;;
+        server-cors-allowed-origins) printf 'PGRST_SERVER_CORS_ORIGINS' ;;
+        db-channel) printf 'PGRST_DB_CHANNEL' ;;
+        db-channel-enabled) printf 'PGRST_DB_CHANNEL_ENABLED' ;;
+        *) return 1 ;;
+    esac
+}
+
+postrust_decode_config_value() {
+    local raw="$1" inner="" out="" hex="" decoded="" char=""
+    local backslash quote slash
+    local -i index=0 length=0
+    printf -v backslash '\134'
+    quote='"'
+    slash='/'
+    if [[ "$raw" =~ ^\"(.*)\"$ ]]; then
+        inner="${BASH_REMATCH[1]}"
+        length=${#inner}
+        while (( index < length )); do
+            char="${inner:index:1}"
+            if [[ "$char" != "$backslash" ]]; then
+                out+="$char"
+                index=$((index + 1))
+                continue
+            fi
+            index=$((index + 1))
+            (( index < length )) || return 1
+            char="${inner:index:1}"
+            if [[ "$char" == "$quote" || "$char" == "$backslash" || "$char" == "$slash" ]]; then
+                out+="$char"
+            elif [[ "$char" == "b" ]]; then
+                out+=$'\b'
+            elif [[ "$char" == "f" ]]; then
+                out+=$'\f'
+            elif [[ "$char" == "n" ]]; then
+                out+=$'\n'
+            elif [[ "$char" == "r" ]]; then
+                out+=$'\r'
+            elif [[ "$char" == "t" ]]; then
+                out+=$'\t'
+            elif [[ "$char" == "u" ]]; then
+                hex="${inner:index+1:4}"
+                [[ "$hex" =~ ^[0-9a-fA-F]{4}$ ]] || return 1
+                printf -v decoded '%b' "\\u${hex}"
+                out+="$decoded"
+                index=$((index + 4))
+            else
+                return 1
+            fi
+            index=$((index + 1))
+        done
+    elif [[ "$raw" =~ ^[A-Za-z0-9._:+/-]+$ ]]; then
+        out="$raw"
+    else
+        return 1
+    fi
+    [[ "$out" != *$'\n'* && "$out" != *$'\r'* ]] || return 1
+    printf '%s' "$out"
+}
+
+postrust_config_assignments=()
+postrust_seen_keys=" "
+while IFS= read -r postrust_line || [[ -n "$postrust_line" ]]; do
+    postrust_line="${postrust_line%$'\r'}"
+    [[ -z "${postrust_line//[[:space:]]/}" || "$postrust_line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$postrust_line" =~ ^[[:space:]]*([a-z][a-z0-9-]*)[[:space:]]*=[[:space:]]*(.+)$ ]] || {
+        echo "ERROR: Invalid Postrust tenant configuration line" >&2
+        exit 1
+    }
+    postrust_key="${BASH_REMATCH[1]}"
+    postrust_raw="${BASH_REMATCH[2]}"
+    postrust_raw="${postrust_raw%"${postrust_raw##*[![:space:]]}"}"
+    [[ "$postrust_seen_keys" != *" ${postrust_key} "* ]] || {
+        echo "ERROR: Duplicate Postrust configuration key" >&2
+        exit 1
+    }
+    postrust_env_name=$(postrust_env_name_for_key "$postrust_key") || {
+        echo "ERROR: Unsupported Postrust configuration key" >&2
+        exit 1
+    }
+    postrust_value=$(postrust_decode_config_value "$postrust_raw") || {
+        echo "ERROR: Invalid Postrust configuration value" >&2
+        exit 1
+    }
+    postrust_seen_keys+="${postrust_key} "
+    postrust_config_assignments+=("${postrust_env_name}=${postrust_value}")
+done < "$config_path"
+
+if [[ "$postrust_seen_keys" == *" db-channel "* && "$postrust_seen_keys" != *" db-channel-enabled "* ]]; then
+    postrust_config_assignments+=("PGRST_DB_CHANNEL_ENABLED=true")
+fi
+postrust_config_assignments+=("PGRST_COMPAT_MODE=true")
+
+while [[ $# -gt 0 ]]; do
+    if [[ "$1" == "+RTS" ]]; then
+        shift
+        postrust_closed_rts=false
+        while [[ $# -gt 0 ]]; do
+            if [[ "$1" == "-RTS" ]]; then
+                postrust_closed_rts=true
+                shift
+                break
+            fi
+            shift
+        done
+        [[ "$postrust_closed_rts" == true ]] || {
+            echo "ERROR: Unclosed Haskell RTS block" >&2
+            exit 1
+        }
+        continue
+    fi
+    echo "ERROR: Postrust does not accept launcher arguments" >&2
+    exit 1
+done
+
+exec /usr/bin/env -i "${postrust_config_assignments[@]}" "$postgrest_binary"

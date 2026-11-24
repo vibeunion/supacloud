@@ -43,7 +43,7 @@ function createLauncherFixture(): LauncherFixture {
   chmodSync(generationPath, 0o440);
   writeFileSync(pointerPath, `${generationTarget}\n`);
   chmodSync(pointerPath, 0o440);
-  writeFileSync(binaryPath, '#!/bin/sh\nprintf "ARG=%s\\n" "$@"\nenv | sort\n');
+  writeFileSync(binaryPath, '#!/bin/sh\nif [ "$#" -gt 0 ]; then printf "ARG=%s\\n" "$@"; fi\nenv | sort\n');
   chmodSync(binaryPath, 0o755);
   return { root, configRoot, generationDirectory, generationPath, pointerPath, binaryPath };
 }
@@ -79,8 +79,9 @@ describe("PostgREST launcher", () => {
       const launched = invokeLauncher(fixture);
 
       expect(launched.status).toBe(0);
-      expect(launched.stdout).toContain(`ARG=${fixture.generationPath}`);
-      expect(launched.stdout).toContain("ARG=+RTS\nARG=-N1\nARG=-RTS");
+      expect(launched.stdout).toContain("PGRST_SERVER_PORT=3100");
+      expect(launched.stdout).toContain("PGRST_COMPAT_MODE=true");
+      expect(launched.stdout).not.toContain("ARG=");
       expect(launched.stdout).not.toContain("PGRST_DB_URI");
       expect(launched.stdout).not.toContain("SUPABASE_SERVICE_ROLE_KEY");
     } finally {
@@ -151,10 +152,48 @@ describe("PostgREST launcher", () => {
       const launched = invokeLauncher(fixture);
 
       expect(launched.status).toBe(0);
-      expect(launched.stdout).toContain(`ARG=${legacyPath}`);
+      expect(launched.stdout).toContain("PGRST_SERVER_PORT=3100");
+      expect(launched.stdout).toContain("PGRST_COMPAT_MODE=true");
+      expect(launched.stdout).not.toContain(`ARG=${legacyPath}`);
 
       writeFileSync(fixture.pointerPath, "../legacy.conf\n");
       chmodSync(fixture.pointerPath, 0o440);
+      expect(invokeLauncher(fixture).status).not.toBe(0);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test("translates the tenant config into Postrust compatibility mode", () => {
+    const fixture = createLauncherFixture();
+    try {
+      chmodSync(fixture.generationPath, 0o640);
+      writeFileSync(fixture.generationPath, [
+        'db-uri = "postgres://authenticator:secret@db:5432/supa_demo"',
+        'db-anon-role = "anon"',
+        'db-pre-request = "public.set_request_context"',
+        'jwt-secret = "secret \\"quoted\\""',
+        'server-port = 3100',
+        'db-channel = "pgrst_demo"',
+        "",
+      ].join("\n"));
+      chmodSync(fixture.generationPath, 0o440);
+
+      const launched = invokeLauncher(fixture);
+
+      expect(launched.status).toBe(0);
+      expect(launched.stdout).toContain("PGRST_COMPAT_MODE=true");
+      expect(launched.stdout).toContain("PGRST_DB_ANON_ROLE=anon");
+      expect(launched.stdout).toContain("PGRST_DB_PRE_REQUEST=public.set_request_context");
+      expect(launched.stdout).toContain("PGRST_DB_CHANNEL=pgrst_demo");
+      expect(launched.stdout).toContain("PGRST_DB_CHANNEL_ENABLED=true");
+      expect(launched.stdout).toContain("PGRST_DB_URI=postgres://authenticator:secret@db:5432/supa_demo");
+      expect(launched.stdout).toContain('PGRST_JWT_SECRET=secret "quoted"');
+      expect(launched.stdout).not.toContain("ARG=");
+
+      chmodSync(fixture.generationPath, 0o640);
+      writeFileSync(fixture.generationPath, 'server-port = 3100\nnot-a-postrust-key = "x"\n');
+      chmodSync(fixture.generationPath, 0o440);
       expect(invokeLauncher(fixture).status).not.toBe(0);
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });

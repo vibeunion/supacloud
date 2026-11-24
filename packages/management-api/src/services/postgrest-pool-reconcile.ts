@@ -32,7 +32,7 @@ const LEGACY_DYNAMIC_STRING_KEYS = [
 const LEGACY_STATIC_CONFIG_VALUES = new Map([
   ["db-extra-search-path", '"public, extensions, auth"'],
   ["db-anon-role", '"anon"'],
-  ["server-host", '"0.0.0.0"'],
+  ["server-host", '"127.0.0.1"'],
   ["db-pool-acquisition-timeout", "10"],
   ["log-level", '"warn"'],
   ["openapi-mode", '"follow-privileges"'],

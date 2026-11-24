@@ -20,6 +20,11 @@ import {
 } from "./delivery-optimization";
 import { assertUniqueCaddyIds, isolateCaddyCachePaths, runCaddyStartupPreflight } from "./caddy-startup-preflight";
 import {
+    BLOCKED_POSTRUST_REST_PATH_REGEXP,
+    POSTRUST_COLUMNS_QUERY_REPLACE,
+    isBlockedPostrustUpstreamPath,
+} from "./postrust-rest-guard";
+import {
     FRONTEND_GATEWAY_DURABILITY_UNKNOWN_CODE,
     FRONTEND_RELEASE_POINTER_PATH,
     FRONTEND_RELEASE_POINTER_SCHEMA,
@@ -393,6 +398,7 @@ const CADDY_PROJECT_ROUTE_KINDS = [
     "opaque-auth",
     "auth-admin-user-delete",
     "rest-openapi",
+    "rest-blocked",
     "rest",
     "graphql",
     "auth-domain-auth",
@@ -1574,6 +1580,31 @@ export class CaddyGatewayProvider implements GatewayProvider {
         };
     }
 
+    private makeBlockedPostrustRestRoute(projectRef: string, hosts: string[]): CaddyRoute {
+        const id = caddyRouteId(projectRef, "rest-blocked");
+        return {
+            "@id": id,
+            match: [{
+                host: uniqueStrings(hosts.map(normalizeCaddyHost)),
+                path_regexp: {
+                    name: `${sanitizeCaddyId(id)}_path`,
+                    pattern: BLOCKED_POSTRUST_REST_PATH_REGEXP,
+                },
+            }],
+            handle: [{
+                handler: "static_response",
+                status_code: 404,
+                headers: {
+                    "Content-Type": ["application/json"],
+                    "Cache-Control": ["no-store"],
+                },
+                body: "{\"message\":\"Not found\"}",
+            }],
+            terminal: true,
+            __supacloud_priority: 150,
+        };
+    }
+
     private makeRoute(opts: {
         id: string;
         hosts: string[];
@@ -1581,6 +1612,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         upstream: string;
         projectRef: string;
         stripPrefix?: string;
+        rewriteColumns?: boolean;
         rewriteUri?: string;
         headers?: string[];
         corsOrigins?: string[];
@@ -1617,7 +1649,13 @@ export class CaddyGatewayProvider implements GatewayProvider {
         if (corsSubroute) handle.push(corsSubroute);
         if (opts.corsErrorFallback) handle.push(makeFunctionCorsErrorFallback(opts.corsOrigins || []));
         if (opts.rewriteUri) handle.push({ handler: "rewrite", uri: opts.rewriteUri });
-        else if (opts.stripPrefix) handle.push({ handler: "rewrite", strip_path_prefix: opts.stripPrefix });
+        else if (opts.stripPrefix || opts.rewriteColumns) {
+            handle.push({
+                handler: "rewrite",
+                ...(opts.stripPrefix ? { strip_path_prefix: opts.stripPrefix } : {}),
+                ...(opts.rewriteColumns ? { query: { replace: POSTRUST_COLUMNS_QUERY_REPLACE } } : {}),
+            });
+        }
         // 只压缩迁移清单，不改变认证响应、下载和流式接口的传输行为。
         if (opts.encodeMigrationInventory) handle.push({
             handler: "subroute",
@@ -1869,6 +1907,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
     private cloneRouteForCustomLimit(projectRef: string, basePath: string, routeId: string): CaddyRoute | null {
         const normalizedPath = basePath.startsWith("/") ? basePath : `/${basePath}`;
+        const restSuffix = normalizedPath.replace(/\/+$/, "").replace(/^\/rest\/v1(?=\/|$)/, "") || "/";
+        if (normalizedPath.startsWith("/rest/v1") && isBlockedPostrustUpstreamPath(restSuffix)) return null;
         const parentKind =
             normalizedPath.startsWith("/rest/v1") ? "rest" :
             normalizedPath.startsWith("/graphql/v1") ? "graphql" :
@@ -2047,8 +2087,12 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 })] : []),
                 restOpenApiRoute,
                 ...opaqueRoutes,
-                this.makeRoute({ id: caddyRouteId(projectRef, "rest"), hosts, path: "/rest/v1*", upstream: `${hostIp}:${pgrstPort}`, projectRef, stripPrefix: "/rest/v1", corsOrigins, encodeResponses: true }),
-                this.makeRoute({ id: caddyRouteId(projectRef, "graphql"), hosts, path: "/graphql/v1*", upstream: `${hostIp}:${pgrstPort}`, projectRef, rewriteUri: "/rpc/graphql", headers: ["Content-Profile:graphql_public", "Accept-Profile:graphql_public"], corsOrigins, encodeResponses: true }),
+                this.makeBlockedPostrustRestRoute(projectRef, hosts),
+                // Loopback only. The tenant process binds 127.0.0.1, and Caddy
+                // on this host is the public gateway. hostIp may be a bridge
+                // address, which would publish the listener again.
+                this.makeRoute({ id: caddyRouteId(projectRef, "rest"), hosts, path: "/rest/v1*", upstream: `127.0.0.1:${pgrstPort}`, projectRef, stripPrefix: "/rest/v1", rewriteColumns: true, corsOrigins, encodeResponses: true }),
+                this.makeRoute({ id: caddyRouteId(projectRef, "graphql"), hosts, path: "/graphql/v1*", upstream: `127.0.0.1:${pgrstPort}`, projectRef, rewriteUri: "/rpc/graphql", headers: ["Content-Profile:graphql_public", "Accept-Profile:graphql_public"], corsOrigins, encodeResponses: true }),
                 this.makeRoute({
                     id: caddyRouteId(projectRef, "auth"),
                     hosts,

@@ -19,9 +19,10 @@ make_postgrest_archive() {
     local archive="$2"
     local payload_dir
     payload_dir=$(mktemp -d "${tmp_dir}/payload.XXXXXX")
-    printf '#!/bin/sh\nprintf "PostgREST %s\\n"\n' "${version#v}" > "${payload_dir}/postgrest"
-    chmod 755 "${payload_dir}/postgrest"
-    tar -cJf "$archive" -C "$payload_dir" postgrest
+    mkdir -p "${payload_dir}/usr/local/bin"
+    printf '#!/bin/sh\nprintf "PostgREST %s\\n"\n' "${version#v}" > "${payload_dir}/usr/local/bin/postrust"
+    chmod 755 "${payload_dir}/usr/local/bin/postrust"
+    tar -czf "$archive" -C "$payload_dir" usr/local/bin/postrust
 }
 
 postgrest_binary="${tmp_dir}/postgrest"

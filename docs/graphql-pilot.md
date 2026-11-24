@@ -2,7 +2,7 @@
 
 ## Scope
 
-This pilot runs a real PostgreSQL + pg_graphql + PostgREST stack in isolated
+This pilot runs a real PostgreSQL + pg_graphql + Postrust stack in isolated
 local Docker containers with synthetic order data. It does not connect to an
 existing project, alter a shared cluster, or deploy a production application.
 The read-only order detail includes a customer, line items and deliveries.
@@ -22,7 +22,7 @@ Prerequisites: Bun, Docker, and installed compiler dependencies. From the reposi
 
 ```sh
 docker build -t supacloud-graphql-test:pg18 docker/graphql-test
-docker pull postgrest/postgrest:v16.6
+docker pull docker.io/postrust/postrust:v3.4.0@sha256:4de17b6c68403317a33c0a8ab78edb347e6b3131e9784c25b5c700554ac61809
 bun run scripts/check_graphql_pilot.ts
 # Run the same acceptance suite and retain the local page until Ctrl-C:
 bun run scripts/check_graphql_pilot.ts --serve
