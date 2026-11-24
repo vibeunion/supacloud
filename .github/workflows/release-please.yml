@@ -833,7 +833,8 @@ jobs:
             specs+=("@supacloud/admin@$(node -p "require('./packages/admin/package.json').version")")
           fi
           # Metadata can be visible while the tarball still answers 404, which is
-          # how `bun install` failed on a package published seconds earlier.
+          # how the frozen-lockfile install below failed on a package published
+          # seconds earlier.
           node .github/scripts/wait-for-npm-tarball.mjs "${specs[@]}"
 
       - name: Regenerate and verify umbrella lockfile
