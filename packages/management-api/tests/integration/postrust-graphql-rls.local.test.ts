@@ -283,6 +283,22 @@ live("public /graphql/v1 applies claim, auth.uid, and nested RLS for anon and au
     expect(ids(bob.payload, "claim_sub_notes"), JSON.stringify(bob.payload)).toEqual([]);
     expect(ids(bob.payload, "claims_notes"), JSON.stringify(bob.payload)).toEqual([2]);
 
+    const relay = await through(
+        "authenticated",
+        "alice",
+        "{ claim_sub_notesCollection(first: 1) { edges { node { id } } } }",
+    );
+    expect(relay.status, JSON.stringify(relay.payload)).toBe(200);
+    expect(relay.payload).toEqual({
+        errors: [{
+            message: "field 'claim_sub_notesCollection' not found in type: 'query_root'",
+            extensions: {
+                code: "validation-failed",
+                path: "$.selectionSet.claim_sub_notesCollection",
+            },
+        }],
+    });
+
     const anonUid = await through("anon", ALICE, uidQuery);
     const aliceUid = await through("authenticated", ALICE, uidQuery);
     const bobUid = await through("authenticated", BOB, uidQuery);

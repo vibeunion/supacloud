@@ -20,7 +20,7 @@ The Caddy project route matches `/graphql/v1*` and rewrites that URI to `/v1/gra
 
 These client paths stay closed on the project host: `/internal/postrust/graphql`, `/api/graphql`, `/v1/graphql`, `/v1alpha1/graphql`, `/v1/graphql/ws`, and `/admin/graphql`. A `/rest/v1` request whose suffix is `/admin`, `/_`, `/api/graphql`, `/v1/graphql`, or `/v1alpha1/graphql` is still 404 before the prefix strip. The tenant process stays bound to `127.0.0.1`. The official image still serves those raw handlers on the loopback port; the gateway does not publish them. `/graphql/v1` is the rewrite onto the handler, not a new public match for `/v1/graphql`.
 
-`/rest/v1/rpc/graphql` is unchanged. When `graphql_public.graphql` exists, that REST RPC can still reach `pg_graphql`. It is not the public `/graphql/v1` implementation.
+`/rest/v1/rpc/graphql` is closed on the project host. The gateway and the project REST proxy answer it with 404 before the request reaches `graphql_public.graphql`. Other `/rest/v1/rpc/*` functions stay available. The database function can still exist for a direct database session; it is not a hosted HTTP GraphQL API.
 
 ## Dialect the compiler and clients use
 
@@ -47,6 +47,7 @@ The workflow runs that from `packages/management-api`.
 
 That fixture sends an opaque publishable key plus the caller bearer through public `/graphql/v1` with the evaluation flag unset. Policies are `TO authenticated`. The run asserts:
 
+- a Relay `claim_sub_notesCollection` / `edges` / `node` query is HTTP 200 with `errors[0].extensions.code` `validation-failed`, no `data` field, and a message that names the missing field on `query_root`;
 - an `anon` JWT sees no rows;
 - `request.jwt.claim.sub` sees no rows for `authenticated` (fail-closed, because pre-request did not run);
 - `request.jwt.claims ->> sub` returns only the caller's row;
@@ -59,12 +60,31 @@ The same file skips when `SUPACLOUD_TEST_POSTRUST_GRAPHQL` is not `1` or `POSTRU
 
 `SUPACLOUD_POSTRUST_GRAPHQL` still opens only `POST /internal/postrust/graphql` on the management listener, and only for a credential `hasProjectServiceRoleCredential` accepts. An `anon` or `authenticated` key alone is 401 and is not forwarded. Unset, empty, `false`, `1`, `yes`, and `TRUE` leave that listener path closed. Project Caddy renders still delete a stale `route-project-<ref>-postrust-graphql` and do not add one. That path is not the public API and does not replace opaque-key translation on `/graphql/v1`.
 
-## Not claimed
+## Hosted documents
 
-- Relay `pg_graphql` documents work on hosted `/graphql/v1`.
-- `db-pre-request`, singular `request.jwt.claim.*` settings, or the REST `search_path` run for GraphQL.
-- GraphQL subscriptions, a supabase-js GraphQL client, or error-shape parity with `pg_graphql`.
-- Postrust's Hasura conformance harness was replayed here.
-- Lite serves this dialect.
-- The catalog emits GraphQL SDL or `GRANT`.
-- A production host was upgraded, retagged, or deployed.
+A Relay query (`*Collection`, `edges`, `node`) sent to `/graphql/v1` is rejected. The CI fixture expects HTTP 200 and this body, with no `data` field and no empty `edges` list:
+
+```json
+{
+  "errors": [{
+    "message": "field 'claim_sub_notesCollection' not found in type: 'query_root'",
+    "extensions": {
+      "code": "validation-failed",
+      "path": "$.selectionSet.claim_sub_notesCollection"
+    }
+  }]
+}
+```
+
+That is the measured hosted rejection for that document. A `pg_graphql` error document was not replayed beside it, so envelope parity with `pg_graphql` stays unmeasured.
+
+This repository does not ship a supabase-js GraphQL adapter. Callers post a Hasura document to `/graphql/v1`, or use the compiler client generated from a role-scoped export of that route.
+
+## Limits that remain
+
+- GraphQL does not call `PGRST_DB_PRE_REQUEST`. Upstream documents that setting as REST-only. Singular `request.jwt.claim.*` stays unset. `auth.uid()` in the CI fixture succeeds because the function falls back to `request.jwt.claims`. REST `search_path` is not applied.
+- Postrust v3.4.0 GraphQL subscriptions stay on paths this gateway keeps closed, including `/v1/graphql/ws` and `/admin`. Publishing those paths is not how this route gains subscriptions.
+- Lite `/graphql/v1` still executes real `pg_graphql` through `graphql.resolve`. `LITE_GRAPHQL_CONTRACT.interchangeableWithHosted` is false. The same contract would need a real Hasura executor on PostgreSQL `GRANT` and RLS. Lite does not simulate that executor and does not embed Postrust.
+- Postrust's Hasura conformance harness was not replayed here.
+- The catalog does not emit GraphQL SDL or `GRANT`.
+- No production host was upgraded, retagged, or deployed for this cutover.

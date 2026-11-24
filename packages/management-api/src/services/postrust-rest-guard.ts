@@ -5,7 +5,7 @@
  * stripped onto the tenant process.
  */
 export const BLOCKED_POSTRUST_REST_PATH_REGEXP =
-    "^/rest/v1/(?:admin(?:/.*)?|_(?:/.*)?|api/graphql(?:/.*)?|v1/graphql(?:/.*)?|v1alpha1/graphql(?:/.*)?)/?$";
+    "^/rest/v1/(?:admin(?:/.*)?|_(?:/.*)?|api/graphql(?:/.*)?|v1/graphql(?:/.*)?|v1alpha1/graphql(?:/.*)?|[Rr][Pp][Cc]/[Gg][Rr][Aa][Pp][Hh][Qq][Ll](?:/.*)?)/?$";
 
 /**
  * Caddy rewrites the `columns` query value with these operations, in order.
@@ -64,5 +64,6 @@ export function isBlockedPostrustUpstreamPath(targetPath: string): boolean {
     }
     const [first, second] = resolved;
     if (first === "admin" || first === "_") return true;
+    if (first?.toLowerCase() === "rpc" && second?.toLowerCase() === "graphql") return true;
     return (first === "api" || first === "v1" || first === "v1alpha1") && second === "graphql";
 }

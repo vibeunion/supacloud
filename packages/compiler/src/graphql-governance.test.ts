@@ -70,6 +70,26 @@ test("reports hosted Postrust Hasura arguments and limit page size", () => {
   expect(result.operations[0]).toMatchObject({ pageSizes: [3] });
 });
 
+test("rejects a pg_graphql Relay document against a hosted Hasura schema", () => {
+  const schema = schemaFromSource(`
+    schema { query: query_root }
+    type query_root {
+      notes(where: String, order_by: String, limit: Int): [Note!]!
+    }
+    type Note { id: Int }
+  `);
+  const relay = checkGraphqlCompatibility(schema, [{
+    path: "notes.graphql",
+    source: "query Notes { notesCollection(first: 1) { edges { node { id } } } }",
+  }]);
+  expect(relay.ok).toBe(false);
+  expect(relay.diagnostics.some((item) => item.code === "graphql-validation" && item.message.includes("notesCollection"))).toBe(true);
+  const hosted = checkGraphqlCompatibility(schema, [{
+    source: "query Notes { notes(limit: 1, order_by: \"id\") { id } }",
+  }]);
+  expect(hosted.ok).toBe(true);
+});
+
 test("rejects disallowed, too-deep and over-sized operations", () => {
   const schema = schemaFromSource(base);
   const result = checkGraphqlCompatibility(schema, [{

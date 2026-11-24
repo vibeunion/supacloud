@@ -2,6 +2,19 @@ import type { Database } from './db/database.js'
 import { ApiError, type RequestContext } from './types.js'
 import { errorProperty, isRecord } from './validation.js'
 
+/**
+ * Lite `/graphql/v1` executes real `pg_graphql` (`graphql.resolve`).
+ * Hosted `/graphql/v1` is Postrust Hasura. These documents are not interchangeable.
+ * A compatible Lite path needs a real Hasura executor on PostgreSQL GRANT and RLS.
+ * This module does not simulate that dialect and does not embed Postrust.
+ */
+export const LITE_GRAPHQL_CONTRACT = {
+  path: '/graphql/v1',
+  dialect: 'pg_graphql',
+  hostedDialect: 'postrust-hasura',
+  interchangeableWithHosted: false,
+} as const
+
 export interface GraphqlCapability {
   status: 'supported' | 'unsupported' | 'disabled' | 'unverified'
   extension: 'pg_graphql'

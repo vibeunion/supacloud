@@ -3,8 +3,17 @@ import { mkdtemp, rm, readdir, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createBackend } from '../src/runtime/index.js'
-import { GraphqlHandler, inspectGraphql } from '../src/runtime/graphql.js'
+import { GraphqlHandler, LITE_GRAPHQL_CONTRACT, inspectGraphql } from '../src/runtime/graphql.js'
 import { readJson, record } from './support/contracts.js'
+
+test('Lite GraphQL stays pg_graphql and is not the hosted Hasura contract', () => {
+  expect(LITE_GRAPHQL_CONTRACT).toEqual({
+    path: '/graphql/v1',
+    dialect: 'pg_graphql',
+    hostedDialect: 'postrust-hasura',
+    interchangeableWithHosted: false,
+  })
+})
 
 test('PGlite truthfully reports missing pg_graphql and rejects required startup', async () => {
   const backend = await createBackend({ startRuntimeServices: false })

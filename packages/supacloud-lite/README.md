@@ -958,8 +958,11 @@ is rejected when invalid in strict mode. Lite does not sample or retire on
 that budget, because functions run in-process.
 
 `/graphql/v1` requires real `pg_graphql` and uses the caller's role/RLS. Hosted
-project `/graphql/v1` is the Postrust Hasura dialect; Lite does not serve that
-dialect, so a Lite GraphQL document is not a hosted document. Neither
+project `/graphql/v1` is the Postrust Hasura dialect. Lite does not serve that
+dialect: `LITE_GRAPHQL_CONTRACT.interchangeableWithHosted` is false, and a Lite
+document is not a hosted document. Aligning them needs a real Hasura executor
+on PostgreSQL `GRANT` and RLS. Lite does not simulate that executor and does
+not embed Postrust. Neither
 bundled PGlite nor stock native downloads include the extension. Native can use
 an operator-managed installation selected with `--postgres-dir`. Required
 GraphQL fails startup when missing; `doctor --json` reports actual or unverified

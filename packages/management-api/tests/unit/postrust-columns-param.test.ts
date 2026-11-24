@@ -50,10 +50,14 @@ describe("Postrust private surfaces", () => {
             "/v1alpha1/graphql",
             "/foo/../admin",
             "/api/graphql/../graphql",
+            "/rpc/graphql",
+            "/rpc/graphql/",
+            "/RPC/GraphQL",
+            "/rpc/graphql/extra",
         ]) {
             expect(isBlockedPostrustUpstreamPath(path)).toBe(true);
         }
-        for (const path of ["/users", "/administrator", "/api/users", "/v1", "/rpc/graphql"]) {
+        for (const path of ["/users", "/administrator", "/api/users", "/v1", "/rpc/other", "/rpc/graphql_public"]) {
             expect(isBlockedPostrustUpstreamPath(path)).toBe(false);
         }
     });
@@ -73,6 +77,9 @@ describe("Postrust private surfaces", () => {
             "/rest/v1/api/graphql/ws",
             "/rest/v1/v1/graphql",
             "/rest/v1/v1alpha1/graphql",
+            "/rest/v1/rpc/graphql",
+            "/rest/v1/rpc/graphql/",
+            "/rest/v1/RPC/GraphQL",
         ]) {
             expect(pattern.test(path)).toBe(true);
         }
@@ -81,7 +88,7 @@ describe("Postrust private surfaces", () => {
             "/rest/v1/administrator",
             "/rest/v1/api/users",
             "/rest/v1/v1",
-            "/rest/v1/rpc/graphql",
+            "/rest/v1/rpc/other",
             "/graphql/v1",
         ]) {
             expect(pattern.test(path)).toBe(false);
