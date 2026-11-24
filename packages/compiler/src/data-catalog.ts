@@ -24,16 +24,16 @@ export const PUBLIC_GRAPHQL_CONTRACT = {
   dialect: "pg_graphql",
 } as const;
 
-export const DATA_PLANE_ROLES = ["anon", "authenticated", "service_role"] as const;
+export const DATA_PLANE_ROLES: ["anon", "authenticated", "service_role"] = ["anon", "authenticated", "service_role"];
 
-export const CLUSTER_LOGIN_ROLES = ["supabase_auth_admin", "supabase_admin"] as const;
+export const CLUSTER_LOGIN_ROLES: ["supabase_auth_admin", "supabase_admin"] = ["supabase_auth_admin", "supabase_admin"];
 
 export const REST_EXECUTION_SURFACES = ["postgrest", "postrust", "lite"] as const;
 
 export type RestExecutionSurface = (typeof REST_EXECUTION_SURFACES)[number];
 
 /** Standing limits of this contract version. They are not a per-file scan. */
-export const DATA_CATALOG_GAPS = [
+export const DATA_CATALOG_GAPS: [
   "rest-types-not-generated-from-catalog",
   "graphql-sdl-not-generated-from-catalog",
   "grants-not-emitted-from-catalog",
@@ -42,7 +42,16 @@ export const DATA_CATALOG_GAPS = [
   "public-graphql-remains-pg-graphql",
   "postrust-hasura-graphql-is-not-the-contract",
   "generated-typescript-model-not-proven-equal-to-zmodel",
-] as const;
+] = [
+  "rest-types-not-generated-from-catalog",
+  "graphql-sdl-not-generated-from-catalog",
+  "grants-not-emitted-from-catalog",
+  "field-level-deny-not-projected",
+  "relation-predicates-not-projected",
+  "public-graphql-remains-pg-graphql",
+  "postrust-hasura-graphql-is-not-the-contract",
+  "generated-typescript-model-not-proven-equal-to-zmodel",
+];
 
 const closed = { additionalProperties: false } as const;
 const hashString = Type.String({ pattern: "^[a-f0-9]{64}$" });

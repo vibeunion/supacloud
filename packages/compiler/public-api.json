@@ -156,7 +156,7 @@
     {
       "name": "CLUSTER_LOGIN_ROLES",
       "kind": "value",
-      "signature": "export declare const CLUSTER_LOGIN_ROLES: readonly [\"supabase_auth_admin\", \"supabase_admin\"];"
+      "signature": "export declare const CLUSTER_LOGIN_ROLES: [\"supabase_auth_admin\", \"supabase_admin\"];"
     },
     {
       "name": "CommandExecutionCapabilities",
@@ -311,7 +311,7 @@
     {
       "name": "DATA_CATALOG_GAPS",
       "kind": "value",
-      "signature": "export declare const DATA_CATALOG_GAPS: readonly [\"rest-types-not-generated-from-catalog\", \"graphql-sdl-not-generated-from-catalog\", \"grants-not-emitted-from-catalog\", \"field-level-deny-not-projected\", \"relation-predicates-not-projected\", \"public-graphql-remains-pg-graphql\", \"postrust-hasura-graphql-is-not-the-contract\", \"generated-typescript-model-not-proven-equal-to-zmodel\"];"
+      "signature": "export declare const DATA_CATALOG_GAPS: [\n    \"rest-types-not-generated-from-catalog\",\n    \"graphql-sdl-not-generated-from-catalog\",\n    \"grants-not-emitted-from-catalog\",\n    \"field-level-deny-not-projected\",\n    \"relation-predicates-not-projected\",\n    \"public-graphql-remains-pg-graphql\",\n    \"postrust-hasura-graphql-is-not-the-contract\",\n    \"generated-typescript-model-not-proven-equal-to-zmodel\"\n];"
     },
     {
       "name": "DATA_CATALOG_VERSION",
@@ -321,7 +321,7 @@
     {
       "name": "DATA_PLANE_ROLES",
       "kind": "value",
-      "signature": "export declare const DATA_PLANE_ROLES: readonly [\"anon\", \"authenticated\", \"service_role\"];"
+      "signature": "export declare const DATA_PLANE_ROLES: [\"anon\", \"authenticated\", \"service_role\"];"
     },
     {
       "name": "DatabaseContractManifest",
