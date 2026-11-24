@@ -106,7 +106,7 @@ export class GraphqlHandler {
           schemas: this.schemas,
           source: documentSource,
           variableValues: isRecord(body["variables"]) ? body["variables"] : null,
-          operationName,
+          ...(operationName === undefined ? {} : { operationName }),
         })
       })
       return finish(response(200, envelope))
