@@ -86,6 +86,7 @@ test("binds REST execution and public GraphQL to one ZenStack schema", async () 
     schemaOwner: "zenstack",
     execution: "postrust",
     executionIsSchemaOwner: false,
+    servesPublicRest: false,
     contract: "postgrest-compatible",
     generatedFromCatalog: false,
     openApi: "not-emitted",
@@ -106,6 +107,7 @@ test("binds REST execution and public GraphQL to one ZenStack schema", async () 
   const projected = emitPolicyRls(orders);
   expect(catalog.policyRls).toEqual({
     status: "projected",
+    reading: "row-policies-emitted",
     role: "authenticated",
     statementCount: projected.statements.length,
     hash: createHash("sha256").update(projected.sql).digest("hex"),
@@ -118,12 +120,14 @@ test("records a model with no row policy and does not emit GRANT", async () => {
   const source = "model Note {\n  id String @id\n  title String\n}\n";
   const catalog = await compileDataCatalog({ source, schemaPath: "schema.zmodel", restExecution: "postgrest" });
   expect(catalog.policyRls.status).toBe("no-row-policy");
+  expect(catalog.policyRls.reading).toBe("no-row-policy-declared");
   expect(catalog.policyRls.statementCount).toBe(0);
   expect(catalog.policyRls.hash).toMatch(/^[a-f0-9]{64}$/);
   expect(catalog.policyRls.reason).toBeNull();
   expect(catalog.authorization.emittedRowPolicy).toBe(false);
   expect(catalog.authorization.emittedGrant).toBe(false);
   expect(catalog.rest.execution).toBe("postgrest");
+  expect(catalog.rest.servesPublicRest).toBe(true);
   expect(catalog.graphql.publicPath).toBe("/graphql/v1");
 });
 
@@ -142,8 +146,24 @@ model Attachment {
 `;
   const catalog = await compileDataCatalog({ source, schemaPath: "schema.zmodel", restExecution: "lite" });
   expect(catalog.policyRls.status).toBe("not-projected");
+  expect(catalog.policyRls.reading).toBe("projection-incomplete");
   expect(catalog.policyRls.hash).toBeNull();
   expect(catalog.policyRls.reason).toContain("relation predicate");
+  expect(catalog.rest.servesPublicRest).toBe(false);
+  const incomplete = JSON.parse(JSON.stringify(catalog)) as { policyRls: { hash: string | null; reading: string } };
+  incomplete.policyRls.hash = "a".repeat(64);
+  incomplete.policyRls.reading = "no-row-policy-declared";
+  expect(() => parseDataCatalogDocument(incomplete)).toThrow(/Invalid ZenStack data catalog/);
+  const emptyWithoutHash = JSON.parse(JSON.stringify(catalog)) as { policyRls: { status: string; reading: string; hash: string | null; reason: null } };
+  emptyWithoutHash.policyRls.status = "no-row-policy";
+  emptyWithoutHash.policyRls.reading = "no-row-policy-declared";
+  emptyWithoutHash.policyRls.hash = null;
+  emptyWithoutHash.policyRls.reason = null;
+  expect(() => parseDataCatalogDocument(emptyWithoutHash)).toThrow(/Invalid ZenStack data catalog/);
+  const postrustServing = JSON.parse(JSON.stringify(catalog)) as { rest: { execution: string; servesPublicRest: boolean } };
+  postrustServing.rest.execution = "postrust";
+  postrustServing.rest.servesPublicRest = true;
+  expect(() => parseDataCatalogDocument(postrustServing)).toThrow(/Invalid ZenStack data catalog/);
   expect(catalog.authorization.emittedRowPolicy).toBe(false);
   expect(catalog.authorization.emittedGrant).toBe(false);
   expect(catalog.models.map((model) => model.name).sort()).toEqual(["Attachment", "Review"]);
@@ -222,6 +242,8 @@ test("database-contracts writes the catalog beside the existing contract and che
     expect(written.written).toContain("rls.sql");
     const document = JSON.parse(await readFile(join(root, "generated/data-catalog.json"), "utf8"));
     expect(document.rest.execution).toBe("postrust");
+    expect(document.rest.servesPublicRest).toBe(false);
+    expect(document.policyRls.reading).toBe("row-policies-emitted");
     expect(document.graphql.publicPath).toBe("/graphql/v1");
     expect(document.graphql.dialect).toBe("pg_graphql");
     expect(document.graphql.generatedFromCatalog).toBe(false);

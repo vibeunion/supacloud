@@ -93,11 +93,45 @@ const enumSchema = Type.Object({
   values: Type.Array(enumValueSchema, { minItems: 1 }),
 }, closed);
 
-const policyStatus = Type.Union([
-  Type.Literal("projected"),
-  Type.Literal("no-row-policy"),
-  Type.Literal("not-projected"),
-]);
+const policyRole = Type.Literal("authenticated");
+const projectedPolicy = Type.Object({
+  status: Type.Literal("projected"),
+  reading: Type.Literal("row-policies-emitted"),
+  role: policyRole,
+  statementCount: Type.Integer({ minimum: 1 }),
+  hash: hashString,
+  reason: Type.Null(),
+}, closed);
+const noRowPolicy = Type.Object({
+  status: Type.Literal("no-row-policy"),
+  reading: Type.Literal("no-row-policy-declared"),
+  role: policyRole,
+  statementCount: Type.Literal(0),
+  hash: hashString,
+  reason: Type.Null(),
+}, closed);
+const incompletePolicy = Type.Object({
+  status: Type.Literal("not-projected"),
+  reading: Type.Literal("projection-incomplete"),
+  role: policyRole,
+  statementCount: Type.Literal(0),
+  hash: Type.Null(),
+  reason: Type.String({ minLength: 1, maxLength: 200 }),
+}, closed);
+function restSurface<Execution extends "postgrest" | "postrust" | "lite", Serves extends boolean>(
+  execution: Execution,
+  servesPublicRest: Serves,
+) {
+  return Type.Object({
+    schemaOwner: Type.Literal("zenstack"),
+    executionIsSchemaOwner: Type.Literal(false),
+    contract: Type.Literal("postgrest-compatible"),
+    execution: Type.Literal(execution),
+    servesPublicRest: Type.Literal(servesPublicRest),
+    generatedFromCatalog: Type.Literal(false),
+    openApi: Type.Literal("not-emitted"),
+  }, closed);
+}
 
 export const dataCatalogDocumentSchema = Type.Object({
   version: Type.Literal(DATA_CATALOG_VERSION),
@@ -127,18 +161,11 @@ export const dataCatalogDocumentSchema = Type.Object({
     emittedGrant: Type.Literal(false),
     emittedRowPolicy: Type.Boolean(),
   }, closed),
-  rest: Type.Object({
-    schemaOwner: Type.Literal("zenstack"),
-    executionIsSchemaOwner: Type.Literal(false),
-    contract: Type.Literal("postgrest-compatible"),
-    execution: Type.Union([
-      Type.Literal("postgrest"),
-      Type.Literal("postrust"),
-      Type.Literal("lite"),
-    ]),
-    generatedFromCatalog: Type.Literal(false),
-    openApi: Type.Literal("not-emitted"),
-  }, closed),
+  rest: Type.Union([
+    restSurface("postgrest", true),
+    restSurface("postrust", false),
+    restSurface("lite", false),
+  ]),
   graphql: Type.Object({
     schemaOwner: Type.Literal("zenstack"),
     publicPath: Type.Literal(PUBLIC_GRAPHQL_CONTRACT.path),
@@ -150,13 +177,7 @@ export const dataCatalogDocumentSchema = Type.Object({
     clientDefault: Type.Literal(PUBLIC_GRAPHQL_CONTRACT.path),
     postrustHasuraDialect: Type.Literal("not-public-contract"),
   }, closed),
-  policyRls: Type.Object({
-    status: policyStatus,
-    role: Type.Literal("authenticated"),
-    statementCount: Type.Integer({ minimum: 0 }),
-    hash: Type.Union([hashString, Type.Null()]),
-    reason: Type.Union([Type.String({ minLength: 1, maxLength: 200 }), Type.Null()]),
-  }, closed),
+  policyRls: Type.Union([projectedPolicy, noRowPolicy, incompletePolicy]),
   gaps: Type.Tuple([
     Type.Literal("rest-types-not-generated-from-catalog"),
     Type.Literal("graphql-sdl-not-generated-from-catalog"),
@@ -661,6 +682,7 @@ function assertRestExecution(value: string): asserts value is RestExecutionSurfa
 
 interface PolicyProjection {
   status: "projected" | "no-row-policy" | "not-projected";
+  reading: "row-policies-emitted" | "no-row-policy-declared" | "projection-incomplete";
   role: "authenticated";
   statementCount: number;
   hash: string | null;
@@ -676,9 +698,19 @@ async function projectPolicy(source: string): Promise<PolicyProjection> {
   try {
     const emitted = emitPolicyRls(source);
     if (emitted.role !== "authenticated") fail("row-policy projection must stay on the authenticated role");
-    const status = emitted.statements.length === 0 ? "no-row-policy" : "projected";
+    if (emitted.statements.length === 0) {
+      return {
+        status: "no-row-policy",
+        reading: "no-row-policy-declared",
+        role: "authenticated",
+        statementCount: 0,
+        hash: sha256(emitted.sql),
+        reason: null,
+      };
+    }
     return {
-      status,
+      status: "projected",
+      reading: "row-policies-emitted",
       role: "authenticated",
       statementCount: emitted.statements.length,
       hash: sha256(emitted.sql),
@@ -689,6 +721,7 @@ async function projectPolicy(source: string): Promise<PolicyProjection> {
     const reason = error.message.replaceAll(/\s+/g, " ").trim().slice(0, 200);
     return {
       status: "not-projected",
+      reading: "projection-incomplete",
       role: "authenticated",
       statementCount: 0,
       hash: null,
@@ -739,6 +772,7 @@ export async function compileDataCatalog(input: CompileDataCatalogInput): Promis
       executionIsSchemaOwner: false,
       contract: "postgrest-compatible",
       execution: input.restExecution,
+      servesPublicRest: input.restExecution === "postgrest",
       generatedFromCatalog: false,
       openApi: "not-emitted",
     },

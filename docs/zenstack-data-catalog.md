@@ -59,7 +59,7 @@ role list, or a Hasura owner on `catalog` is rejected.
   "role": "authenticated",
   "catalog": {
     "schema": "zenstack/schema.zmodel",
-    "restExecution": "postrust"
+    "restExecution": "postgrest"
   },
   "migrations": ["migrations/001.sql"]
 }
@@ -67,8 +67,14 @@ role list, or a Hasura owner on `catalog` is rejected.
 
 `schema` is one self-contained `.zmodel` file inside `rootDir`. Imports are
 not expanded. A `datasource` block, when present, must set provider
-`postgresql`. `restExecution` is `postgrest`, `postrust`, or `lite`. The
-command writes `data-catalog.json`
+`postgresql`. `restExecution` names the PostgREST-compatible REST process.
+`postgrest` is the process that serves public `/rest/v1` today, so
+`servesPublicRest` is true only for that value. `lite` and `postrust` can be
+recorded, and `servesPublicRest` stays false for both. Recording `postrust`
+does not mean its REST parity has passed. A project may use that binary for
+live `/rest/v1` only after the SDK parity suite is green on it, including
+`from().select().order()`. This catalog does not store that run. The command
+writes `data-catalog.json`
 next to the existing database contract and hashes the ZModel into
 `database.manifest.json`. `--check` fails when that file or the manifest
 drifts, and it does not write.
@@ -85,11 +91,13 @@ catalog does not replace that check.
 `policyRls.status` is the result of the existing row-policy projection for the
 `authenticated` role:
 
-| Status | Meaning |
-| --- | --- |
-| `projected` | The projection emitted at least one statement. `authorization.emittedRowPolicy` is true. `hash` is the SHA-256 of that SQL. |
-| `no-row-policy` | The projection ran and emitted no statements. `hash` still covers that empty projection. `emittedRowPolicy` is false. |
-| `not-projected` | A row predicate is outside the current projection, such as a relation predicate. The models stay in the inventory. `hash` is null and `emittedRowPolicy` is false. |
+| Status | `reading` | Meaning |
+| --- | --- | --- |
+| `projected` | `row-policies-emitted` | At least one statement was emitted. `hash` is the SHA-256 of that SQL. `authorization.emittedRowPolicy` is true. `reason` is null. |
+| `no-row-policy` | `no-row-policy-declared` | The projection ran and the ZModel declared no row policy. `hash` is the SHA-256 of that empty projection and is never null. `emittedRowPolicy` is false. |
+| `not-projected` | `projection-incomplete` | A row predicate is outside the current projection, such as a relation predicate. The models stay in the inventory. `hash` is null, `reason` is required, and `emittedRowPolicy` is false. |
+
+A null `hash` is valid only together with `reading: "projection-incomplete"` and a `reason`. It does not mean the schema needs no policy. The empty case keeps a hash and uses `no-row-policy-declared`. A document that pairs a null hash with `no-row-policy`, or a hash with `not-projected`, is rejected.
 
 `authorization.emittedGrant` is always false.
 
