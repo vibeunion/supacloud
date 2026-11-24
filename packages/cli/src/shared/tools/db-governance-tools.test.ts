@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import type { DatabaseModule, QueryExecutor } from "@supacloud/db";
 import { executionMode } from "../execution-policy";
 import {
@@ -309,6 +309,24 @@ describe("db governance tools", () => {
         ]));
         expect(report.enforcement.next.join(" ")).not.toContain("ownership = \"enforce\"");
         expect(readFileSync(moduleFile, "utf8")).toBe(before);
+    });
+
+    test("operation-ownership refuses a module file outside the project root", async () => {
+        const outside = mkdtempSync(join(tmpdir(), "supacloud-ownership-outside-"));
+        const outsideFile = join(outside, "modules.ts");
+        writeFileSync(outsideFile, MODULES_SOURCE, "utf8");
+        const before = readFileSync(outsideFile, "utf8");
+
+        await expect(db({
+            action: "operation-ownership",
+            operation_action: "adopt",
+            root,
+            module_file: relative(root, outsideFile),
+            write: true,
+        })).rejects.toThrow(/必须位于项目目录内/);
+
+        // Nothing outside the project may be rewritten, even with --write.
+        expect(readFileSync(outsideFile, "utf8")).toBe(before);
     });
 
     test("operation-ownership suggest reports when enforcement is ready", async () => {

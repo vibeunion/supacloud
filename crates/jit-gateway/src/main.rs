@@ -95,6 +95,21 @@ async fn healthcheck() -> impl IntoResponse {
     )
 }
 
+/// Every route the control listener registers, in `METHOD /path` form.
+///
+/// The manifest is the artifact downstream drift checks compare against, so it
+/// has to be the same list the router uses; a manifest that omits a live route
+/// makes the check pass while the surface is larger than declared.
+const JIT_GATEWAY_ROUTES: &[&str] = &[
+    "GET /health",
+    "GET /healthcheck",
+    "GET /manifest",
+    "POST /v1/bindings",
+    "GET /v1/bindings",
+    "GET /v1/bindings/:credential_id",
+    "DELETE /v1/bindings/:credential_id",
+];
+
 async fn manifest() -> impl IntoResponse {
     let mut manifest = BoundaryManifest::new(
         "jit-gateway",
@@ -102,12 +117,11 @@ async fn manifest() -> impl IntoResponse {
         "axum-tower",
     );
     manifest.capabilities.push("database-gateway".to_owned());
-    manifest.routes.extend([
-        "GET /health".to_owned(),
-        "POST /v1/bindings".to_owned(),
-        "GET /v1/bindings".to_owned(),
-        "DELETE /v1/bindings/:credential_id".to_owned(),
-    ]);
+    manifest.routes.extend(
+        JIT_GATEWAY_ROUTES
+            .iter()
+            .map(|route| (*route).to_owned()),
+    );
     Json(manifest)
 }
 
@@ -192,4 +206,74 @@ async fn delete_binding(
             "credential_id": credential_id
         })),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::JIT_GATEWAY_ROUTES;
+
+    /// Axum spells path parameters as `{name}`; the manifest uses `:name`.
+    fn normalize(path: &str) -> String {
+        let mut out = String::with_capacity(path.len());
+        let mut chars = path.chars();
+        while let Some(ch) = chars.next() {
+            match ch {
+                '{' => {
+                    out.push(':');
+                    for inner in chars.by_ref() {
+                        if inner == '}' {
+                            break;
+                        }
+                        out.push(inner);
+                    }
+                }
+                other => out.push(other),
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn manifest_routes_cover_every_registered_route() {
+        // The manifest is what downstream drift checks compare against, so it
+        // must not silently omit a route the router actually registers.
+        let source = include_str!("main.rs");
+        let mut registered = Vec::new();
+        for chunk in source.split(".route(").skip(1) {
+            let Some(rest) = chunk.trim_start().strip_prefix('"') else {
+                continue;
+            };
+            if let Some(end) = rest.find('"') {
+                let path = &rest[..end];
+                // Only real route paths start with '/'; this also keeps the
+                // scan from matching string literals in this test itself.
+                if path.starts_with('/') {
+                    registered.push(normalize(path));
+                }
+            }
+        }
+        assert!(!registered.is_empty(), "no routes were detected in main.rs");
+        for path in registered {
+            assert!(
+                JIT_GATEWAY_ROUTES
+                    .iter()
+                    .any(|route| route.ends_with(&format!(" {path}"))),
+                "route {path} is registered but missing from JIT_GATEWAY_ROUTES"
+            );
+        }
+    }
+
+    #[test]
+    fn manifest_entries_are_method_and_path_pairs() {
+        for route in JIT_GATEWAY_ROUTES {
+            let (method, path) = route
+                .split_once(' ')
+                .unwrap_or_else(|| panic!("manifest route must be 'METHOD /path': {route}"));
+            assert!(
+                ["GET", "POST", "PUT", "PATCH", "DELETE"].contains(&method),
+                "unsupported method in manifest: {route}"
+            );
+            assert!(path.starts_with('/'), "path must be absolute: {route}");
+        }
+    }
 }
