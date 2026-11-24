@@ -19,6 +19,7 @@
 ## Vibecoding
 
 - [Vibecoding Golden Paths](./vibecoding-golden-paths.md) - Single entry point, conventional structure, generators, AI context and executable diagnostics ([中文](./vibecoding-golden-paths.zh-CN.md))
+- [Vibecoding Lite agent contract](./vibecoding-lite-agent-contract.md) - One database per worktree, JSON handoff, migration ledger, plan-only production MCP, and required RLS completion
 - [Vibecoding Default Policy](./vibecoding-default-policy.md) - Best-path defaults, explicit alternatives and AI decision boundaries ([中文](./vibecoding-default-policy.zh-CN.md))
 - [Engineering Goals](./engineering-goals.md) - Ownership contract and implementation priorities ([中文](./engineering-goals.zh-CN.md))
 - [Type Safety](./type-safety.md) - Compiler-enforced type and governance boundaries

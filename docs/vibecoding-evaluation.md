@@ -54,8 +54,12 @@ or certify deployment. Do not claim an improvement until comparable real agent
 runs have been recorded and reviewed.
 
 Daily verification uses `app verify-plan --target <module>` and a directly
-relevant single test file. Generated drift, consumer types, real PostgreSQL/RLS,
-authenticated behavior and delivery read-back remain release/adoption gates.
+relevant single test file. `verify-plan` lists the existing RLS completion
+commands and sets `skipped_is_done` to false. It does not execute them.
+Generated drift, consumer types, authenticated behavior and delivery read-back
+remain release/adoption gates. A backend change is not done when the RLS
+reconcile was skipped. See
+[Vibecoding Lite agent contract](vibecoding-lite-agent-contract.md).
 
 ## Customer Source Inventory
 

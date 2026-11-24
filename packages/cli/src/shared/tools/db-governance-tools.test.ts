@@ -199,6 +199,12 @@ describe("db governance tools", () => {
         expect(result.isError).toBe(false);
         const report = JSON.parse(result.content[0].text);
         expect(report).toMatchObject({ version: 1, scope: "database-check", ok: true });
+        expect(report.completion).toEqual({
+            done: false,
+            rls_checks: "skipped",
+            skipped_is_done: false,
+            reason: "The catalog reconcile, including rls-disabled, did not run",
+        });
         expect(report.checks).toEqual([
             expect.objectContaining({ name: "source-contract", skipped: true }),
             expect.objectContaining({ name: "module-lint", ok: true, modules: ["clean"] }),

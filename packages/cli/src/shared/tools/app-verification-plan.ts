@@ -79,6 +79,15 @@ export async function createVerificationPlan(root: string, graph: ApplicationGra
   const selected = [...tests].sort();
   if (!selected.length) manual.push("No colocated tests found; declare a focused test before changing this module");
   if (selected.length > 32) manual.push("More than 32 local tests; narrow module ownership before execution");
+  const completion = {
+    rls: "required" as const,
+    skipped_is_done: false as const,
+    executed: false,
+    commands: [
+      ["supacloud", "db", "module_check", "--module_file", "db/modules.ts"],
+      ["supacloud-lite", "complete", "--project-dir", ".", "--module-file", "supabase/db/modules.ts"],
+    ],
+  };
   return {
     version: 1,
     source: "declaration",
@@ -90,14 +99,16 @@ export async function createVerificationPlan(root: string, graph: ApplicationGra
       ...selected.map(file => ["bun", "test", `./${file}`]),
       ["git", "diff", "--check"],
     ] : [],
+    completion,
     manual,
     coverage,
     limitations: [
       "Colocation selects candidates; it does not prove behavioral coverage",
       "Dependent modules and database behavior require explicit integration acceptance",
       "No recursive scan, test execution or generated-file repair is performed",
+      "RLS completion commands are required and were not executed by this plan",
     ],
-    releaseOnly: ["generated artifact drift", "consumer types", "database/RLS and authenticated integration", "delivery read-back"],
+    releaseOnly: ["generated artifact drift", "consumer types", "authenticated integration", "delivery read-back"],
     executed: false,
   };
 }

@@ -96,6 +96,18 @@ Do not fabricate old migration files and immediately push them. Reconcile delibe
 10. Never insert/update/delete `supabase_migrations.schema_migrations` via `database query`. If the controlled baseline action cannot represent the verified state, stop and request operator assistance.
 11. Run `supabase push --dry_run`; it should report no unintended pending historical migration. Read back migration history and affected objects.
 
+## Lite agent schema path
+
+Use one project database for the worktree. Read `lite handoff` or
+`lite start --format json`. Keep the `service_role` key out of the model
+context. Put schema and seed changes in a new forward migration and apply them
+with `lite migrate`. Run `lite complete` before calling the backend done. That
+command runs the existing module reconcile, including `rls-disabled`. A missing
+manifest or a manifest with no owned tables is skipped, and skipped is not done.
+
+`lite db_pull` and `lite db_diff` are operator drift tools. They are not the
+agent path for applying schema. Do not point them at production.
+
 ## Lite drift
 
 For Lite, `lite db_pull` writes drafts outside migrations and does not silently

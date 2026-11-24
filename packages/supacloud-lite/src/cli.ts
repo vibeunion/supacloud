@@ -6,7 +6,7 @@ import packageJson from '../package.json' with { type: 'json' }
 import { generateTypes, inspectDb } from './runtime/index.js'
 import type { S3EndpointOptions } from './runtime/storage/s3.js'
 import { computeDbDiff, createTemporaryNativeEngine, pullSchema } from './runtime/node/db-diff.js'
-import { checkDatabaseModules, formatDatabaseModuleCheck } from './runtime/node/db-check.js'
+import { checkDatabaseModules, formatDatabaseModuleCheck, loadDatabaseModules } from './runtime/node/db-check.js'
 import { assertDataDirUnlocked } from './runtime/db/data-dir-lock.js'
 import { createNativeEngine } from './runtime/node/native/engine.js'
 import { inspectPostgresExtensions } from './runtime/node/native/extensions.js'
@@ -35,6 +35,13 @@ import { waitForShutdown } from './shutdown.js'
 import { createLocalAuthUser } from './auth-cli.js'
 import { buildVersionMatrix } from './compat-matrix.js'
 import { formatImportReport, runSupabaseImport } from './import-lab.js'
+import {
+  buildLiteAgentHandoff,
+  evaluateRlsCompletion,
+  liteProjectUrl,
+  serializeLiteAgentHandoff,
+  type RlsCompletion,
+} from './agent-contract.js'
 
 interface CliOptions extends ProjectRuntimeOptions {
   command: string
@@ -195,12 +202,26 @@ async function main(): Promise<void> {
     return
   }
 
+  if (options.command === 'handoff' || (options.command === 'keys' && options.json)) {
+    if (options.serviceRole) {
+      throw new Error(`${options.command} JSON is the agent handoff and cannot print the service_role key`)
+    }
+    await writeAgentHandoff(options, paths)
+    return
+  }
+
+  if (options.command === 'complete') {
+    if (options.serviceRole) throw new Error('complete cannot print the service_role key')
+    await runCompleteCommand(options)
+    return
+  }
+
   if (options.command === 'keys') {
     const secrets = await ensureProjectSecrets(paths)
     const keys = await mintProjectKeys(secrets.jwtSecret)
     const privilegedKey = options.serviceRole
       ? `\nservice_role key:\n${keys.serviceRoleKey}`
-      : '\nUse --service-role to print the privileged key.'
+      : '\nThe privileged key is operator-only. Do not pass it to an agent or model context.'
     await writeStandardOutput(`anon key:\n${keys.anonKey}\n${privilegedKey}\n`)
     return
   }
@@ -363,10 +384,27 @@ async function main(): Promise<void> {
   }
 
   if (options.command !== 'start') throw new Error(`unknown command: ${options.command}`)
+  if (options.json && options.serviceRole) throw new Error('start --json cannot print the service_role key')
 
-  const project = await startProjectServer({ ...options, log: (message) => console.log(`  ${message}`) })
+  const log = options.json
+    ? (message: string) => { process.stderr.write(`  ${message}\n`) }
+    : (message: string) => { console.log(`  ${message}`) }
+  const project = await startProjectServer({ ...options, log })
   const shutdown = waitForShutdown(() => project.close())
-  await writeStandardOutput(`
+  if (options.json) {
+    if (resolvedS3Endpoint.generatedSecret) {
+      await writeStandardError(
+        'Generated S3 secret access key (shown once, this process only, not part of the agent handoff):\n' +
+        `${resolvedS3Endpoint.generatedSecret}\n`,
+      )
+    }
+    await writeStandardOutput(serializeLiteAgentHandoff(buildLiteAgentHandoff({
+      url: project.url,
+      anonKey: project.backend.anonKey,
+      projectDir: paths.projectDir,
+      moduleFile: options.moduleFile,
+    })))
+  } else await writeStandardOutput(`
   SupaCloud Lite running
 
           API URL: ${project.url}
@@ -382,8 +420,9 @@ async function main(): Promise<void> {
           `${options.s3Endpoint.bucketScope?.length ? `buckets ${options.s3Endpoint.bucketScope.join(',')}` : 'all buckets'})`
         : 'disabled (pass --s3-endpoint to expose S3-compatible clients)'}
 
-  Run "supacloud-lite keys" for the anon key.
-  Run "supacloud-lite keys --service-role" only when privileged access is required.
+  Run "supacloud-lite handoff" or "supacloud-lite start --json" for the agent handoff.
+  That JSON contains only the project URL, the anon key, and the next commands.
+  The privileged key is operator-only. Do not pass it to an agent or model context.
 ${resolvedS3Endpoint.generatedSecret
     ? `
   Generated S3 secret access key (shown once, this process only):
@@ -394,6 +433,91 @@ ${resolvedS3Endpoint.generatedSecret
 
   await shutdown
   process.exitCode = 0
+}
+
+async function writeAgentHandoff(options: CliOptions, paths: ReturnType<typeof resolveProjectPaths>): Promise<void> {
+  const secrets = await ensureProjectSecrets(paths)
+  const { anonKey } = await mintProjectKeys(secrets.jwtSecret)
+  const handoff = buildLiteAgentHandoff({
+    url: liteProjectUrl({
+      apiUrl: options.apiUrl ?? process.env.SUPACLOUD_LITE_API_URL,
+      host: options.host ?? '127.0.0.1',
+      port: options.port ?? 54321,
+    }),
+    anonKey,
+    projectDir: paths.projectDir,
+    moduleFile: options.moduleFile,
+  })
+  await writeStandardOutput(serializeLiteAgentHandoff(handoff))
+}
+
+function checkExecutor(project: Awaited<ReturnType<typeof createProjectBackend>>) {
+  return {
+    query: async <T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]> =>
+      (await project.backend.db.query<T>(sql, params)).rows,
+  }
+}
+
+function openCheckBackend(options: CliOptions) {
+  return createProjectBackend({
+    ...options,
+    applyMigrations: false,
+    includeFunctions: false,
+    includeWebhooks: false,
+    includeIdentity: false,
+    graphql: { enabled: false },
+    startRuntimeServices: false,
+    log: quietLog,
+  })
+}
+
+async function writeCompletion(completion: RlsCompletion, json: boolean): Promise<void> {
+  if (!completion.done) process.exitCode = 1
+  if (json) {
+    await writeStandardOutput(`${JSON.stringify(completion)}\n`)
+    return
+  }
+  const status = completion.done ? 'done' : 'not done'
+  await writeStandardOutput(
+    `RLS completion: ${status} (${completion.rls_checks})\n${completion.reason ? `${completion.reason}\n` : ''}`,
+  )
+}
+
+async function runCompleteCommand(options: CliOptions): Promise<void> {
+  const paths = resolveProjectPaths(options)
+  const moduleFile = options.moduleFile ?? join(paths.projectDir, 'supabase', 'db', 'modules.ts')
+  let ownedTableCount = 0
+  try {
+    const modules = await loadDatabaseModules(moduleFile)
+    ownedTableCount = modules.reduce((count, module) => count + module.tables.length, 0)
+  } catch (error) {
+    await writeCompletion({
+      ...evaluateRlsCompletion({ executed: false, ok: false, ownedTableCount: 0, rlsDisabled: [] }),
+      reason: error instanceof Error ? error.message : 'RLS reconcile did not run',
+    }, options.json)
+    return
+  }
+
+  let project: Awaited<ReturnType<typeof openCheckBackend>> | undefined
+  try {
+    project = await openCheckBackend(options)
+    const result = await checkDatabaseModules({ moduleFile, executor: checkExecutor(project) })
+    const rlsDisabled = result.reports.flatMap((report) =>
+      report.reconcile.issues.filter((issue) => issue.code === 'rls-disabled').map((issue) => issue.object))
+    await writeCompletion(evaluateRlsCompletion({
+      executed: true,
+      ok: result.ok,
+      ownedTableCount,
+      rlsDisabled,
+    }), options.json)
+  } catch (error) {
+    await writeCompletion({
+      ...evaluateRlsCompletion({ executed: false, ok: false, ownedTableCount, rlsDisabled: [] }),
+      reason: error instanceof Error ? error.message : 'RLS reconcile did not run',
+    }, options.json)
+  } finally {
+    await project?.backend.close()
+  }
 }
 
 async function runDbCommand(options: CliOptions): Promise<void> {
@@ -493,22 +617,9 @@ async function runDbCommand(options: CliOptions): Promise<void> {
 
   if (subcommand === 'check') {
     const moduleFile = options.moduleFile ?? join(paths.projectDir, 'supabase', 'db', 'modules.ts')
-    const project = await createProjectBackend({
-      ...options,
-      applyMigrations: false,
-      includeFunctions: false,
-      includeWebhooks: false,
-      includeIdentity: false,
-      graphql: { enabled: false },
-      startRuntimeServices: false,
-      log: quietLog,
-    })
+    const project = await openCheckBackend(options)
     try {
-      const executor = {
-        query: async <T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]> =>
-          (await project.backend.db.query<T>(sql, params)).rows,
-      }
-      const result = await checkDatabaseModules({ moduleFile, executor })
+      const result = await checkDatabaseModules({ moduleFile, executor: checkExecutor(project) })
       await writeStandardOutput(formatDatabaseModuleCheck(result))
       if (!result.ok) throw new Error('db check found error-level issues')
     } finally {
@@ -795,10 +906,12 @@ Usage: supacloud-lite [command] [options]
 
 Commands:
   start                 start the single-project server
+  handoff               print the agent JSON handoff and exit
+  complete              run the existing RLS reconcile; skipped checks are not done
   migrate               apply pending supabase/migrations/*.sql
   status                list applied migrations
   keys                  print the anon key
-  keys --service-role   also print the privileged service_role key
+  keys --service-role   operator-only privileged key; never pass it to an agent
   auth create-user      create a local Auth user while the project server is stopped
   gen types             emit Supabase-shaped TypeScript database types
   db reset              reset initialized database/storage and re-run migrations
@@ -842,7 +955,7 @@ Options:
       --replication-tls-cert <p> PostgreSQL TLS certificate
       --replication-tls-key <p> PostgreSQL TLS private key
       --memory            use an in-memory PGlite database
-      --json              emit machine-readable doctor/migrate/status/auth output
+      --json              agent handoff for start/keys; JSON for doctor/migrate/status/auth/complete
       --from <dir>        import: Supabase project directory to read
       --report <file>     import: also write the JSON report to this path
       --email <email>     auth create-user: account email

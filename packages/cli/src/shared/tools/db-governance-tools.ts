@@ -21,6 +21,7 @@ import {
     type TableOperation,
 } from "@supacloud/db";
 import { databaseSources } from "@supacloud/db/source-contracts";
+import { databaseCheckCompletion } from "./agent-completion";
 import { runDbWorkflow, type DbWorkflowAction } from "./db-workflow";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
@@ -893,12 +894,10 @@ async function runCheck(
         checks.push({ name: "catalog", skipped: true, reason: "no --database_url, DATABASE_URL, --lite or --remote" });
     }
 
+    const report = { version: 1, scope: "database-check", root, ok, checks };
     return textResult(JSON.stringify({
-        version: 1,
-        scope: "database-check",
-        root,
-        ok,
-        checks,
+        ...report,
+        completion: databaseCheckCompletion(report),
     }, null, 2), !ok);
 }
 
