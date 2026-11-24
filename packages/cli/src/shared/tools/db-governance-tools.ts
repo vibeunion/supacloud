@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { lstat, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import * as ts from "@supacloud/db/typescript";
 import { Type } from "typebox";
 import {
@@ -397,8 +397,24 @@ async function selectedDatabaseModules(
     return {
         modules,
         selected,
-        modulePath: resolve(root, args.module_file ?? "db/modules.ts"),
+        modulePath: requireModulePathInsideRoot(root, args.module_file ?? "db/modules.ts"),
     };
+}
+
+/**
+ * Resolve a module file and refuse anything outside the project root.
+ *
+ * `adopt --write` rewrites this path atomically, so `--module-file ../other.ts`
+ * would let the reviewer-facing command modify a file the project does not own.
+ * The symlink case is rejected separately by the `lstat` check at the write site.
+ */
+function requireModulePathInsideRoot(root: string, moduleFile: string): string {
+    const modulePath = resolve(root, moduleFile);
+    const pathWithinRoot = relative(root, modulePath);
+    if (pathWithinRoot === "" || isAbsolute(pathWithinRoot) || pathWithinRoot.startsWith("..")) {
+        throw new Error(`数据库模块文件必须位于项目目录内: ${modulePath}`);
+    }
+    return modulePath;
 }
 
 function requireOwnershipAction(args: DbToolArguments): "suggest" | "adopt" {
