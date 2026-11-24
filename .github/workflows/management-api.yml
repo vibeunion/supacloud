@@ -1447,6 +1447,7 @@ jobs:
       - docker-and-scripts-checks
       - unit-test
       - postgres-18-compatibility
+      - postrust-graphql-rls
       - integration-test
       - shell-scripts-lint
       - caddy-edge-proxy-smoke
@@ -1470,6 +1471,7 @@ jobs:
           DOCKER_AND_SCRIPTS: ${{ needs.docker-and-scripts-checks.result }}
           UNIT_TESTS: ${{ needs.unit-test.result }}
           POSTGRES_18: ${{ needs.postgres-18-compatibility.result }}
+          POSTRUST_GRAPHQL_RLS: ${{ needs.postrust-graphql-rls.result }}
           INTEGRATION_TESTS: ${{ needs.integration-test.result }}
           SHELL_SCRIPTS_LINT: ${{ needs.shell-scripts-lint.result }}
           CADDY_EDGE_PROXY: ${{ needs.caddy-edge-proxy-smoke.result }}
@@ -1489,6 +1491,7 @@ jobs:
             "$DOCKER_AND_SCRIPTS" \
             "$UNIT_TESTS" \
             "$POSTGRES_18" \
+            "$POSTRUST_GRAPHQL_RLS" \
             "$INTEGRATION_TESTS" \
             "$SHELL_SCRIPTS_LINT" \
             "$CADDY_EDGE_PROXY" \
