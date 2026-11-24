@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.1](https://github.com/vibeunion/supacloud/compare/db-v0.26.0...db-v0.26.1) (2026-11-24)
+
+
+### Bug Fixes
+
+* **db:** stop default library ASTs from stalling noImplicitThis ([#2799](https://github.com/vibeunion/supacloud/issues/2799)) ([12bdda1](https://github.com/vibeunion/supacloud/commit/12bdda13f08404626a6a881051dee2fc9b3e969b))
+
 ## [0.26.0](https://github.com/vibeunion/supacloud/compare/db-v0.25.2...db-v0.26.0) (2026-11-23)
 
 
