@@ -1453,6 +1453,7 @@ jobs:
       - app-generation
       - workspace-tooling
       - generate-sbom
+      - postrust-graphql-rls
     runs-on: ubuntu-24.04
     timeout-minutes: 2
 
@@ -1476,6 +1477,7 @@ jobs:
           APP_GENERATION: ${{ needs.app-generation.result }}
           WORKSPACE_TOOLING: ${{ needs.workspace-tooling.result }}
           SBOM: ${{ needs.generate-sbom.result }}
+          POSTRUST_GRAPHQL_RLS: ${{ needs.postrust-graphql-rls.result }}
         run: |
           for result in \
             "$LINT_AND_TYPECHECK" \
@@ -1494,7 +1496,8 @@ jobs:
             "$CADDY_EDGE_PROXY" \
             "$APP_GENERATION" \
             "$WORKSPACE_TOOLING" \
-            "$SBOM"; do
+            "$SBOM" \
+            "$POSTRUST_GRAPHQL_RLS"; do
             if [[ "$result" != "success" ]]; then
               echo "Required CI job did not succeed: $result" >&2
               exit 1
@@ -1684,3 +1687,58 @@ jobs:
             packages/edge-runtime/dist/*
             packages/pgredis-runtime/dist/*
           retention-days: 7
+
+  postrust-graphql-rls:
+    name: Postrust GraphQL RLS
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install PostgreSQL 16
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-16
+          test -x /usr/lib/postgresql/16/bin/initdb
+
+      - name: Install pinned management API dependencies
+        run: bash scripts/prepare_management_api_dependencies.sh
+
+      # The download helper resolves the Docker Hub bearer token for the blob,
+      # and the installer checks the layer digest, that the member appears
+      # exactly once and is a regular file, and the binary digest. Both already
+      # live in scripts/lib/postgrest_upgrade.sh; this job must not restate them.
+      - name: Install the pinned Postrust v3.4.0 binary
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          source scripts/lib/release_assets.sh
+          # shellcheck disable=SC1091
+          source scripts/lib/postgrest_upgrade.sh
+          archive="$(mktemp)"
+          supacloud_download_postrust_artifact \
+            "https://registry-1.docker.io/v2/postrust/postrust/blobs/${SUPACLOUD_POSTRUST_LAYER_AMD64}" \
+            "$archive"
+          supacloud_install_pinned_postrust_layer \
+            "$archive" \
+            "$SUPACLOUD_POSTRUST_LAYER_MEMBER" \
+            "${SUPACLOUD_POSTRUST_LAYER_AMD64#sha256:}" \
+            "$SUPACLOUD_POSTRUST_BINARY_AMD64_SHA256" \
+            amd64 \
+            "$RUNNER_TEMP/postrust"
+          "$RUNNER_TEMP/postrust" --version || true
+
+      - name: Run the evaluation-route RLS fixture through the pinned binary
+        working-directory: packages/management-api
+        env:
+          SUPACLOUD_TEST_POSTRUST_GRAPHQL: "1"
+          POSTRUST_BIN: ${{ runner.temp }}/postrust
+          POSTGRES_BIN: /usr/lib/postgresql/16/bin
+        run: bun test tests/integration/postrust-graphql-rls.local.test.ts
