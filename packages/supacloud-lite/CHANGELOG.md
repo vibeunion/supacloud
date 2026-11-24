@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.44.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.43.2...supacloud-lite-v0.44.0) (2026-11-24)
+
+
+### Features
+
+* serve public /graphql/v1 with Postrust GraphQL ([ce7b167](https://github.com/vibeunion/supacloud/commit/ce7b167a57b4d22971865e8b07e7e55187be1033))
+
 ## [0.43.2](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.43.1...supacloud-lite-v0.43.2) (2026-11-24)
 
 

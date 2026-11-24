@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/lite",
-  "version": "0.43.2",
+  "version": "0.44.0",
   "description": "Bun-native, single-project Supabase-compatible backend powered by PGlite or native PostgreSQL",
   "type": "module",
   "license": "Apache-2.0",
@@ -64,7 +64,7 @@
     "@electric-sql/pglite-postgis": "0.2.16",
     "@supacloud/db": "file:../db",
     "exact-mirror": "1.2.7",
-        "graphql": "16.14.2",
+    "graphql": "16.14.2",
     "fast-xml-parser": "5.12.1",
     "tar": "^7.5.22",
     "typebox": "1.4.3"

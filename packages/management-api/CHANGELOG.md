@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.140.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.139.1...management-api-v0.140.0) (2026-11-24)
+
+
+### Features
+
+* serve public /graphql/v1 with Postrust GraphQL ([ce7b167](https://github.com/vibeunion/supacloud/commit/ce7b167a57b4d22971865e8b07e7e55187be1033))
+
 ## [0.139.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.139.0...management-api-v0.139.1) (2026-11-24)
 
 
