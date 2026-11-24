@@ -14,6 +14,26 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.127.1](https://github.com/vibeunion/supacloud/compare/cli-v0.127.0...cli-v0.127.1) (2026-11-23)
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#2768](https://github.com/vibeunion/supacloud/issues/2768)) ([d8aaee9](https://github.com/vibeunion/supacloud/commit/d8aaee9ed38d5792be2d0e8fcd1b9d59703f7bc7))
+
+## [0.127.0](https://github.com/vibeunion/supacloud/compare/cli-v0.126.2...cli-v0.127.0) (2026-11-23)
+
+
+### Features
+
+* **db:** add compile-time operation ownership governance ([#2763](https://github.com/vibeunion/supacloud/issues/2763)) ([d5f5b3e](https://github.com/vibeunion/supacloud/commit/d5f5b3eb7fc1ae5484a9f78f3ae08d3dd9ede04f))
+* **db:** add operation ownership adoption workflow ([#2765](https://github.com/vibeunion/supacloud/issues/2765)) ([c3df7ad](https://github.com/vibeunion/supacloud/commit/c3df7ada5cd16672370ec45b968959eb78296ba4))
+
+
+### Bug Fixes
+
+* **cli:** harden operation ownership source adoption ([#2767](https://github.com/vibeunion/supacloud/issues/2767)) ([3251fae](https://github.com/vibeunion/supacloud/commit/3251faead7691be84445355986316a5f76420056))
+
 ## [0.126.2](https://github.com/vibeunion/supacloud/compare/cli-v0.126.1...cli-v0.126.2) (2026-11-21)
 
 

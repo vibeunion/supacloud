@@ -154,6 +154,8 @@ test.skipIf(process.env.SUPACLOUD_MANAGEMENT_TEST_NATIVE !== "1")(
           postgrest_desired text, postgrest_actual text, postgrest_health text,
           postgrest_port integer, postgrest_last_error text,
           postgrest_updated_at timestamptz, postgrest_last_reconciled_at timestamptz,
+          dataplane_desired text, dataplane_actual text, dataplane_health text,
+          dataplane_port integer, dataplane_last_error text, dataplane_updated_at timestamptz,
           updated_at timestamptz
         );
         INSERT INTO projects(ref, status, postgrest_desired, updated_at, postgrest_last_error) VALUES

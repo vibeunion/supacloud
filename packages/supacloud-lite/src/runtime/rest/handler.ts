@@ -9,6 +9,7 @@ import { ApiError, type RequestContext } from '../types.js'
 import { SUPACLOUD_LITE_VERSION } from '../../version.js'
 import { QueryBuilder, pgArrayLiteral, renderColumnExpr, sanitizeCast } from './build.js'
 import { errorToResponse, jsonResponse } from './errors.js'
+import { buildRestOpenApiDocument } from './openapi.js'
 import { ParseError, parseQuery, type ParsedQuery } from './parse.js'
 
 /** Internal throw used to roll back a successful mutation while preserving its result. */
@@ -110,6 +111,15 @@ export class RestHandler {
   private exposedSchemas: string[]
   /** Max rows a read returns (PostgREST db-max-rows). Undefined = unlimited. */
   private maxRows?: number
+  /**
+   * Root documents keyed by `schema|role`.
+   *
+   * Introspection is three catalog queries plus a privilege join; serving that
+   * on every introspection request would put avoidable load on a tenant
+   * database. There is no TTL, matching PostgREST: an explicit schema reload is
+   * what invalidates it, so ACL changes need the same signal as DDL changes.
+   */
+  private openApiCache = new Map<string, Record<string, unknown>>()
 
   constructor(
     private db: Database,
@@ -119,11 +129,15 @@ export class RestHandler {
     this.maxRows = opts?.maxRows
   }
 
+  /** Drop cached root documents; call it when the schema or its privileges change. */
+  invalidateOpenApiCache(): void {
+    this.openApiCache.clear()
+  }
+
   /** Entry point: resolve the profile schema, enforce schema exposure, route to table/rpc. */
   async handle(req: Request, ctx: RequestContext, url: URL): Promise<Response> {
     try {
       const rest = url.pathname.replace(/^\/rest\/v1\/?/, '')
-      if (rest === '') return jsonResponse(200, { info: { title: 'supacloud-lite', version: SUPACLOUD_LITE_VERSION } })
 
       const method = req.method.toUpperCase()
       const schema =
@@ -142,6 +156,23 @@ export class RestHandler {
           details: null,
           hint: null,
         })
+      }
+
+      // The root document is per-schema in PostgREST: it describes the schema
+      // the request negotiated, not every exposed schema at once.
+      if (rest === '') {
+        const cacheKey = `${schema}|${ctx.role}`
+        const cached = this.openApiCache.get(cacheKey)
+        if (cached) return jsonResponse(200, cached)
+        const document = await buildRestOpenApiDocument(this.db, {
+          schema,
+          role: ctx.role,
+          exposedSchemas: this.exposedSchemas,
+          version: SUPACLOUD_LITE_VERSION,
+          serverUrl: url.origin,
+        })
+        this.openApiCache.set(cacheKey, document)
+        return jsonResponse(200, document)
       }
 
       if (rest.startsWith('rpc/')) {
@@ -436,13 +467,15 @@ export class RestHandler {
     const q = parseQuery(searchParams)
     if (method === 'GET' || method === 'HEAD') applyRequestRange(q, req)
 
-    // A VOLATILE function may have run DDL (create/alter/drop), so drop the
-    // schema/function caches afterwards - otherwise REST keeps serving a stale
-    // shape until the next migration.
+    // A VOLATILE function may have run DDL (create/alter/drop, including grants),
+    // so drop the schema/function caches *and* the cached root document
+    // afterwards - otherwise REST keeps serving a stale shape, and the document
+    // keeps advertising objects whose privileges just changed.
     if (fn.volatility === 'v') {
-      return await this.runRpc(ctx, fn, call, q, prefer, wantsObject, wantsCsv, schema, method).finally(() =>
+      return await this.runRpc(ctx, fn, call, q, prefer, wantsObject, wantsCsv, schema, method).finally(() => {
         this.db.invalidateSchemaCache()
-      )
+        this.invalidateOpenApiCache()
+      })
     }
     return await this.runRpc(ctx, fn, call, q, prefer, wantsObject, wantsCsv, schema, method)
   }

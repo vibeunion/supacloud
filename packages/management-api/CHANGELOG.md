@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.139.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.139.0...management-api-v0.139.1) (2026-11-24)
+
+
+### Bug Fixes
+
+* **management-api:** 重试一次瞬时激活竞态，避免 Function 列表整体 500 ([#2771](https://github.com/vibeunion/supacloud/issues/2771)) ([b699e37](https://github.com/vibeunion/supacloud/commit/b699e37cd9dec2a483a6f796f60c25e1094a9f5d))
+
+## [0.139.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.138.5...management-api-v0.139.0) (2026-11-23)
+
+
+### Features
+
+* **dataplane:** unify the REST data plane and retire per-project PostgREST ([#2766](https://github.com/vibeunion/supacloud/issues/2766)) ([e4217b6](https://github.com/vibeunion/supacloud/commit/e4217b6907b44d6edaee58f6fa1ec8daf3f4c5c0))
+* **db:** add compile-time operation ownership governance ([#2763](https://github.com/vibeunion/supacloud/issues/2763)) ([d5f5b3e](https://github.com/vibeunion/supacloud/commit/d5f5b3eb7fc1ae5484a9f78f3ae08d3dd9ede04f))
+
 ## [0.138.5](https://github.com/vibeunion/supacloud/compare/management-api-v0.138.4...management-api-v0.138.5) (2026-11-21)
 
 
