@@ -16,7 +16,7 @@ Existing Supabase interfaces remain authoritative:
 - GoTrue remains the Auth execution path.
 - Storage keeps the Supabase object and policy model.
 - Realtime remains the subscription transport.
-- `pg_graphql` remains the GraphQL execution engine.
+- Public `/graphql/v1` is Postrust Hasura. Lite reads use that shape. `/rest/v1/rpc/graphql` is 404.
 
 SupaCloud adds governance, receipts, isolation, and operator tooling around
 those interfaces. It does not introduce a second GraphQL runtime.
@@ -44,12 +44,10 @@ And event history can be filtered and paged without leaking task-attempt interna
 ### P0: GraphQL
 
 ```gherkin
-Given a pg_graphql query or mutation
-When governance is disabled
-Then the request is forwarded unchanged for Supabase compatibility
-When governance is enabled
-Then persisted identity, operation allowlist, depth, field, complexity, and page-size limits are enforced
-And subscription requests identify Supabase Realtime as the transport
+Given a document posted to /graphql/v1
+When the project gateway accepts it
+Then the request is rewritten to loopback Postrust /v1/graphql
+And subscription requests stay off the project host
 ```
 
 ### P0: preview
@@ -76,8 +74,8 @@ And capacity policies and history are auditable without changing Supabase tenant
 
 ## Compatibility Rules
 
-1. New GraphQL governance defaults to disabled.
-2. GraphQL mutations are sent to `pg_graphql`; no alternate executor is introduced.
+1. Public `/graphql/v1` is Postrust Hasura. `SUPACLOUD_POSTRUST_GRAPHQL` stays a default-off management listener.
+2. Hosted documents go to that process. Lite reads are SQL under PostgreSQL GRANT and RLS. There is no second hosted GraphQL executor.
 3. GraphQL subscriptions are not emulated over HTTP; clients use Supabase Realtime.
 4. Migration import writes files only after an explicit output directory and write request.
 5. Hasura permissions become reviewable RLS SQL; they are never silently applied.

@@ -12,7 +12,7 @@ import { compileProject, pullGraphqlSchema } from '@supacloud/compiler'
 
 const nativeGraphql = process.env.SUPACLOUD_LITE_TEST_GRAPHQL === '1' ? test : test.skip
 
-nativeGraphql('real pg_graphql: role-scoped schema, nested RLS, mutation denial and request isolation', async () => {
+nativeGraphql('PostgreSQL 18 Hasura reads: role-scoped schema, nested RLS, mutation denial and request isolation', async () => {
   const name = `supacloud-lite-graphql-${crypto.randomUUID()}`
   const password = crypto.randomUUID()
   const work = await mkdtemp(join(tmpdir(), 'lite-graphql-generated-'))

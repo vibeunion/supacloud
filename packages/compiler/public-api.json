@@ -311,7 +311,7 @@
     {
       "name": "DATA_CATALOG_GAPS",
       "kind": "value",
-      "signature": "export declare const DATA_CATALOG_GAPS: [\n    \"rest-types-not-generated-from-catalog\",\n    \"graphql-sdl-not-generated-from-catalog\",\n    \"grants-not-emitted-from-catalog\",\n    \"field-level-deny-not-projected\",\n    \"relation-predicates-not-projected\",\n    \"graphql-db-pre-request-not-applied\",\n    \"lite-graphql-remains-pg-graphql\",\n    \"generated-typescript-model-not-proven-equal-to-zmodel\"\n];"
+      "signature": "export declare const DATA_CATALOG_GAPS: [\n    \"rest-types-not-generated-from-catalog\",\n    \"graphql-sdl-not-generated-from-catalog\",\n    \"grants-not-emitted-from-catalog\",\n    \"field-level-deny-not-projected\",\n    \"relation-predicates-not-projected\",\n    \"graphql-db-pre-request-not-applied\",\n    \"lite-graphql-read-limits\",\n    \"generated-typescript-model-not-proven-equal-to-zmodel\"\n];"
     },
     {
       "name": "DATA_CATALOG_VERSION",

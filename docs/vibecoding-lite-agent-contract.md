@@ -123,11 +123,17 @@ production. See [Optional AI Operations MCP](mcp-ai-operations.md).
 
 ## GraphQL and Squawk
 
-GraphQL stays the existing `pg_graphql` extension and `graphql.resolve`. Lite
-does not emulate that extension, and this contract does not add another
-GraphQL layer. PGlite and the stock native download do not bundle
-`pg_graphql`; native mode uses an operator-managed PostgreSQL that already
-has it. `doctor --json` reports supported, missing, or not yet verified.
+Lite `/graphql/v1` executes Hasura-shaped reads as SQL in the caller's
+transaction: `query_root`, `where`, `order_by`, `limit`, and foreign-key
+fields named the way pinned Postrust v3.4.0 names them. PostgreSQL `GRANT`
+and RLS apply. Lite does not call `pg_graphql` or `graphql.resolve` for this
+route, and it does not embed Postrust.
+
+Mutations, aggregates, subscriptions, relationship filters, and Relay
+`*Collection` documents are rejected. `db-pre-request` does not run. Those
+limits are listed on `LITE_GRAPHQL_CONTRACT`. A hosted read document of the
+supported shape is a Lite document. `doctor --json` reports the route as
+supported once a database is open, and unverified before that.
 
 Squawk is not added. The migration check remains the existing
 `@supacloud/db` lint plus the single migration ledger. Squawk would be
@@ -143,7 +149,7 @@ This contract does not flatten those differences.
 | Auth process | In-process Auth in the Lite Bun process. Email/password, sessions, and bcrypt are covered by Lite tests. OTP, magic link, anonymous users, OAuth, and MFA stay experimental. | Stock GoTrue v2.198.0 as its own process, including its embedded auth migrations and `supabase_auth_admin`. |
 | API | Lite's PostgREST-compatible handler in the same process. | PostgREST on the project database. This contract does not retarget that process. |
 | Realtime | Lite realtime. RLS DELETE events in V1 go to `service_role` subscribers only. | Management API proxies `wss://<project-api-host>/realtime/v1/websocket` to the existing Elixir Realtime. |
-| Extensions | PGlite bundles its Lite set (`pgvector`, experimental PostGIS, `pg_textsearch`, `pgmq`). `pg_graphql`, `pg_cron`, and other native extensions need an operator PostgreSQL. | The platform image set, including test and check extensions such as `pgtap` and `plpgsql_check` where that image installs them. |
+| Extensions | PGlite bundles its Lite set (`pgvector`, experimental PostGIS, `pg_textsearch`, `pgmq`). Lite GraphQL reads do not need `pg_graphql`. `pg_cron` and other native extensions need an operator PostgreSQL. | The platform image set, including test and check extensions such as `pgtap` and `plpgsql_check` where that image installs them. Postrust v3.4.0 serves hosted `/graphql/v1`. |
 | Control plane | No Management API, no project provision API, no Pigsty HBA edits. | Management API, one database per project, plan-only production MCP. |
 | Privileged key | Operator-only local print. Absent from the agent handoff. | Stored for the project. Not forwarded into model context by the handoff. |
 

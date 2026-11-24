@@ -12,7 +12,7 @@ either client consumes a GraphQL schema generated from ZenStack. Hosted
 | --- | --- | --- |
 | Schema the model edits | ZenStack ZModel, through `@supacloud/db-zenstack` | A second policy engine, ledger, or connection router |
 | REST execution | `postgrest`, `postrust`, or `lite` | The schema owner |
-| Public GraphQL | Postrust Hasura at `/graphql/v1` | A generated SDL file, and not the Lite `pg_graphql` route |
+| Public GraphQL | Postrust Hasura at `/graphql/v1` | A generated SDL file. Lite reads use the same dialect and record `lite-graphql-read-limits`. |
 | Enforcement | PostgreSQL `GRANT` and RLS for `anon`, `authenticated`, and `service_role` | A rename of those roles, or of `supabase_auth_admin` / `supabase_admin` |
 | Identity | Verified GoTrue JWT, then the token role inside the transaction | A second auth store |
 | Isolation | One database per project | A schema-per-tenant router |
@@ -112,7 +112,7 @@ every document so a missing key cannot be read as completed work.
 | `field-level-deny-not-projected` | Field-level `@deny` is not column privilege SQL. |
 | `relation-predicates-not-projected` | Relation predicates are not guessed into subqueries. The projection fails closed and the catalog records `not-projected`. |
 | `graphql-db-pre-request-not-applied` | GraphQL does not run `db-pre-request`. Singular `request.jwt.claim.*` settings stay unset. `auth.uid()` uses its `request.jwt.claims` fallback. |
-| `lite-graphql-remains-pg-graphql` | Lite `/graphql/v1` still requires `pg_graphql`. It is not the hosted Postrust Hasura dialect. |
+| `lite-graphql-read-limits` | Lite `/graphql/v1` serves Hasura reads. Mutations, aggregates, subscriptions, relationship filters, and Relay documents stay unimplemented. `db-pre-request` does not run. |
 | `generated-typescript-model-not-proven-equal-to-zmodel` | `modelSchema` remains a separate generated TypeScript module. This contract does not prove it matches the ZModel. |
 
 Also unchanged, and not claimed here:

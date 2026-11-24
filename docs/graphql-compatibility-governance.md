@@ -2,8 +2,9 @@
 
 Hosted `/graphql/v1` is Postrust GraphQL in the Hasura dialect. The governance
 layer validates application documents and exported role snapshots; it does not
-replace Postrust, PostgreSQL grants, or RLS. Lite still uses real `pg_graphql`
-when that route is enabled, and a Lite snapshot is not a hosted snapshot.
+replace Postrust, PostgreSQL grants, or RLS. Lite `/graphql/v1` executes the
+same Hasura read shape and rejects the operations listed on
+`LITE_GRAPHQL_CONTRACT`. A Relay snapshot is not a hosted snapshot.
 
 ## Compatibility Check
 

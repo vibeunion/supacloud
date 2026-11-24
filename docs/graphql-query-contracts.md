@@ -20,8 +20,9 @@ There is no Code First decorator/resolver mode, handwritten server SDL mode, or
 ZModel-to-GraphQL generator. The ZenStack data catalog binds REST and this
 GraphQL snapshot to one ZModel and records that both still share PostgreSQL
 `GRANT`, RLS, and the GoTrue JWT. It does not emit GraphQL SDL. The public
-route is `/graphql/v1` in the Postrust Hasura dialect. Lite, when GraphQL is
-enabled, still uses `pg_graphql` and is not this contract. See
+route is `/graphql/v1` in the Postrust Hasura dialect. Lite `/graphql/v1`
+executes that read shape under PostgreSQL GRANT and RLS, and rejects mutations,
+aggregates, subscriptions, relationship filters, and Relay documents. See
 [ZenStack data catalog](zenstack-data-catalog.md) and
 [Postrust GraphQL](postrust-graphql-evaluation.md). `@Query` in the application
 framework does not define a GraphQL resolver. SDL and introspection JSON are two snapshot formats, not two
@@ -184,9 +185,9 @@ query ReviewList($limit: Int = 20) {
 }
 ```
 
-The names must exist in the exported schema. Hosted snapshots use Hasura field
-and argument names. A `pg_graphql` Relay document (`reviewCollection`, `edges`,
-`node`) is the Lite shape and does not match this hosted route. The starter
+The names must exist in the exported schema. Hosted and Lite snapshots use
+Hasura field and argument names. A `pg_graphql` Relay document
+(`reviewCollection`, `edges`, `node`) does not match this route. The starter
 schema is a synthetic example and does not provision these tables or serve
 GraphQL from the memory demo.
 
@@ -237,7 +238,8 @@ Reviewing role grants, enforcing RLS, applying migrations, and testing
 authenticated access remain explicit deployment gates. Hosted `/graphql/v1`
 does not run `db-pre-request`; policies should use `auth.uid()` or
 `request.jwt.claims`, not the singular `request.jwt.claim.sub` setting. Lite
-still requires real `pg_graphql` when its GraphQL route is enabled. Keep production
+`/graphql/v1` serves the same Hasura reads and rejects mutations, aggregates,
+subscriptions, relationship filters, and Relay documents. Keep production
 introspection off when not needed. Use a representative role snapshot and refresh
 it after schema or grant changes; compilation cannot detect an unrefreshed remote
 schema or prove row-level policy correctness.

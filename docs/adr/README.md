@@ -8,3 +8,4 @@ ADR 记录已选择的方向、责任边界与取舍；状态为 Approved 不代
 | [ADR-2026-10-02-ASYNC：异步编程模型、流边界与治理职责](2026-10-02-async-stream-governance.md) | Approved | 分阶段落实；本次仅固化规范，保留已有 SDK 与响应式入口 |
 | [ADR-2026-11-23-RUST：Rust 平台能力引入与 PostgREST 边界](2026-11-23-rust-platform-adoption.md) | Approved | 第一阶段已实施；第 4 节已由 ADR-2026-11-24-DATA-PLANE 部分取代 |
 | [ADR-2026-11-24-DATA-PLANE：统一 Data API，退役每项目 PostgREST 进程](2026-11-24-postgrest-dataplane-unification.md) | Approved | 第一阶段已实施（数据面进程 + 契约测试）；控制面切换与拆除未开始 |
+| [Public GraphQL moves to Postrust Hasura](2026-11-24-postrust-graphql-public-cutover.md) | Accepted | Hosted `/graphql/v1` and Lite reads use the Hasura dialect. `/rest/v1/rpc/graphql` is 404. Not a production deploy. |

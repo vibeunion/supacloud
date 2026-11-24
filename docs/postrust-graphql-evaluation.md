@@ -26,7 +26,7 @@ These client paths stay closed on the project host: `/internal/postrust/graphql`
 
 Hosted documents are Hasura-shaped. A role-scoped export from `/graphql/v1` is Postrust introspection, not a `pg_graphql` Relay connection schema. The compiler client and `graphql-schema` still post to `/graphql/v1`. They do not call `/v1/graphql` or `/internal/postrust/graphql`.
 
-`PUBLIC_GRAPHQL_CONTRACT` records `dialect: "postrust-hasura"`, `rewritePath: "/v1/graphql"`, and null profile headers. The catalog does not accept another dialect, path, or owner. Relay `*Collection` / `edges` / `node` documents are the `pg_graphql` shape. They are not the hosted contract. Lite `/graphql/v1`, when enabled, still requires the real `pg_graphql` extension and is not this dialect.
+`PUBLIC_GRAPHQL_CONTRACT` records `dialect: "postrust-hasura"`, `rewritePath: "/v1/graphql"`, and null profile headers. The catalog does not accept another dialect, path, or owner. Relay `*Collection` / `edges` / `node` documents are the `pg_graphql` shape. They are not the hosted contract. Lite `/graphql/v1` executes that same read shape as SQL under the caller role. It does not embed Postrust. Mutations, aggregates, subscriptions, relationship filters, and Relay documents are rejected. The catalog gap `lite-graphql-read-limits` records those limits. [ADR](adr/2026-11-24-postrust-graphql-public-cutover.md).
 
 The feature matrix reports both shapes from the snapshot it is given: Relay connections, and Hasura `where` / `order_by` arguments plus a `query_root` query type. It does not execute either engine.
 
@@ -36,11 +36,14 @@ The feature matrix reports both shapes from the snapshot it is given: Relay conn
 
 `PGRST_DB_PRE_REQUEST` is REST-only. GraphQL does not call it, so `public.set_request_context` does not write `request.jwt.claim.sub`. `GraphQLContext` still sets `request.jwt.claims` and the database role. `auth.uid()` in this repository reads the singular setting and falls back to `request.jwt.claims ->> sub`.
 
-`.github/workflows/management-api.yml` job `postrust-graphql-rls` installs PostgreSQL 16, downloads the pinned v3.4.0 layer, checks the layer digest and the binary SHA256 `f174c84a1b3ac8a24c13a4ef7896adfc029ece8c1b206ee715e3864f5f169b7a`, and runs:
+`.github/workflows/management-api.yml` job `postrust-graphql-rls` installs PostgreSQL 16, downloads the pinned v3.4.0 layer through `supacloud_install_pinned_postrust_layer`, and runs the hosted RLS fixture plus `packages/supacloud-lite/test/graphql-postrust-compare.local.test.ts`. That comparison executes the same read documents on Lite and on the pinned binary.
 
 ```sh
 SUPACLOUD_TEST_POSTRUST_GRAPHQL=1 POSTRUST_BIN=<pinned binary> \
   bun test tests/integration/postrust-graphql-rls.local.test.ts
+# from packages/supacloud-lite, same binary:
+SUPACLOUD_TEST_POSTRUST_GRAPHQL=1 POSTRUST_BIN=<pinned binary> \
+  bun test test/graphql-postrust-compare.local.test.ts
 ```
 
 The workflow runs that from `packages/management-api`.

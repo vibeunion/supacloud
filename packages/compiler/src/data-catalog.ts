@@ -11,7 +11,9 @@ import { Errors, Value } from "typebox/value";
  * Public GraphQL is the Postrust Hasura dialect at `/graphql/v1`, rewritten to
  * `/v1/graphql` on the tenant REST port. This module records that binding and
  * the projection status of row policies. It does not emit REST types, GraphQL
- * SDL, or GRANT statements. Lite GraphQL remains `pg_graphql`.
+ * SDL, or GRANT statements. Lite `/graphql/v1` executes the same Hasura read
+ * shape under PostgreSQL GRANT and RLS. Its remaining limits are the
+ * `lite-graphql-read-limits` gap.
  */
 
 export const DATA_CATALOG_VERSION = 1 as const;
@@ -40,7 +42,7 @@ export const DATA_CATALOG_GAPS: [
   "field-level-deny-not-projected",
   "relation-predicates-not-projected",
   "graphql-db-pre-request-not-applied",
-  "lite-graphql-remains-pg-graphql",
+  "lite-graphql-read-limits",
   "generated-typescript-model-not-proven-equal-to-zmodel",
 ] = [
   "rest-types-not-generated-from-catalog",
@@ -49,7 +51,7 @@ export const DATA_CATALOG_GAPS: [
   "field-level-deny-not-projected",
   "relation-predicates-not-projected",
   "graphql-db-pre-request-not-applied",
-  "lite-graphql-remains-pg-graphql",
+  "lite-graphql-read-limits",
   "generated-typescript-model-not-proven-equal-to-zmodel",
 ];
 
@@ -185,7 +187,7 @@ export const dataCatalogDocumentSchema = Type.Object({
     Type.Literal("field-level-deny-not-projected"),
     Type.Literal("relation-predicates-not-projected"),
     Type.Literal("graphql-db-pre-request-not-applied"),
-    Type.Literal("lite-graphql-remains-pg-graphql"),
+    Type.Literal("lite-graphql-read-limits"),
     Type.Literal("generated-typescript-model-not-proven-equal-to-zmodel"),
   ]),
 }, closed);
