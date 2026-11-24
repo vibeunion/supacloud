@@ -129,3 +129,11 @@ PostgreSQL 19 不在本次范围内：Pigsty 软件源没有任何 `postgresql-1
 也没有 PG19 制品，且 `pg_durable` 是 `shared_preload_libraries` 扩展，无法绕过。
 `PG_VERSION` 保持 18。本节只记录版本与文档同步，未在任何主机执行升级，也不构成
 第二至第四道验收门的结果。
+
+## 2026-11-24 GoTrue adoption review
+
+The GoTrue row above stays at v2.198.0. On 2026-11-24 that tag was still the newest stable official `supabase/auth` release. `v2.199.0` was not tagged. The only newer artifact was pre-release `v2.199.0-rc.5` (git tag `rc2.199.0-rc.5`), whose [release-please pull request](https://github.com/supabase/auth/pull/2938) was still open. This repository does not pin that candidate.
+
+v2.198.0 already contains the startup migrations `20260911120000` (`one_time_tokens.link_token_hash`) and `20261030120000` (`saml_providers.dedicated_scope`). `GOTRUE_EXPERIMENTAL_ENABLE_OTT_AS_SOURCE_OF_TRUTH` defaults to false, and SupaCloud does not set it, so phone OTP and the Send SMS Hook stay on the existing path. The Chinese GoTrue cell above compresses that OTP work into an automatic source-of-truth move; the [English adoption review](./gotrue-v2.198-adoption.md) is the precise contract.
+
+No host was upgraded, no image was retagged, and npm was not published. A future stable `v2.199.0` would add `custom_oauth_providers.client_auth_method` on first start. Do not start `v2.199.0-rc.5` to obtain that column early.
