@@ -750,6 +750,7 @@ async function runContext(args: AppToolArguments): Promise<ToolResult> {
                 ["supacloud", "app", "compile"],
                 ...verification.commands,
             ],
+            completion: verification.completion,
             release: {
                 first: ["supacloud", "app", "check", "--format", "json"],
                 rule: "Check committed artifacts before any regeneration; never repair drift to make this gate pass",
@@ -764,6 +765,7 @@ async function runContext(args: AppToolArguments): Promise<ToolResult> {
             ...verification.manual.map(item => `  manual: ${item}`),
             "  fixes: preview first; business policy requires explicit input",
             "  release: app check before regeneration; local tests do not prove deployment",
+            `  completion: not done until ${verification.completion.commands.map(command => command.join(" ")).join("; ")}`,
         ].join("\n"));
     }
     const semantic = await createProjectSemanticSnapshot(result.graph, root, outDir);

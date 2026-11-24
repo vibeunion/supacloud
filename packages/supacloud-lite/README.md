@@ -192,7 +192,9 @@ supacloud-lite start \
 ### CLI
 
 ```text
-supacloud-lite start
+supacloud-lite start [--json]
+supacloud-lite handoff
+supacloud-lite complete [--json] [--module-file supabase/db/modules.ts]
 supacloud-lite migrate
 supacloud-lite status
 supacloud-lite keys [--service-role]
@@ -214,7 +216,7 @@ supacloud-lite version
 
 `import` 把本地 Supabase 项目的 config、migrations、seed / `import/data.sql`、Auth 用户、Storage 对象和 Functions 导入 Lite，并打印验收清单。无法在本机核对的行保持未勾选并写明原因。这不是部署。详见 `docs/supabase-import-lab.md`。
 
-首次初始化或 state 目录不存在/为空时，先运行 `supacloud-lite migrate`。`db reset` 只接受已经初始化且保留有效 `secrets.json` 标记的 state；它不会为 reset 创建或覆盖项目 secrets。
+首次初始化或 state 目录不存在/为空时，先运行 `supacloud-lite migrate`。`db reset` 只接受已经初始化且保留有效 `secrets.json` 标记的 state；它不会为 reset 创建或覆盖项目 secrets。`migrate`、`complete`、`db check`、`db reset`、`auth create-user` 会自行打开项目数据库并持有数据目录锁，因此在 `start` 运行期间会以 `database data directory is already in use` 失败：这是单进程单数据库的既有约束，不是缺陷。需要执行这些命令时先停止 Lite 进程。
 
 #### 创建本地 Auth 账号
 
@@ -641,13 +643,23 @@ chmod +x ./supacloud-lite-linux-x64
 
 The single binary still reads the project's `supabase/` directory and writes `.supacloud-lite/` persistent state outside the project; it does not include a web console or Supabase Studio. Linux x64/arm64, macOS x64/arm64, and Windows x64 use separate artifacts and cannot be mixed across operating systems or CPU architectures.
 
+Agent handoff after start. The JSON contains only the project URL, the anon key, and the next commands:
+
+```bash
+bunx supacloud-lite start --json
+bunx supacloud-lite handoff
+bunx supacloud-lite complete --module-file supabase/db/modules.ts
+```
+
+`complete` runs the existing RLS reconcile. Skipping it is not done. The handoff never includes the `service_role` key. `keys --json` and `start --json` reject `--service-role`.
+
 Get the anon key:
 
 ```bash
 bunx supacloud-lite keys
 ```
 
-Print the `service_role` key only when the server side genuinely needs to bypass RLS:
+Print the privileged key only for an operator process that must bypass RLS. Do not pass it to an agent or model context:
 
 ```bash
 bunx supacloud-lite keys --service-role
@@ -735,7 +747,9 @@ automatic discovery of unconfigured providers.
 ### CLI
 
 ```text
-supacloud-lite start
+supacloud-lite start [--json]
+supacloud-lite handoff
+supacloud-lite complete [--json] [--module-file supabase/db/modules.ts]
 supacloud-lite migrate
 supacloud-lite status
 supacloud-lite keys [--service-role]
@@ -757,7 +771,7 @@ supacloud-lite version
 
 `import` loads a local Supabase project's config, migrations, seed or `import/data.sql`, Auth users, Storage objects, and Functions into Lite, then prints a verify checklist. Rows that this machine cannot check stay unchecked with a blocker. This is not a deployment. See `docs/supabase-import-lab.md`.
 
-Run `supacloud-lite migrate` first when initializing a project or when the state directory is missing or empty. `db reset` only accepts initialized state with a valid `secrets.json` marker; it never creates or replaces project secrets for a reset.
+Run `supacloud-lite migrate` first when initializing a project or when the state directory is missing or empty. `db reset` only accepts initialized state with a valid `secrets.json` marker; it never creates or replaces project secrets for a reset. `migrate`, `complete`, `db check`, `db reset` and `auth create-user` open the project database themselves and hold the data-directory lock, so they fail with `database data directory is already in use` while `start` is running. That is the one-process-per-database rule, not a defect: stop the Lite process before running them.
 
 #### Create a Local Auth User
 

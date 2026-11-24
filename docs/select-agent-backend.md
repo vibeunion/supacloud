@@ -224,6 +224,16 @@ commit state, delete the ledger row or replay the captured DDL against the
 already-changed database. File publication is not a cross-filesystem/DB atomic
 transaction or a guarantee of crash-proof fsync durability.
 
+## Lite agent handoff
+
+Local Lite authoring uses the
+[Lite agent contract](vibecoding-lite-agent-contract.md). `start --json` and
+`handoff` print one object: project URL, anon key, and next commands. The
+`service_role` key is not part of that object. The next commands apply forward
+migrations and run `supacloud-lite complete`, which reuses the existing
+read-only module reconcile. Skipping that RLS check is not completion.
+Production MCP is unchanged and stays plan-only.
+
 ## Acceptance
 
 ```gherkin

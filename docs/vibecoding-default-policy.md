@@ -29,11 +29,12 @@ The goal is to reduce architectural entropy, not to remove advanced capabilities
 | Durable execution | Workflow/Command | pgflow or pg_durable after a proven scenario |
 | New application template | `minimal` (compiler/Effect; `app` alias) | Explicit `client` (supabase-js only), `command`, or `model-command` |
 | Local development | `fast`, the in-memory demo; not Lite/PGlite and not Command semantics | `integration` on real loopback PostgreSQL |
+| Local agent backend | One Lite database per worktree, JSON handoff of URL, anon key, and next commands | Hosted project create on the full platform |
 | Generated output | Compiler-generated and drift-checked | Never hand-edit generated directories to bypass checks |
 | Failure handling | Fail closed and preserve the last valid output | No implicit repair, migration or silent downgrade |
 | Write retry | No automatic retry by default | Explicitly enabled only with a server idempotency contract |
 | External side effects | Receipt plus reconciliation | Unknown outcomes must not be redispatched automatically |
-| AI context | Read-only structured context pack | No credentials, real data or arbitrary repository scan |
+| AI context | Read-only structured context pack, plus the Lite handoff when a local backend is required | No `service_role` key, real user data, or arbitrary repository scan |
 
 ## Adding An Alternative
 

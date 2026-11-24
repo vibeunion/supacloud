@@ -8,7 +8,7 @@ import type { ToolSchema } from "../schema";
 import { registerTool, type ToolServer } from "../tool-server";
 
 export type LiteCliAction =
-    | "version" | "start" | "migrate" | "status" | "keys" | "gen_types"
+    | "version" | "start" | "handoff" | "complete" | "migrate" | "status" | "keys" | "gen_types"
     | "db_reset" | "db_diff" | "db_pull" | "db_check" | "snapshot_create" | "snapshot_restore"
     | "upgrade" | "inspect" | "doctor";
 
@@ -41,7 +41,6 @@ export interface LiteCliArgs {
     output?: string;
     file?: string;
     snapshot_file?: string;
-    service_role?: boolean;
     force?: boolean;
     memory?: boolean;
     format?: "text" | "json";
@@ -90,7 +89,8 @@ export function buildLiteArgs(request: LiteCliArgs): string[] {
     if (request.action === "version") return ["--version"];
 
     switch (request.action) {
-        case "start": case "migrate": case "status": case "keys": case "upgrade": case "inspect": case "doctor":
+        case "start": case "handoff": case "complete": case "migrate": case "status": case "keys":
+        case "upgrade": case "inspect": case "doctor":
             args.push(request.action);
             break;
         case "gen_types": args.push("gen", "types"); break;
@@ -133,15 +133,19 @@ export function buildLiteArgs(request: LiteCliArgs): string[] {
     optionalFlag(args, "--replication-tls-key", request.replication_tls_key);
     optionalFlag(args, "--output", request.output);
     optionalFlag(args, "--file", request.action === "db_diff" ? request.file : undefined);
-    booleanFlag(args, "--service-role", request.service_role);
+    if ((request as { service_role?: boolean }).service_role === true) {
+        throw new Error("The Lite agent adapter cannot print or forward the service_role key");
+    }
     booleanFlag(args, "--force", request.force);
     booleanFlag(args, "--memory", request.memory);
-    if (request.format === "json") args.push("--json");
+    if (request.action === "handoff" || request.format === "json") args.push("--json");
     if (request.baseline && request.action !== "db_pull") throw new Error("baseline requires db_pull");
     booleanFlag(args, "--baseline", request.baseline);
     if (request.production && request.action !== "doctor") throw new Error("production requires doctor");
     booleanFlag(args, "--production", request.production);
-    if (request.module_file && request.action !== "db_check") throw new Error("module_file requires db_check");
+    if (request.module_file && request.action !== "db_check" && request.action !== "complete" && request.action !== "handoff" && request.action !== "start") {
+        throw new Error("module_file requires db_check, complete, handoff, or start");
+    }
     optionalFlag(args, "--module-file", request.module_file);
     optionalFlag(args, "--runtime-mode", request.runtime_mode);
     optionalFlag(args, "--postgres-dir", request.postgres_dir);
@@ -217,6 +221,25 @@ async function executeLiteCli(
     }
 }
 
+function containsPrivilegedProjectKey(text: string): boolean {
+    if (/service_role key\s*:/i.test(text)) return true;
+    for (const match of text.matchAll(/eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g)) {
+        const payload = match[0]?.split(".")[1];
+        if (!payload) continue;
+        try {
+            const claims = JSON.parse(Buffer.from(payload.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8")) as { role?: unknown };
+            if (claims.role === "service_role") return true;
+        } catch {
+            // Non-JWT tokens are not project keys.
+        }
+    }
+    return false;
+}
+
+function agentJsonResult(action: LiteCliAction, request: LiteCliArgs): boolean {
+    return action === "handoff" || (request.format === "json" && (action === "keys" || action === "complete"));
+}
+
 function formatExecutionText(action: LiteCliAction, execution: LiteCliExecutionResult): string {
     const combinedOutput = [execution.stdout.trim(), execution.stderr.trim()].filter(Boolean).join("\n");
     const heading = execution.exitCode === 0
@@ -231,10 +254,10 @@ export function registerLiteCliTools(server: ToolServer, options: LiteCliToolOpt
     const execute = options.executeLiteCli || ((request) => executeLiteCli(request, environment, fallbackWorkdir));
     registerTool(server,
         "lite",
-        "Controlled adapter for the local SupaCloud Lite CLI. Lite actions are local-only and never use the Management API or official Supabase CLI.",
+        "Controlled adapter for the local SupaCloud Lite CLI. One worktree uses one project database. handoff returns only the project URL, the anon key, and the next commands. Schema and seed changes go through forward migrations. complete runs the existing RLS reconcile and is not done when that check is skipped. This adapter never prints the service_role key and never calls the Management API.",
         {
             action: withDescription(stringEnum([
-                "version", "start", "migrate", "status", "keys", "gen_types", "db_reset", "db_diff", "db_pull",
+                "version", "start", "handoff", "complete", "migrate", "status", "keys", "gen_types", "db_reset", "db_diff", "db_pull",
                 "snapshot_create", "snapshot_restore", "upgrade", "inspect", "doctor", "db_check",
             ]), "Lite CLI action"),
             workdir: optional(Type.String(), "[*] Process working directory (default: current directory)"),
@@ -263,10 +286,9 @@ export function registerLiteCliTools(server: ToolServer, options: LiteCliToolOpt
             output: optional(Type.String(), "[gen_types/snapshot_create/upgrade] Output path"),
             file: optional(Type.String(), "[db_diff/db_pull] Migration suffix or name"),
             snapshot_file: optional(Type.String(), "[snapshot_restore] Snapshot archive"),
-            service_role: optional(Type.Boolean(), "[keys] Also print the service_role key"),
             force: optional(Type.Boolean(), "[snapshot_restore] Replace non-empty restore targets"),
             memory: optional(Type.Boolean(), "[*] Use an in-memory PGlite database"),
-            format: optional(stringEnum(["text", "json"]), "[doctor] Output format (default: text)"),
+            format: optional(stringEnum(["text", "json"]), "[start/keys/complete/doctor] Output format. start, keys, and handoff JSON is the agent handoff."),
             baseline: optional(Type.Boolean(), "[db_pull] Record already-present schema in local migration history after review"),
             production: optional(Type.Boolean(), "[doctor] Add single-node production readiness checks"),
             runtime_mode: optional(stringEnum(["development", "strict"]), "[*] Lite runtime mode"),
@@ -274,14 +296,23 @@ export function registerLiteCliTools(server: ToolServer, options: LiteCliToolOpt
             identity_module: optional(Type.String(), "[*] Trusted external identity bridge module"),
             external_auth_proxy_issuer: optional(Type.String(), "[start] Same-origin OAuth proxy issuer"),
             external_auth_proxy_redirect_origin: optional(Type.String(), "[start] Allowed logout redirect origins"),
-            module_file: optional(Type.String(), "[db_check] Database module manifest"),
+            module_file: optional(Type.String(), "[db_check/complete/handoff/start] Database module manifest"),
         },
         async (request) => {
+            if ((request as { service_role?: boolean }).service_role === true) {
+                throw new Error("The Lite agent adapter cannot print or forward the service_role key");
+            }
             buildLiteArgs(request);
             const execution = await execute(request);
+            if (containsPrivilegedProjectKey(`${execution.stdout}\n${execution.stderr}`)) {
+                throw new Error("Refusing to return a service_role key to the agent");
+            }
+            const text = agentJsonResult(request.action, request)
+                ? execution.stdout.trim()
+                : formatExecutionText(request.action, execution);
             return {
                 isError: execution.exitCode !== 0,
-                content: [{ type: "text" as const, text: formatExecutionText(request.action, execution) }],
+                content: [{ type: "text" as const, text }],
             };
         },
     );

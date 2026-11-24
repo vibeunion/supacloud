@@ -24,6 +24,13 @@ selection rule: when no special requirement exists, generators and AI use the
 validated best path; alternatives must be explicit and carry their own governance
 and verification obligations.
 
+The local agent backend contract is [Vibecoding Lite agent contract](vibecoding-lite-agent-contract.md).
+One worktree serves one project database. After start, the handoff JSON
+contains only the project URL, the anon key, and the next commands. It does
+not include the `service_role` key. Schema and seed changes go through the
+existing migration ledger. Production MCP stays plan-only. A backend change
+is not done when the existing RLS reconcile is skipped.
+
 ## Quick start
 
 ```bash

@@ -47,7 +47,17 @@ describe("SupaCloud Lite CLI adapter", () => {
             action: "db_check",
             module_file: "supabase/db/modules.ts",
         })).toEqual(["db", "check", "--module-file", "supabase/db/modules.ts"]);
-        expect(() => buildLiteArgs({ action: "status", module_file: "supabase/db/modules.ts" })).toThrow("module_file requires db_check");
+        expect(() => buildLiteArgs({ action: "status", module_file: "supabase/db/modules.ts" })).toThrow("module_file requires");
+        expect(buildLiteArgs({
+            action: "handoff",
+            project_dir: "/workspace/project",
+        })).toEqual(["handoff", "--project-dir", "/workspace/project", "--json"]);
+        expect(buildLiteArgs({
+            action: "complete",
+            module_file: "supabase/db/modules.ts",
+            format: "json",
+        })).toEqual(["complete", "--json", "--module-file", "supabase/db/modules.ts"]);
+        expect(() => buildLiteArgs({ action: "keys", service_role: true } as never)).toThrow("service_role");
 
         expect(buildLiteArgs({
             action: "snapshot_restore",
@@ -105,5 +115,28 @@ describe("SupaCloud Lite CLI adapter", () => {
         expect(request).toEqual({ action: "doctor", project_dir: resolve(".") });
         expect(result.isError).toBe(false);
         expect(result.content[0].text).toContain("SupaCloud Lite doctor completed");
+    });
+
+    test("handoff returns the JSON payload and refuses a service_role key", async () => {
+        let registered: ((args: Record<string, unknown>) => Promise<{ isError: boolean; content: Array<{ text: string }> }>) | undefined;
+        registerLiteCliTools({
+            tool(_name, _description, _schema, callback) {
+                registered = callback as NonNullable<typeof registered>;
+            },
+        }, {
+            executeLiteCli: async () => ({
+                exitCode: 0,
+                stdout: `${JSON.stringify({
+                    url: "http://127.0.0.1:54321",
+                    anon_key: "anon-key",
+                    next: ["supacloud-lite complete --project-dir /workspace/project"],
+                })}\n`,
+                stderr: "",
+            }),
+        });
+        const result = await registered!({ action: "handoff", project_dir: "/workspace/project" });
+        expect(result.isError).toBe(false);
+        expect(Object.keys(JSON.parse(result.content[0]!.text)).sort()).toEqual(["anon_key", "next", "url"]);
+        await expect(registered!({ action: "keys", service_role: true })).rejects.toThrow("service_role");
     });
 });
