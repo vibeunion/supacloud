@@ -5,7 +5,7 @@
     "": {
       "name": "@supacloud/cli",
       "dependencies": {
-        "@supacloud/compiler": "^0.64.0",
+        "@supacloud/compiler": "^0.65.0",
         "@supacloud/db": "file:../db",
         "@supacloud/delivery": "file:../delivery",
         "typebox": "1.4.3",
