@@ -892,8 +892,9 @@ db-extra-search-path = $(toml_basic_string "public, extensions, auth, ${ref}")
 db-anon-role = "anon"
 jwt-secret = $(toml_basic_string "$jwt_secret")
 server-port = ${pgrst_port}
-# Bind to 0.0.0.0 so the host gateway can reach the tenant runtime.
-server-host = "0.0.0.0"
+# Loopback only. The host gateway dials 127.0.0.1. The process still serves
+# Postrust's /admin and GraphQL handlers, which the gateway refuses.
+server-host = "127.0.0.1"
 db-pool = ${postgrest_db_pool}
 db-pool-acquisition-timeout = 10
 log-level = "warn"

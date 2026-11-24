@@ -30,7 +30,7 @@ The launcher maps the existing keys (`db-uri`, `db-schemas`, `db-anon-role`, `jw
 
 Shared Compose, Podman, CI, and pilot containers have no per-tenant config file. They set `PGRST_DB_CHANNEL=pgrst` and `PGRST_DB_CHANNEL_ENABLED=true` so a `NOTIFY pgrst` from the existing DDL trigger reloads the schema cache. Postrust leaves that listener off unless it is set.
 
-supabase-js bulk insert sends `columns="task","is_complete"`. Postrust treats the quote characters as part of the column name. The project REST proxy strips one pair of surrounding quotes from each name before forwarding. Calls that reach Postrust directly still need unquoted `columns`.
+supabase-js bulk insert sends `columns="task","is_complete"`. Postrust treats the quote characters as part of the column name. The public Caddy `/rest/v1*` route rewrites that parameter before it strips the prefix, and the project REST proxy applies the same translation. A client that opens the loopback REST port directly still needs unquoted `columns`.
 
 ## What stays the same
 
@@ -45,17 +45,19 @@ CI on `363bc7eff` (`run 45408359105`) failed `from().select().order()` in `sdk-p
 
 The rows were never inserted. supabase-js bulk insert sends `columns="task","is_complete"`. Postrust v3.4.0 `parse_columns` keeps the quote characters, so the names do not match the table and the insert is rejected. The test ignored that error and then counted zero rows. `like` itself still passes `%` through to SQL `LIKE` after replacing only `*` with `%` (`crates/postrust-core/src/query/builder.rs` at tag v3.4.0), so a percent pattern remains a wildcard once the rows exist.
 
-`c10be4f01` strips one pair of surrounding quotes per name in the project REST proxy before the request reaches Postrust. `tests/unit/postrust-columns-param.test.ts` pins that translation. A client that opens the tenant REST port directly, and skips the proxy, still has to send unquoted `columns`.
+The public Caddy `/rest/v1*` route and the project REST proxy each strip one pair of surrounding quotes per name before the request reaches Postrust. `tests/unit/postrust-columns-param.test.ts` pins both translations. A client that opens the loopback REST port directly still has to send unquoted `columns`.
 
 ## Surfaces the official image always serves
 
 The CI container log for the pinned image records this startup, and v3.4.0 has no environment variable that removes it:
 
-- `/admin`, `/admin/openapi.json`, `/admin/swagger`, `/admin/scalar`, and `/admin/graphql` come from the `admin-ui` build feature. The dashboard and OpenAPI handlers in `crates/postrust-server/src/admin.rs` take no credential. Anyone who can connect to the tenant REST port can open them.
+- `/admin`, `/admin/openapi.json`, `/admin/swagger`, `/admin/scalar`, and `/admin/graphql` come from the `admin-ui` build feature. The dashboard and OpenAPI handlers in `crates/postrust-server/src/admin.rs` take no credential. A client that can open the listener directly can still open them.
 - `/_` is the custom-route and health surface (`/_/health`).
 - `/api/graphql` and GraphQL subscriptions start even when `PGRST_GRAPHQL_FEDERATION` is left false. That flag only adds Apollo Federation fields. The subscription broker then retries DNS for its notification listener, which is a new log and CPU source on a host that has no such name.
 
-The public gateway still forwards project GraphQL to `pg_graphql` at `/graphql/v1` → `/rpc/graphql`. It does not add routes for `/admin`, `/_`, or `/api/graphql`. Those paths are still served on the tenant REST process, which is bound to `0.0.0.0` so the gateway can reach it. Not publishing a route is not the same as turning the handler off. v3.4.0 cannot turn these handlers off without a different build. This repository does not ship a fork of the image.
+The public gateway still forwards project GraphQL to `pg_graphql` at `/graphql/v1` → `/rpc/graphql`. A request under `/rest/v1` whose path, after the prefix strip, is `/admin` (including `/admin/openapi.json`, `/swagger`, `/scalar`, and `/graphql`), `/_`, `/api/graphql`, `/v1/graphql`, or `/v1alpha1/graphql` is answered with 404 before that strip. The project REST proxy refuses the same suffixes. v3.4.0 cannot turn the handlers off without a different build, and this repository does not ship a fork of the image.
+
+The host tenant process binds `127.0.0.1`. Caddy on that host dials `127.0.0.1`, which is also where the Management API proxy and health checks connect. Compose and Podman do not publish the container port; the image still listens on `0.0.0.0` inside its own network namespace so the gateway container can reach it. The CI service publishes `127.0.0.1:3000` only.
 
 ## Other deviations from PostgREST v16.6
 

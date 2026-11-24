@@ -18,6 +18,12 @@ import { getAuthRuntimeDescriptor } from "../services/auth-runtime.service";
 import { GOTRUE_USER_ID_PATTERN } from "../utils/project-user-lifecycle";
 import { beginRequestObservability } from "../utils/observability";
 import { governGraphqlProjectRequest } from "../services/graphql-request-governance";
+import {
+    isBlockedPostrustUpstreamPath,
+    normalizePostgrestColumnsParam,
+} from "../services/postrust-rest-guard";
+
+export { normalizePostgrestColumnsParam };
 
 const MAX_ASYNC_BODY_BYTES = 256 * 1024;
 const MAX_TASK_LINK_ID_BYTES = 255;
@@ -806,17 +812,6 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: P
     }
 }
 
-/** supabase-js quotes bulk-insert column names. Postrust keeps those quotes in the name. */
-export function normalizePostgrestColumnsParam(value: string): string {
-    return value.split(",").map((part) => {
-        const trimmed = part.trim();
-        if (trimmed.length >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
-            return trimmed.slice(1, -1).replaceAll("\"\"", "\"");
-        }
-        return trimmed;
-    }).join(",");
-}
-
 const sdkProxyRoutesBase = new Elysia({ prefix: "" })
     .group("/auth/v1", (app) => {
         const handler = async ({ request }: { request: Request }) => {
@@ -868,16 +863,22 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
             if (isOpenApiSchemaRequest(request) && !(await hasProjectServiceRoleCredential(request, ref))) {
                 return openApiSchemaForbiddenResponse();
             }
+            const url = new URL(request.url);
+            let targetPath = url.pathname.replace(/^\/rest\/v1/, "");
+            if (!targetPath || targetPath === "") targetPath = "/";
+            if (isBlockedPostrustUpstreamPath(targetPath)) {
+                return new Response(JSON.stringify({ message: "Not found" }), {
+                    status: 404,
+                    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+                });
+            }
             const ports = await getTenantPorts(ref);
             if (!ports) return new Response(JSON.stringify({ message: 'Tenant backend not active' }), { status: 502, headers: { 'Content-Type': 'application/json' } });
-            
-            const url = new URL(request.url);
+
             const columns = url.searchParams.get("columns");
             if (columns !== null) {
                 url.searchParams.set("columns", normalizePostgrestColumnsParam(columns));
             }
-            let targetPath = url.pathname.replace(/^\/rest\/v1/, '');
-            if (!targetPath || targetPath === '') targetPath = '/';
             const targetUrl = `http://127.0.0.1:${ports.pgrstPort}${targetPath}${url.search}`;
             const linkOrigin = `${url.protocol}//${url.host}/rest/v1`;
             return executeProxy(request, targetUrl, { linkOrigin, ref, host: resolveProjectApiHost(ref, undefined), timeoutMs: config.restProxyTimeoutMs });

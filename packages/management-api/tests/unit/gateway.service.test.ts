@@ -21,6 +21,10 @@ import {
     gatewayService,
     reconcileCanonicalGatewayRoutes,
 } from "../../src/services/gateway.service";
+import {
+    BLOCKED_POSTRUST_REST_PATH_REGEXP,
+    POSTRUST_COLUMNS_QUERY_REPLACE,
+} from "../../src/services/postrust-rest-guard";
 
 const inventoryCompression = {
     handler: "subroute",
@@ -566,6 +570,32 @@ describe("CaddyGatewayProvider", () => {
         const publicImageCache = findHandlerDeep(storage, "cache");
 
         expect(rest?.match?.[0]?.path).toEqual(["/rest/v1*"]);
+        const blocked = routes.find((route: any) => route["@id"] === "route-project-testref123-rest-blocked");
+        const graphql = routes.find((route: any) => route["@id"] === "route-project-testref123-graphql");
+        expect(blocked?.terminal).toBe(true);
+        expect(blocked?.handle).toEqual([{
+            handler: "static_response",
+            status_code: 404,
+            headers: {
+                "Content-Type": ["application/json"],
+                "Cache-Control": ["no-store"],
+            },
+            body: "{\"message\":\"Not found\"}",
+        }]);
+        expect(blocked?.match?.[0]?.path_regexp?.pattern).toBe(BLOCKED_POSTRUST_REST_PATH_REGEXP);
+        expect(routes.indexOf(blocked)).toBeGreaterThan(-1);
+        expect(routes.indexOf(blocked)).toBeLessThan(routes.indexOf(rest));
+        expect(routes.indexOf(blocked)).toBeLessThan(routes.indexOf(opaqueRest));
+        const restRewrite = rest?.handle?.find((handler: any) => handler.handler === "rewrite");
+        expect(restRewrite).toMatchObject({
+            strip_path_prefix: "/rest/v1",
+            query: { replace: POSTRUST_COLUMNS_QUERY_REPLACE },
+        });
+        expect(rest?.handle?.find((handler: any) => handler.handler === "reverse_proxy")?.upstreams?.[0]?.dial)
+            .toBe("127.0.0.1:3000");
+        expect(graphql?.handle?.find((handler: any) => handler.handler === "rewrite")?.uri).toBe("/rpc/graphql");
+        expect(graphql?.handle?.find((handler: any) => handler.handler === "reverse_proxy")?.upstreams?.[0]?.dial)
+            .toBe("127.0.0.1:3000");
         expect(restEncode).toEqual({
             handler: "encode",
             encodings: { zstd: {}, gzip: {} },
@@ -2517,6 +2547,8 @@ describe("CaddyGatewayProvider", () => {
         );
         expect(custom?.match?.[0]?.path).toEqual(["/rest/v1/audit*"]);
         expect(custom?.handle?.some((handler: any) => handler.handler === "rate_limit")).toBe(true);
+        expect(await provider.setCustomRouteRateLimit("testref123", "/rest/v1/admin", { second: 2 })).toBe(false);
+        expect(await provider.setCustomRouteRateLimit("testref123", "/rest/v1/api/graphql", { second: 2 })).toBe(false);
 
         restore();
     });
@@ -2709,8 +2741,12 @@ describe("CaddyGatewayProvider route headers", () => {
         });
 
         expect(apiRoutes.length).toBeGreaterThan(0);
+        const blocked = apiRoutes.find((route: any) => String(route["@id"]).endsWith("-rest-blocked"));
+        expect(findHandlerDeep(blocked, "reverse_proxy")).toBeUndefined();
+        expect(blocked?.handle?.some((handler: any) => handler.handler === "static_response" && handler.status_code === 404)).toBe(true);
 
         for (const route of apiRoutes) {
+            if (String(route["@id"]).endsWith("-rest-blocked")) continue;
             const proxy = findHandlerDeep(route, "reverse_proxy");
             const requestSet = proxy?.headers?.request?.set;
             const routeId = String(route["@id"] || "");

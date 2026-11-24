@@ -1025,7 +1025,7 @@ jobs:
       postgrest:
         image: docker.io/postrust/postrust:v3.4.0@sha256:4de17b6c68403317a33c0a8ab78edb347e6b3131e9784c25b5c700554ac61809
         ports:
-          - 3000:3000
+          - 127.0.0.1:3000:3000
         env:
           PGRST_DB_URI: postgres://supabase_admin:postgres@postgres:5432/postgres
           PGRST_DB_SCHEMAS: public
