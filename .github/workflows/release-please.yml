@@ -134,7 +134,7 @@ jobs:
           if [[ "$RELEASE_ACTION_OUTCOME" == "failure" ]]; then
             git fetch origin --tags
           fi
-          node --test .github/scripts/resolve-release-outputs.test.mjs .github/scripts/validate-release-identity.test.mjs
+          node --test .github/scripts/resolve-release-outputs.test.mjs .github/scripts/validate-release-identity.test.mjs .github/scripts/wait-for-npm-tarball.test.mjs
           node .github/scripts/resolve-release-outputs.mjs
 
   publish-management-api-binaries:
@@ -832,22 +832,10 @@ jobs:
           if [[ "$SUPACLOUD_SYNC_ADMIN" == "true" ]]; then
             specs+=("@supacloud/admin@$(node -p "require('./packages/admin/package.json').version")")
           fi
-          for spec in "${specs[@]}"; do
-            published=""
-            for attempt in $(seq 1 12); do
-              published="$(npm view "$spec" version 2>/dev/null || true)"
-              if [[ "$published" == "${spec##*@}" ]]; then
-                break
-              fi
-              if [[ "$attempt" -lt 12 ]]; then
-                sleep 5
-              fi
-            done
-            if [[ "$published" != "${spec##*@}" ]]; then
-              echo "Published package is not visible: $spec" >&2
-              exit 1
-            fi
-          done
+          # Metadata can be visible while the tarball still answers 404, which is
+          # how the frozen-lockfile install below failed on a package published
+          # seconds earlier.
+          node .github/scripts/wait-for-npm-tarball.mjs "${specs[@]}"
 
       - name: Regenerate and verify umbrella lockfile
         if: ${{ steps.synchronize.outputs.changed == 'true' }}
@@ -950,20 +938,8 @@ jobs:
         if: ${{ steps.synchronize.outputs.changed == 'true' }}
         run: |
           compiler_version="$(node -p "require('./packages/compiler/package.json').version")"
-          published=""
-          for attempt in $(seq 1 12); do
-            published="$(npm view "@supacloud/compiler@$compiler_version" version 2>/dev/null || true)"
-            if [[ "$published" == "$compiler_version" ]]; then
-              break
-            fi
-            if [[ "$attempt" -lt 12 ]]; then
-              sleep 5
-            fi
-          done
-          if [[ "$published" != "$compiler_version" ]]; then
-            echo "Published compiler is not visible: @supacloud/compiler@$compiler_version" >&2
-            exit 1
-          fi
+          # Same race as the umbrella sync: the tarball lags the metadata.
+          node .github/scripts/wait-for-npm-tarball.mjs "@supacloud/compiler@$compiler_version"
 
       - name: Regenerate and verify CLI lockfile
         if: ${{ steps.synchronize.outputs.changed == 'true' }}
