@@ -2251,7 +2251,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
     private async addProjectDomainsUnlocked(projectRef: string, apiDomains: string[], studioDomains: string[]): Promise<boolean> {
         await this.hydrateFromDiskIfUninitialized();
-        const existingKinds = ["opaque-rest", "opaque-graphql", "opaque-auth", "auth-admin-user-delete", "auth-admin", "rest", POSTRUST_GRAPHQL_EVALUATION_ROUTE_KIND, "graphql", "auth", "gotrue-well-known", "functions", "storage", "realtime-api", "realtime", "management", "app-mcp", "acme"];
+        // The evaluation route kind stays out of this list. A stale
+        // route-project-<ref>-postrust-graphql must not gain API hosts here.
+        // setupUpstream deletes that id.
+        const existingKinds = ["opaque-rest", "opaque-graphql", "opaque-auth", "auth-admin-user-delete", "auth-admin", "rest", "graphql", "auth", "gotrue-well-known", "functions", "storage", "realtime-api", "realtime", "management", "app-mcp", "acme"];
         for (const kind of existingKinds) {
             const route = this.routesById.get(caddyRouteId(projectRef, kind));
             const matches = Array.isArray(route?.["match"]) ? route["match"] as Record<string, unknown>[] : [];

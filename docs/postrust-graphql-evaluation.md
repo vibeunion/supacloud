@@ -17,7 +17,7 @@ The long-term shape is one data contract: the compiler and ZenStack own the sche
 
 `SUPACLOUD_POSTRUST_GRAPHQL`
 
-Only the exact string `true` opens the evaluation handler. Unset, empty, `false`, `1`, `yes`, and `TRUE` leave it closed. `postrustGraphqlEvaluationEnabled` reads `process.env` when it is called, so a flip takes effect on the next request. It does not wait for a process restart. Project Caddy routes are a separate render: every `setupUpstream` deletes a stale project-host route id `route-project-<ref>-postrust-graphql` and does not add one, whether or not the flag is set. That deletion is visible on the next project route render.
+Only the exact string `true` opens the evaluation handler. Unset, empty, `false`, `1`, `yes`, and `TRUE` leave it closed. `postrustGraphqlEvaluationEnabled` reads `process.env` when it is called, so a flip takes effect on the next request. It does not wait for a process restart. Project Caddy routes are a separate render: every `setupUpstream` deletes a stale project-host route id `route-project-<ref>-postrust-graphql` and does not add one, whether or not the flag is set. That deletion is visible on the next project route render. Adding an API domain does not attach that stale route to the new host.
 
 The path is not a project API route. The name `/internal/postrust/graphql` is not the boundary. The handler lives on the management API listener, and only a credential that `hasProjectServiceRoleCredential` accepts for that project can open it. An `anon` or `authenticated` key alone receives 401 and is not forwarded. The caller's `Authorization` bearer is left in place, so the database role is still that token's `role` claim. An operator sends the project `service_role` credential in `apikey` and the user JWT in `Authorization`.
 
@@ -34,7 +34,7 @@ These paths stay closed on the project host, including while the flag is on: `/i
 
 ## What the pinned binary already does
 
-Postrust v3.4.0 has no switch that removes GraphQL from the REST binary. On the tenant port (`server-host = 0.0.0.0`) the process answers `/v1/graphql`, `/v1alpha1/graphql`, and `/api/graphql` whether or not this flag is set. The flag does not reduce that process surface. It only decides whether the management listener will proxy one path to `/v1/graphql`. Reaching the tenant port directly still reaches the process paths. That exposure comes with the REST pin and is recorded in [Postrust v3.4.0 adoption](./postrust-v3.4.0-adoption.md).
+Postrust v3.4.0 has no switch that removes GraphQL from the REST binary. The host tenant process sets `server-host = "127.0.0.1"` and answers `/v1/graphql`, `/v1alpha1/graphql`, and `/api/graphql` on that loopback port whether or not this flag is set. The flag does not reduce that process surface. It only decides whether the management listener will proxy one path to `/v1/graphql`. A client that can open the loopback port still reaches those paths. Compose and Podman do not publish the container port; the image listens on `0.0.0.0` inside its own network namespace. That exposure comes with the REST pin and is recorded in [Postrust v3.4.0 adoption](./postrust-v3.4.0-adoption.md).
 
 In the v3.4.0 sources, `graphql_identity` in `crates/postrust-server/src/build.rs` uses the same JWT verifier as REST. The database role on the transaction is the verified token's `role` claim. `GraphQLContext::session` in `crates/postrust-graphql/src/context.rs` builds that transaction from the REST session, including `request.jwt.claims`, and then sets the database role. It passes `pre_request(false)`, so `db-pre-request` does not run. `public.set_request_context` therefore does not write `request.jwt.claim.sub`. `auth.uid()` in this repository also falls back to `request.jwt.claims`. GraphQL also leaves `search_path` as the role and database set it, rather than applying the REST extra search path.
 
@@ -54,6 +54,6 @@ Opaque API keys are translated on `/graphql/v1` before the request reaches `pg_g
 
 - The dialect is Hasura's (`query_root`, `where`, `order_by`), not `pg_graphql`'s Relay connections. This is not bit-for-bit compatibility with `pg_graphql`, and it is not a claim that it should be.
 - Not run, and not claimed as passed: supabase-js or another GraphQL client, nested queries, error-shape comparison, `auth.uid()` itself, or Postrust's Hasura conformance harness. The one local RLS fixture above is the only live GraphQL query this change ran.
-- This draft stays unmerged until the REST contract difference on #2786 is settled. SDK parity for `from().select().order()` is a REST question, not a reason to retarget `/graphql/v1`.
+- #2786 is on main. SDK parity for `from().select().order()` remains a REST question. This route keeps `/graphql/v1` on `pg_graphql`.
 - The compiler still pulls and checks the `pg_graphql` schema at `/graphql/v1`. Generating REST and this GraphQL surface from the ZenStack catalog is future work. No compiler or ZenStack hook was added.
 - `db-pre-request`, singular `request.jwt.claim.*` settings, REST `search_path`, opaque API keys, and GraphQL subscriptions are outside this route.

@@ -1,6 +1,6 @@
 // @supacloud-test-isolate
 import { afterEach, expect, spyOn, test } from "bun:test";
-import { rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { Elysia } from "elysia";
 import { CaddyGatewayProvider } from "../../src/services/gateway.service";
 import {
@@ -22,7 +22,7 @@ const PUBLISHED_POSTRUST_PATHS = [
 
 type LoadedRoute = {
     "@id"?: string;
-    match?: Array<{ path?: string[] }>;
+    match?: Array<{ path?: string[]; host?: string[] }>;
     handle?: Array<Record<string, unknown>>;
 };
 
@@ -149,6 +149,65 @@ test("a second project render still leaves the evaluation path off the project h
         expect(routes.some((route) => route["@id"] === "route-project-evalref-postrust-graphql")).toBe(false);
         expect(rewriteUri(routes.find((route) => route["@id"] === "route-project-evalref-graphql"))).toBe("/rpc/graphql");
         expect(JSON.stringify(routes)).not.toContain(POSTRUST_GRAPHQL_UPSTREAM_URI);
+    } finally {
+        restore();
+    }
+});
+
+function stalePostrustGraphqlRoute() {
+    return {
+        apps: {
+            http: {
+                servers: {
+                    supacloud: {
+                        routes: [
+                            {
+                                "@id": "route-project-evalref-postrust-graphql",
+                                match: [{ host: ["old.example.com"], path: ["/internal/postrust/graphql*"] }],
+                                handle: [
+                                    { handler: "rewrite", uri: "/v1/graphql" },
+                                    { handler: "reverse_proxy", upstreams: [{ dial: "127.0.0.1:3000" }] },
+                                ],
+                                terminal: true,
+                            },
+                        ],
+                    },
+                },
+            },
+        },
+    };
+}
+
+test("setupUpstream deletes a stale project-host Postrust GraphQL route", async () => {
+    const calls: Array<{ url: string; method: string; body: unknown }> = [];
+    const restore = captureFetch(calls);
+    try {
+        await mkdir("/tmp/supacloud-caddy-test", { recursive: true });
+        await writeFile("/tmp/supacloud-caddy-test/config.json", JSON.stringify(stalePostrustGraphqlRoute()));
+        const result = await new CaddyGatewayProvider().setupUpstream("evalref", 3000, 9999);
+        expect(result.success).toBe(true);
+        const routes = loadedRoutes(calls);
+        expect(routes.some((route) => route["@id"] === "route-project-evalref-postrust-graphql")).toBe(false);
+        const graphql = routes.find((route) => route["@id"] === "route-project-evalref-graphql");
+        expect(rewriteUri(graphql)).toBe("/rpc/graphql");
+        expect(requestHeaders(graphql)["Accept-Profile"]).toEqual(["graphql_public"]);
+        expect(JSON.stringify(routes)).not.toContain("/internal/postrust/graphql");
+    } finally {
+        restore();
+    }
+});
+
+test("adding a project domain leaves a stale Postrust GraphQL route off the new host", async () => {
+    const calls: Array<{ url: string; method: string; body: unknown }> = [];
+    const restore = captureFetch(calls);
+    try {
+        await mkdir("/tmp/supacloud-caddy-test", { recursive: true });
+        await writeFile("/tmp/supacloud-caddy-test/config.json", JSON.stringify(stalePostrustGraphqlRoute()));
+        const added = await new CaddyGatewayProvider().addProjectDomains("evalref", ["new.example.com"], []);
+        expect(added).toBe(true);
+        const routes = loadedRoutes(calls);
+        const stale = routes.find((route) => route["@id"] === "route-project-evalref-postrust-graphql");
+        expect(stale?.match?.[0]?.host).toEqual(["old.example.com"]);
     } finally {
         restore();
     }
