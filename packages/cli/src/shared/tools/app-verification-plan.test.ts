@@ -34,6 +34,16 @@ test("verification selects one module's local tests and never executes or broade
   expect(plan.tests).toEqual(["src/health/health.test.ts"]);
   expect(plan.commands).toEqual([["bun", "test", "./src/health/health.test.ts"], ["git", "diff", "--check"]]);
   expect(plan.executed).toBe(false);
+  expect(plan.completion).toEqual({
+    rls: "required",
+    skipped_is_done: false,
+    executed: false,
+    commands: [
+      ["supacloud", "db", "module_check", "--module_file", "db/modules.ts"],
+      ["supacloud-lite", "complete", "--project-dir", ".", "--module-file", "supabase/db/modules.ts"],
+    ],
+  });
+  expect(plan.releaseOnly).not.toContain("database/RLS and authenticated integration");
 });
 
 test("missing and ambiguous targets cannot silently select the whole repository", async () => {

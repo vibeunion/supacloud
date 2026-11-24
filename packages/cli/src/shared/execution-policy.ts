@@ -42,7 +42,7 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
     },
     lite: {
         local: [
-            "version", "start", "migrate", "status", "keys", "gen_types", "db_reset", "db_diff", "db_pull",
+            "version", "start", "handoff", "complete", "migrate", "status", "keys", "gen_types", "db_reset", "db_diff", "db_pull",
             "db_check", "snapshot_create", "snapshot_restore", "upgrade", "inspect", "doctor",
         ],
     },

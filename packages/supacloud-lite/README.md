@@ -641,13 +641,23 @@ chmod +x ./supacloud-lite-linux-x64
 
 The single binary still reads the project's `supabase/` directory and writes `.supacloud-lite/` persistent state outside the project; it does not include a web console or Supabase Studio. Linux x64/arm64, macOS x64/arm64, and Windows x64 use separate artifacts and cannot be mixed across operating systems or CPU architectures.
 
+Agent handoff after start. The JSON contains only the project URL, the anon key, and the next commands:
+
+```bash
+bunx supacloud-lite start --json
+bunx supacloud-lite handoff
+bunx supacloud-lite complete --module-file supabase/db/modules.ts
+```
+
+`complete` runs the existing RLS reconcile. Skipping it is not done. The handoff never includes the `service_role` key. `keys --json` and `start --json` reject `--service-role`.
+
 Get the anon key:
 
 ```bash
 bunx supacloud-lite keys
 ```
 
-Print the `service_role` key only when the server side genuinely needs to bypass RLS:
+Print the privileged key only for an operator process that must bypass RLS. Do not pass it to an agent or model context:
 
 ```bash
 bunx supacloud-lite keys --service-role

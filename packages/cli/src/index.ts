@@ -339,8 +339,9 @@ EXAMPLES
   ${preferredCommand} supabase db_diff --schema public --name add_accounts
   ${preferredCommand} supabase push --ref abc123 --dir supabase/migrations --dry_run
   ${preferredCommand} supabase db_dump --db_url "postgresql://..." --file backups/schema.sql
-  ${preferredCommand} lite migrate --project_dir .
-  ${preferredCommand} lite start --project_dir . --port 54321
+  ${preferredCommand} lite handoff --project_dir .
+  ${preferredCommand} lite start --project_dir . --port 54321 --format json
+  ${preferredCommand} lite complete --project_dir . --module_file supabase/db/modules.ts
   ${preferredCommand} lite doctor --project_dir . --format json
   ${preferredCommand} branch create --name feature-auth --data_mode schema_only
   ${preferredCommand} branch promotion_plan --branch_ref preview123

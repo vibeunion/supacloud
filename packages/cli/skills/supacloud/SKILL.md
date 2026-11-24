@@ -18,7 +18,7 @@ Use `supacloud` as the project-level control surface and keep durable changes re
 
    A missing remote project context does not block local `app init/generate/context/check/doctor`, `migration_new`, `db_diff`, or `db_reset`; it blocks remote inspection/apply until context is supplied.
 
-2. Never place secrets, service-role keys, database URLs, passwords, or tokens in commands that will be logged, source files, migration files, or chat output.
+2. Never place secrets, service-role keys, database URLs, passwords, or tokens in commands that will be logged, source files, migration files, or chat output. The Lite agent handoff is only `url`, `anon_key`, and `next`. Do not request or repeat the `service_role` key.
 3. Treat schema, functions/RPC, triggers, RLS policies, indexes, grants, extensions, and seed/reference-data changes as migrations. Do not apply them through `database query`, `psql`, a dashboard SQL editor, or a raw Management API call.
 4. Use `database query` only for read-only inspection unless the user explicitly authorizes a documented break-glass operation. Break-glass work still requires a backup, rollback SQL, and a follow-up migration in the same task.
 5. Run a remote migration dry-run before apply. Production apply requires explicit user approval in the current task.
@@ -69,6 +69,21 @@ supacloud app check --format json
 supacloud app doctor --format json
 supacloud app verify-plan --target <module>
 ```
+
+For a local isolated backend, start Lite and read the handoff. Do not create a
+second project database in the same worktree.
+
+```bash
+supacloud-lite start --json --project-dir .
+supacloud lite handoff --project_dir .
+supacloud lite complete --project_dir . --module_file supabase/db/modules.ts
+```
+
+`handoff` prints only the project URL, the anon key, and the next commands.
+Schema and seed changes are forward files under `supabase/migrations`, applied
+with `lite migrate`. `complete` runs the existing RLS reconcile. A skipped RLS
+check is not done. Production MCP stays plan-only. See
+`docs/vibecoding-lite-agent-contract.md`.
 
 Read [references/app-workflow.md](references/app-workflow.md) for the full
 sequence and guardrails. `app fix` previews one reviewed diagnostic repair;
@@ -136,6 +151,7 @@ supacloud database baseline_migrations \
 
 Before declaring success, provide:
 
+- the Lite `complete` result, or `db check` / `db module_check` evidence whose `completion.done` is true, when the change touches a backend schema. `completion.rls_checks: "skipped"` is not done;
 - migration filenames and reviewed diff;
 - local reset/test/typecheck evidence appropriate to the project;
 - remote dry-run evidence;
