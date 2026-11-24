@@ -381,7 +381,18 @@ async function generateScaffold(args: AppToolArguments): Promise<ToolResult> {
     let registerIn = args.register_in;
     let inferredRegistration: { target: string; evidence: string[] } | undefined;
     let inferredModule: { name: string; evidence: string[] } | undefined;
-    if (registerIn === undefined && (kind === "module" || kind === "resource" || kind === "feature")) {
+    let existingModuleTarget = false;
+    if (kind === "module" && args.name !== undefined && /^[A-Za-z][A-Za-z0-9_-]*$/.test(args.name.trim())) {
+        try {
+            existingModuleTarget = existsSync(scaffoldPath(
+                root, join(dir, args.name.trim(), `${args.name.trim()}.module.ts`),
+            ));
+        } catch {
+            // Let the normal scaffold path validation report malformed targets.
+        }
+    }
+    if (registerIn === undefined && !existingModuleTarget
+        && (kind === "module" || kind === "resource" || kind === "feature")) {
         try {
             const project = await projectCompileConfig({ ...args, action: "check" });
             const inference = createInferencePlan(project.result.graph, {
