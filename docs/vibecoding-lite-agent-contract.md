@@ -78,14 +78,25 @@ Seed data for the agent path belongs in a forward migration. `supabase/seed.sql`
 remains the existing operator replay file used by migrate and reset. It is not
 a second ledger and it is not permission to run arbitrary SQL.
 
+`migrate`, `complete`, `db check`, `db reset` and `auth create-user` open the
+project database themselves, and opening it takes the data-directory lock. They
+fail with `database data directory is already in use` while `start` holds it,
+which is the one-process-per-database rule, not a defect. Stop the Lite process
+before running them, and read the handoff `next` list as work for the stopped
+window rather than for the running server. The anon key is derived from the
+project secrets and the URL from the same `--host`/`--port` flags, so both
+survive the restart.
+
 ## RLS completion
 
 Agents are not done when the existing RLS checks are skipped.
 
 `supacloud-lite complete` loads the database module manifest and runs the same
 read-only reconcile as `supacloud-lite db check` (`@supacloud/db` catalog
-reconcile, including `rls-disabled`). The command exits non-zero unless that
-reconcile ran against at least one owned table and reported no error. A
+reconcile, including `rls-disabled`). It needs the same exclusive database
+access as `migrate`, so run it with the Lite process stopped. The command exits
+non-zero unless that reconcile ran against at least one owned table and reported
+no error. A
 missing manifest, a manifest with no owned tables, or a database that could
 not be read is `rls_checks: "skipped"` and `done: false`. `skipped_is_done` is
 always false.
