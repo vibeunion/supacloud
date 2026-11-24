@@ -154,6 +154,11 @@
       "signature": "export declare const CLEAN_ARCHITECTURE_RULES: ModuleBoundaryRule[];"
     },
     {
+      "name": "CLUSTER_LOGIN_ROLES",
+      "kind": "value",
+      "signature": "export declare const CLUSTER_LOGIN_ROLES: [\"supabase_auth_admin\", \"supabase_admin\"];"
+    },
+    {
       "name": "CommandExecutionCapabilities",
       "kind": "type",
       "signature": "export interface CommandExecutionCapabilities {\n    requirePersistentAdapters?: boolean;\n    rpc?: Record<string, {\n        audit?: boolean;\n        idempotency?: boolean;\n        reconcile?: boolean;\n        transaction?: boolean;\n        boundary?: \"database\" | \"external\";\n    }>;\n    permission?: boolean;\n    audit?: boolean;\n    idempotency?: boolean;\n    transaction?: boolean | \"rpc-only\";\n}"
@@ -162,6 +167,16 @@
       "name": "CommandNode",
       "kind": "type",
       "signature": "export interface CommandNode {\n    rpc?: string;\n    branches?: CommandBranchNode[];\n    branchesFallback?: \"reject\" | \"command\";\n    className: string;\n    name: string;\n    permission?: string;\n    transaction: \"required\" | \"none\";\n    audit?: string;\n    idempotency: \"required\" | \"none\";\n    tenantScope?: \"required\" | \"none\";\n    standalone?: boolean;\n    uses?: InfraResourceUseRef[];\n    aspects?: AspectRefNode[];\n}"
+    },
+    {
+      "name": "compileDataCatalog",
+      "kind": "value",
+      "signature": "export declare function compileDataCatalog(input: CompileDataCatalogInput): Promise<DataCatalogDocument>;"
+    },
+    {
+      "name": "CompileDataCatalogInput",
+      "kind": "type",
+      "signature": "export interface CompileDataCatalogInput {\n    source: string;\n    schemaPath: string;\n    restExecution: RestExecutionSurface;\n}"
     },
     {
       "name": "CompiledExecutionManifest",
@@ -294,6 +309,21 @@
       "signature": "export declare function createSemanticSnapshot(graph: ApplicationGraph, options?: SemanticSnapshotOptions): SemanticSnapshot;"
     },
     {
+      "name": "DATA_CATALOG_GAPS",
+      "kind": "value",
+      "signature": "export declare const DATA_CATALOG_GAPS: [\n    \"rest-types-not-generated-from-catalog\",\n    \"graphql-sdl-not-generated-from-catalog\",\n    \"grants-not-emitted-from-catalog\",\n    \"field-level-deny-not-projected\",\n    \"relation-predicates-not-projected\",\n    \"public-graphql-remains-pg-graphql\",\n    \"postrust-hasura-graphql-is-not-the-contract\",\n    \"generated-typescript-model-not-proven-equal-to-zmodel\"\n];"
+    },
+    {
+      "name": "DATA_CATALOG_VERSION",
+      "kind": "value",
+      "signature": "export declare const DATA_CATALOG_VERSION: 1;"
+    },
+    {
+      "name": "DATA_PLANE_ROLES",
+      "kind": "value",
+      "signature": "export declare const DATA_PLANE_ROLES: [\"anon\", \"authenticated\", \"service_role\"];"
+    },
+    {
       "name": "DatabaseContractManifest",
       "kind": "type",
       "signature": "export interface DatabaseContractManifest {\n    readonly version: 1;\n    readonly role: string;\n    readonly fingerprint: string;\n    readonly inputs: Readonly<Record<string, string>>;\n    readonly migrationOrder: readonly string[];\n    readonly outputs: Readonly<Record<string, string>>;\n}"
@@ -301,12 +331,27 @@
     {
       "name": "DatabaseContractsOptions",
       "kind": "type",
-      "signature": "export interface DatabaseContractsOptions {\n    rootDir: string;\n    outDir: string;\n    postgrestTypes?: string;\n    modelSchema?: string;\n    modelPolicy?: string;\n    role: string;\n    graphql?: GraphqlOptions;\n    rpcRegistry?: string;\n    rpcCatalog?: string;\n    migrations: readonly string[];\n}"
+      "signature": "export interface DatabaseContractsOptions {\n    rootDir: string;\n    outDir: string;\n    postgrestTypes?: string;\n    modelSchema?: string;\n    modelPolicy?: string;\n    role: string;\n    graphql?: GraphqlOptions;\n    catalog?: DataCatalogConfig;\n    rpcRegistry?: string;\n    rpcCatalog?: string;\n    migrations: readonly string[];\n}"
     },
     {
       "name": "DatabaseGovernanceOptions",
       "kind": "type",
       "signature": "export interface DatabaseGovernanceOptions {\n    mode: \"off\" | \"check\" | \"enforce\";\n    ownership?: \"off\" | \"assist\" | \"enforce\";\n    projectRoot?: string;\n    moduleFile?: string;\n    databaseUrl?: string;\n    databaseUrlEnv?: string;\n    schemas?: string[];\n    rpcBoundary?: {\n        registry?: string;\n        catalog?: string;\n        legacy?: string;\n    };\n}"
+    },
+    {
+      "name": "DataCatalogConfig",
+      "kind": "type",
+      "signature": "export interface DataCatalogConfig {\n    schema: string;\n    restExecution: RestExecutionSurface;\n}"
+    },
+    {
+      "name": "DataCatalogDocument",
+      "kind": "type",
+      "signature": "export type DataCatalogDocument = Static<typeof dataCatalogDocumentSchema>;"
+    },
+    {
+      "name": "DataCatalogError",
+      "kind": "both",
+      "signature": "export declare class DataCatalogError extends Error {\n    readonly code: \"data-catalog\";\n    constructor(message: string);\n}"
     },
     {
       "name": "DEFAULT_SUPACLOUD_CONFIG",
@@ -1019,6 +1064,16 @@
       "signature": "export declare function parseDatabaseContractsOptions(value: unknown, directory: string): DatabaseContractsOptions;"
     },
     {
+      "name": "parseDataCatalogConfig",
+      "kind": "value",
+      "signature": "export declare function parseDataCatalogConfig(value: unknown, directory: string): DataCatalogConfig;"
+    },
+    {
+      "name": "parseDataCatalogDocument",
+      "kind": "value",
+      "signature": "export declare function parseDataCatalogDocument(value: unknown): DataCatalogDocument;"
+    },
+    {
       "name": "parseDeliveryBuildManifest",
       "kind": "value",
       "signature": "export declare function parseDeliveryBuildManifest(value: unknown): DeliveryBuildManifest;"
@@ -1072,6 +1127,11 @@
       "name": "ProviderNode",
       "kind": "type",
       "signature": "export interface ProviderNode {\n    token: string;\n    tokenKind: TokenKind;\n    kind: ProviderKind;\n    useClass?: string;\n    useValueExpr?: string;\n    useFactoryName?: string;\n    useExisting?: string;\n    scope: Scope;\n    deps: string[];\n    dependencyOptions?: DependencyOptions[];\n    optionalDeps?: string[];\n    selfDeps?: string[];\n    skipSelfDeps?: string[];\n    hostDeps?: string[];\n    functionalInjects?: FunctionalInjectNode[];\n    multi?: boolean;\n    providedIn?: \"root\";\n    hasOnDestroy?: boolean;\n    hasOnInit?: boolean;\n    exported: boolean;\n    file: string;\n    line: number;\n    importPath?: string;\n    importModule?: string;\n}"
+    },
+    {
+      "name": "PUBLIC_GRAPHQL_CONTRACT",
+      "kind": "value",
+      "signature": "export declare const PUBLIC_GRAPHQL_CONTRACT: {\n    readonly path: \"/graphql/v1\";\n    readonly rewritePath: \"/rpc/graphql\";\n    readonly acceptProfile: \"graphql_public\";\n    readonly contentProfile: \"graphql_public\";\n    readonly dialect: \"pg_graphql\";\n};"
     },
     {
       "name": "pullGraphqlSchema",
@@ -1144,6 +1204,11 @@
       "signature": "export declare function renderClient(graph: ApplicationGraph, options?: GenerateOptions): string;"
     },
     {
+      "name": "renderDataCatalog",
+      "kind": "value",
+      "signature": "export declare function renderDataCatalog(document: DataCatalogDocument): string;"
+    },
+    {
       "name": "renderDeliveryFunctionEntry",
       "kind": "value",
       "signature": "export declare function renderDeliveryFunctionEntry(generatedDirectory: string, hostPath: string, databaseSecret?: string): string;"
@@ -1177,6 +1242,16 @@
       "name": "resolveSupacloudConfig",
       "kind": "value",
       "signature": "export declare function resolveSupacloudConfig(config?: SupaCloudConfig, cwd?: any): {\n    rootDir: string;\n    outDir: string;\n    include: string[];\n    strict: boolean;\n    requireRouteContracts: boolean;\n    generateClient: boolean;\n    generateOpenApi: boolean;\n    openApi?: NonNullable<CompileOptions[\"openApi\"]>;\n    generatePermissions: boolean;\n    moduleBoundaryPreset: ModuleBoundaryPresetName;\n    commandCapabilities?: CommandExecutionCapabilities;\n    moduleBoundaries?: NonNullable<CompileOptions[\"moduleBoundaries\"]>;\n    typeSafety?: NonNullable<CompileOptions[\"typeSafety\"]>;\n    databaseGovernance?: NonNullable<CompileOptions[\"databaseGovernance\"]>;\n    allowRouteCommandBindings?: boolean;\n    disallowControllerDirectDb: boolean;\n    detectOrphanModules: boolean;\n    effect?: NonNullable<CompileOptions[\"effect\"]>;\n    treeShakeUnusedProviders: boolean;\n    graphql?: GraphqlOptions;\n};"
+    },
+    {
+      "name": "REST_EXECUTION_SURFACES",
+      "kind": "value",
+      "signature": "export declare const REST_EXECUTION_SURFACES: readonly [\"postgrest\", \"postrust\", \"lite\"];"
+    },
+    {
+      "name": "RestExecutionSurface",
+      "kind": "type",
+      "signature": "export type RestExecutionSurface = (typeof REST_EXECUTION_SURFACES)[number];"
     },
     {
       "name": "RouteNode",

@@ -127,6 +127,21 @@ are emitted as `rls.sql`. `--check` fails closed when the migration list does no
 contain those statements. Ordinary reads stay on PostgREST. This does not apply
 SQL or replace a command host policy.
 
+Optional `catalog` names that same ZenStack ZModel as the schema owner for REST
+and GraphQL. `restExecution` is `postgrest`, `postrust`, or `lite`: the process
+that would serve PostgREST-compatible REST. It is not the schema owner. Only
+`postgrest` sets `servesPublicRest`. `postrust` and `lite` stay false until
+separate parity evidence exists; recording `postrust` is not that evidence,
+and Postrust Hasura GraphQL cannot be selected here. The generated
+`data-catalog.json` records one model inventory, GoTrue JWT roles `anon`,
+`authenticated`, and `service_role`, and PostgreSQL `GRANT` plus RLS as the
+shared enforcement. It does not emit REST types, OpenAPI, GraphQL SDL, or
+`GRANT`. Public GraphQL stays `/graphql/v1` (`pg_graphql` via `/rpc/graphql`
+with the `graphql_public` profile). A null row-policy `hash` means
+`projection-incomplete`, not an empty policy. When `modelPolicy` is also set,
+it must be the same ZModel file. See
+[ZenStack data catalog](../../docs/zenstack-data-catalog.md).
+
 `--check` detects drift in supplied snapshots, local ZModel imports, RPC
 registry/catalog inputs, migration content/order and generated artifacts without
 writing. This is an offline check, not proof of live database parity or

@@ -16,8 +16,12 @@ ZModel + SQL grants/policies -> migrated PostgreSQL -> pg_graphql
 ```
 
 There is no Code First decorator/resolver mode, handwritten server SDL mode, or
-ZModel-to-GraphQL generator. `@Query` in the application framework does not define
-a GraphQL resolver. SDL and introspection JSON are two snapshot formats, not two
+ZModel-to-GraphQL generator. The ZenStack data catalog binds REST and this
+GraphQL snapshot to one ZModel and records that both still share PostgreSQL
+`GRANT`, RLS, and the GoTrue JWT. It does not emit GraphQL SDL, and the public
+route remains `/graphql/v1` backed by `pg_graphql`. See
+[ZenStack data catalog](zenstack-data-catalog.md). `@Query` in the application
+framework does not define a GraphQL resolver. SDL and introspection JSON are two snapshot formats, not two
 authoring modes; TypedDocumentNode is an output option, not another schema model.
 Only `schema`, `documents`, `scalars` and `typedDocuments` configure this pipeline.
 The schema must be a local `.graphql`, `.gql` or `.json` snapshot, not TypeScript,
