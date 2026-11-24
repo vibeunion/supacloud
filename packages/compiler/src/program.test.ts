@@ -131,6 +131,22 @@ describe("TypeScript 7 asynchronous API on Bun", () => {
     expect((await program.getSemanticDiagnostics()).some(error => error.code === 2322)).toBe(true);
   });
 
+  test("reports implicit this while default libraries stay loaded for the checker", async () => {
+    const root = await fixture({
+      "src/production.ts": "export function read() { return this.value; }\n",
+    });
+    const file = join(root, "src/production.ts");
+    await using program = await ts.createProgram([file], {
+      strict: true, noImplicitThis: true, target: ts.ScriptTarget.ES2022, types: [],
+    }, { cwd: root });
+    const names = program.getSourceFiles().map((source) => source.fileName.replaceAll("\\", "/"));
+    expect(names.some((name) => name.endsWith("/src/production.ts"))).toBe(true);
+    expect(names.some((name) => name.endsWith("/lib.es5.d.ts"))).toBe(true);
+    expect(names.some((name) => name.endsWith("/lib.dom.d.ts"))).toBe(true);
+    expect((await program.getSemanticDiagnostics(program.getSourceFile(file)!))
+      .some((error) => error.code === 2683)).toBe(true);
+  });
+
   test("binds aliases and prints an HTTP provider migration", async () => {
     const { migrateHttpProviderImports } = await import("./http-provider-migration");
     const source = 'import { provideHttpClient, withInterceptors } from "@supacloud/app";\nprovideHttpClient(withInterceptors([]));\n';

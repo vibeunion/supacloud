@@ -55,12 +55,14 @@ export class Program implements AsyncDisposable {
   }
   static async load(native: NativeProgram, api: API, owned = false, snapshot?: Snapshot): Promise<Program> {
     const sources = new Map<string, SourceFile>();
-    // Let the native client batch independent AST requests into one RPC round trip.
-    const loaded = await Promise.all((await native.getSourceFileNames()).map(async path =>
-      [path, await native.getSourceFile(path)] as const));
-    for (const [path, source] of loaded) {
-      if (source) sources.set(resolve(path), source);
-    }
+    const names = await native.getSourceFileNames();
+    // One batched RPC of every library AST stalls under CI load. Leaving those
+    // files unloaded deadlocks a later semantic request that has to fetch a
+    // library node on the same connection. lib.dom.d.ts travels on its own.
+    const heavy = names.filter((path) => isDomLibrary(path));
+    const light = names.filter((path) => !isDomLibrary(path));
+    await loadSourceChunks(native, sources, light, 8);
+    await loadSourceChunks(native, sources, heavy, 1);
     return new Program(native, api, sources, owned, snapshot);
   }
   getSourceFiles(): SourceFile[] { return [...this.sources.values()]; }
@@ -78,12 +80,45 @@ export class Program implements AsyncDisposable {
     return await resolver.resolveModuleName(name, dirname(containingFile));
   }
   async [Symbol.asyncDispose](): Promise<void> {
-    if (this.owned) {
-      try { await this.native.dispose(); }
-      finally { try { await this.snapshot?.dispose(); } finally { await this.api.close(); } }
+    if (!this.owned) return;
+    // A type server that stops answering must not pin the caller until the test
+    // runner kills it. Closing stdin lets the process leave its read loop.
+    try { await withDeadline(this.native.dispose(), PROGRAM_RELEASE_MS); }
+    finally {
+      try { await withDeadline(this.snapshot?.dispose() ?? Promise.resolve(), PROGRAM_RELEASE_MS); }
+      finally { await this.api.close(); }
     }
   }
 }
+
+const PROGRAM_RELEASE_MS = 2_000;
+
+function withDeadline(operation: Promise<unknown>, timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, timeoutMs);
+    operation.then(() => { clearTimeout(timer); resolve(); }, () => { clearTimeout(timer); resolve(); });
+  });
+}
+
+function isDomLibrary(fileName: string): boolean {
+  return fileName.replaceAll("\\", "/").endsWith("/lib.dom.d.ts");
+}
+
+async function loadSourceChunks(
+  native: NativeProgram,
+  sources: Map<string, SourceFile>,
+  names: readonly string[],
+  size: number,
+): Promise<void> {
+  for (let index = 0; index < names.length; index += size) {
+    const chunk = names.slice(index, index + size);
+    const loaded = await Promise.all(chunk.map(async (path) => [path, await native.getSourceFile(path)] as const));
+    for (const [path, source] of loaded) {
+      if (source) sources.set(resolve(path), source);
+    }
+  }
+}
+
 export interface ProgramInputs {
   cwd?: string;
   sources?: ReadonlyMap<string, string>;
