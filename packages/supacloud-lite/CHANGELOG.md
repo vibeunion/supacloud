@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.43.0...supacloud-lite-v0.43.1) (2026-11-24)
+
+
+### Documentation
+
+* **lite:** state the data-directory lock and list the new commands ([#2791](https://github.com/vibeunion/supacloud/issues/2791)) ([86c5cb7](https://github.com/vibeunion/supacloud/commit/86c5cb70aab741974f75b978a00307c364768fce))
+
 ## [0.43.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.42.2...supacloud-lite-v0.43.0) (2026-11-23)
 
 
