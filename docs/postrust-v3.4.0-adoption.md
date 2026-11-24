@@ -39,15 +39,36 @@ supabase-js bulk insert sends `columns="task","is_complete"`. Postrust treats th
 - Project GraphQL remains `/graphql/v1` proxied to `pg_graphql` through `/rpc/graphql`. Postrust's Hasura-dialect routes are not added to the public gateway.
 - Isolation remains one database per project.
 
-## Known gaps
+## SDK parity evidence
 
-Postrust's own [conformance note](https://github.com/postrust/postrust/blob/v3.4.0/docs/postgrest-conformance.md) says that, on the compatibility build against PostgREST's suite, status codes agree and full-contract agreement is short of every case. This repository did not run that live suite. Do not treat the pin as a passing conformance result.
+CI on `363bc7eff` (`run 45408359105`) failed `from().select().order()` in `sdk-parity.test.ts`. The assertion expected two rows from `.like("task", "order-%-<run>")` and received none. The same assertion passes on `main` with PostgREST v16.6.
 
-These differences remain with the official image and compatibility mode:
+The rows were never inserted. supabase-js bulk insert sends `columns="task","is_complete"`. Postrust v3.4.0 `parse_columns` keeps the quote characters, so the names do not match the table and the insert is rejected. The test ignored that error and then counted zero rows. `like` itself still passes `%` through to SQL `LIKE` after replacing only `*` with `%` (`crates/postrust-core/src/query/builder.rs` at tag v3.4.0), so a percent pattern remains a wildcard once the rows exist.
 
-- OpenAPI is not PostgREST's Swagger 2.0 document at `/`. Postrust serves its own OpenAPI 3.0 description, and object keys stay alphabetical unless the binary is rebuilt with `compat-key-order`. The published image is not built that way.
-- `Prefer: tx=rollback` is not implemented.
-- The REST process also answers Postrust GraphQL at `/api/graphql` and `/v1/graphql`. That is a second implementation on the internal port. Public project GraphQL is still pg_graphql. Do not route clients to Postrust's GraphQL paths.
-- There is no official linux/arm64 artifact for v3.4.0.
+`c10be4f01` strips one pair of surrounding quotes per name in the project REST proxy before the request reaches Postrust. `tests/unit/postrust-columns-param.test.ts` pins that translation. A client that opens the tenant REST port directly, and skips the proxy, still has to send unquoted `columns`.
+
+## Surfaces the official image always serves
+
+The CI container log for the pinned image records this startup, and v3.4.0 has no environment variable that removes it:
+
+- `/admin`, `/admin/openapi.json`, `/admin/swagger`, `/admin/scalar`, and `/admin/graphql` come from the `admin-ui` build feature. The dashboard and OpenAPI handlers in `crates/postrust-server/src/admin.rs` take no credential. Anyone who can connect to the tenant REST port can open them.
+- `/_` is the custom-route and health surface (`/_/health`).
+- `/api/graphql` and GraphQL subscriptions start even when `PGRST_GRAPHQL_FEDERATION` is left false. That flag only adds Apollo Federation fields. The subscription broker then retries DNS for its notification listener, which is a new log and CPU source on a host that has no such name.
+
+The public gateway still forwards project GraphQL to `pg_graphql` at `/graphql/v1` → `/rpc/graphql`. It does not add routes for `/admin`, `/_`, or `/api/graphql`. Those paths are still served on the tenant REST process, which is bound to `0.0.0.0` so the gateway can reach it. Not publishing a route is not the same as turning the handler off. v3.4.0 cannot turn these handlers off without a different build. This repository does not ship a fork of the image.
+
+## Other deviations from PostgREST v16.6
+
+- **arm64.** `install.sh` still installs arm64 artifacts for other components. Postrust v3.4.0 publishes no linux/arm64 image or release binary. The REST installer fails closed on that architecture instead of leaving PostgREST in place.
+- **CORS.** An empty `PGRST_SERVER_CORS_ORIGINS`, which is the default, allows every origin and sends `Access-Control-Allow-Origin` accordingly. PostgREST sends no CORS headers unless `server-cors-allowed-origins` is set. The per-tenant `.conf` still sets that key and the launcher maps it. Compose, Podman, CI, and the pilot do not, so those processes are more permissive than PostgREST was. There is no documented value that restores "send no CORS headers."
+- **Object key order and `GET /`.** The official image logs that compatibility mode still returns object keys alphabetically. `GET /` is not PostgREST's Swagger 2.0 document. Both are visible to anything that reads the REST port directly.
+- **Unknown `.conf` keys.** The launcher exits if a key is not in the mapped set. The management API writer only emits mapped keys, so the generated file starts. An operator-added PostgREST setting that this mapping does not know makes the tenant REST process fail at restart. There is no fallback to the PostgREST binary.
+- **`Prefer: tx=rollback`** is not implemented.
+
+## Conformance
+
+Upstream [postgrest-conformance.md](https://github.com/postrust/postrust/blob/v3.4.0/docs/postgrest-conformance.md) at v3.4.0 reports 99.1% full-contract agreement over 1499 replayed PostgREST cases, and says that measurement used a binary built with `admin-ui,compat-key-order`. The image pinned here is the published `admin-ui,otel` build, which does not include `compat-key-order`. This repository has not replayed that suite. A passing compile of this pin is not that result.
+
+`docs/adr/2026-11-24-postgrest-dataplane-unification.md` describes the data-plane direction. It is not a test result for this image and it does not authorize a production cutover.
 
 No production host was upgraded, retagged, or deployed for this pin.
