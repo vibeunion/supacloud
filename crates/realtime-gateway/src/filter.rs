@@ -46,10 +46,7 @@ impl ColumnFilter {
             "lte" => FilterOp::Lte(val_str.parse().ok()?),
             "in" => {
                 let inner = val_str.strip_prefix('(')?.strip_suffix(')')?;
-                let items: Vec<String> = inner
-                    .split(',')
-                    .map(|s| strip_quotes(s.trim()))
-                    .collect();
+                let items: Vec<String> = inner.split(',').map(|s| strip_quotes(s.trim())).collect();
                 FilterOp::In(items)
             }
             "is" => {
@@ -77,65 +74,50 @@ impl ColumnFilter {
         let val = obj.get(&self.column);
 
         match &self.op {
-            FilterOp::IsNull => val.map_or(true, |v| v.is_null()),
-            FilterOp::IsNotNull => val.map_or(false, |v| !v.is_null()),
-            FilterOp::Eq(expected) => {
-                match val {
-                    Some(v) => value_to_string(v) == *expected,
-                    None => false,
+            FilterOp::IsNull => val.is_none_or(|v| v.is_null()),
+            FilterOp::IsNotNull => val.is_some_and(|v| !v.is_null()),
+            FilterOp::Eq(expected) => match val {
+                Some(v) => value_to_string(v) == *expected,
+                None => false,
+            },
+            FilterOp::Neq(expected) => match val {
+                Some(v) => value_to_string(v) != *expected,
+                None => true,
+            },
+            FilterOp::Gt(num) => match val.and_then(value_to_f64) {
+                Some(n) => n > *num,
+                None => false,
+            },
+            FilterOp::Gte(num) => match val.and_then(value_to_f64) {
+                Some(n) => n >= *num,
+                None => false,
+            },
+            FilterOp::Lt(num) => match val.and_then(value_to_f64) {
+                Some(n) => n < *num,
+                None => false,
+            },
+            FilterOp::Lte(num) => match val.and_then(value_to_f64) {
+                Some(n) => n <= *num,
+                None => false,
+            },
+            FilterOp::In(candidates) => match val {
+                Some(v) => {
+                    let s = value_to_string(v);
+                    candidates.iter().any(|c| c == &s)
                 }
-            }
-            FilterOp::Neq(expected) => {
-                match val {
-                    Some(v) => value_to_string(v) != *expected,
-                    None => true,
-                }
-            }
-            FilterOp::Gt(num) => {
-                match val.and_then(|v| value_to_f64(v)) {
-                    Some(n) => n > *num,
-                    None => false,
-                }
-            }
-            FilterOp::Gte(num) => {
-                match val.and_then(|v| value_to_f64(v)) {
-                    Some(n) => n >= *num,
-                    None => false,
-                }
-            }
-            FilterOp::Lt(num) => {
-                match val.and_then(|v| value_to_f64(v)) {
-                    Some(n) => n < *num,
-                    None => false,
-                }
-            }
-            FilterOp::Lte(num) => {
-                match val.and_then(|v| value_to_f64(v)) {
-                    Some(n) => n <= *num,
-                    None => false,
-                }
-            }
-            FilterOp::In(candidates) => {
-                match val {
-                    Some(v) => {
-                        let s = value_to_string(v);
-                        candidates.iter().any(|c| c == &s)
-                    }
-                    None => false,
-                }
-            }
+                None => false,
+            },
         }
     }
 }
 
 fn strip_quotes(s: &str) -> String {
     let trimmed = s.trim();
-    if (trimmed.starts_with('"') && trimmed.ends_with('"'))
-        || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+    if ((trimmed.starts_with('"') && trimmed.ends_with('"'))
+        || (trimmed.starts_with('\'') && trimmed.ends_with('\'')))
+        && trimmed.len() >= 2
     {
-        if trimmed.len() >= 2 {
-            return trimmed[1..trimmed.len() - 1].to_string();
-        }
+        return trimmed[1..trimmed.len() - 1].to_string();
     }
     trimmed.to_string()
 }

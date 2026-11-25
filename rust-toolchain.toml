@@ -1,0 +1,8 @@
+[toolchain]
+# The four crates under crates/ are independent packages with their own lock
+# files, so a workspace toolchain file is the only place that pins them
+# together. The Rust services CI job reads this file; `cargo` run from any
+# directory inside the repository resolves it the same way.
+channel = "1.97.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

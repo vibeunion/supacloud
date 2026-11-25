@@ -19,11 +19,15 @@ impl CompiledPolicy {
     pub fn from_input(input: &AllowedNetworksInput) -> Result<Self, String> {
         let mut networks = Vec::new();
         for cidr in &input.ipv4 {
-            let net: IpNet = cidr.parse().map_err(|e| format!("Invalid IPv4 CIDR {}: {}", cidr, e))?;
+            let net: IpNet = cidr
+                .parse()
+                .map_err(|e| format!("Invalid IPv4 CIDR {}: {}", cidr, e))?;
             networks.push(net);
         }
         for cidr in &input.ipv6 {
-            let net: IpNet = cidr.parse().map_err(|e| format!("Invalid IPv6 CIDR {}: {}", cidr, e))?;
+            let net: IpNet = cidr
+                .parse()
+                .map_err(|e| format!("Invalid IPv6 CIDR {}: {}", cidr, e))?;
             networks.push(net);
         }
         Ok(Self { networks })

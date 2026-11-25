@@ -38,7 +38,6 @@ fn unauthorized() -> (StatusCode, Json<serde_json::Value>) {
     )
 }
 
-
 #[tokio::main]
 async fn main() {
     init_tracing("info,supacloud_jit_gateway=debug");
@@ -52,7 +51,8 @@ async fn main() {
     .expect("invalid JIT gateway control bind address");
 
     let bind_host = std::env::var("JIT_GATEWAY_BIND_HOST").unwrap_or_else(|_| "127.0.0.1".into());
-    let upstream_host = std::env::var("JIT_GATEWAY_UPSTREAM_HOST").unwrap_or_else(|_| "127.0.0.1".into());
+    let upstream_host =
+        std::env::var("JIT_GATEWAY_UPSTREAM_HOST").unwrap_or_else(|_| "127.0.0.1".into());
     let upstream_port = std::env::var("JIT_GATEWAY_UPSTREAM_PORT")
         .ok()
         .and_then(|p| p.parse::<u16>().ok())
@@ -111,17 +111,12 @@ const JIT_GATEWAY_ROUTES: &[&str] = &[
 ];
 
 async fn manifest() -> impl IntoResponse {
-    let mut manifest = BoundaryManifest::new(
-        "jit-gateway",
-        env!("CARGO_PKG_VERSION"),
-        "axum-tower",
-    );
+    let mut manifest =
+        BoundaryManifest::new("jit-gateway", env!("CARGO_PKG_VERSION"), "axum-tower");
     manifest.capabilities.push("database-gateway".to_owned());
-    manifest.routes.extend(
-        JIT_GATEWAY_ROUTES
-            .iter()
-            .map(|route| (*route).to_owned()),
-    );
+    manifest
+        .routes
+        .extend(JIT_GATEWAY_ROUTES.iter().map(|route| (*route).to_owned()));
     Json(manifest)
 }
 
@@ -153,7 +148,10 @@ async fn create_binding(
     }
 }
 
-async fn list_bindings(State(manager): State<Arc<GatewayManager>>, headers: HeaderMap) -> impl IntoResponse {
+async fn list_bindings(
+    State(manager): State<Arc<GatewayManager>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
     if !control_authorized(&headers) {
         return unauthorized();
     }

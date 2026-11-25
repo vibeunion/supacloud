@@ -33,11 +33,17 @@ async fn main() {
         .route("/healthcheck", get(healthcheck))
         .route("/health", get(healthcheck))
         .route("/", post(handle_root_post))
-        .route("/{*path}", post(handle_transform_post).get(handle_get_dispatch))
+        .route(
+            "/{*path}",
+            post(handle_transform_post).get(handle_get_dispatch),
+        )
         .layer(DefaultBodyLimit::max(engine::MAX_PAYLOAD_BYTES))
         .layer(TraceLayer::new_for_http());
 
-    info!("🚀 SupaCloud Image Service (Rust) listening on http://{}", addr);
+    info!(
+        "🚀 SupaCloud Image Service (Rust) listening on http://{}",
+        addr
+    );
 
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app)
@@ -90,11 +96,7 @@ async fn handle_get_dispatch(Path(path): Path<String>) -> Response {
         .into_response()
 }
 
-async fn handle_transform(
-    path: String,
-    body: Bytes,
-    headers: HeaderMap,
-) -> Response {
+async fn handle_transform(path: String, body: Bytes, headers: HeaderMap) -> Response {
     if body.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -123,21 +125,18 @@ async fn handle_transform(
     let options_clone = options.clone();
 
     // Spawn blocking task to utilize thread pool without blocking Tokio runtime
-    let result = tokio::task::spawn_blocking(move || {
-        process_image(&body_arc, &options_clone)
-    })
-    .await;
+    let result =
+        tokio::task::spawn_blocking(move || process_image(&body_arc, &options_clone)).await;
 
     match result {
         Ok(Ok(output)) => {
             let mut res_headers = with_engine_headers();
-            res_headers.insert(
-                header::CONTENT_TYPE,
-                output.content_type.parse().unwrap(),
-            );
+            res_headers.insert(header::CONTENT_TYPE, output.content_type.parse().unwrap());
             res_headers.insert(
                 header::CACHE_CONTROL,
-                "public, max-age=3600, stale-while-revalidate=86400".parse().unwrap(),
+                "public, max-age=3600, stale-while-revalidate=86400"
+                    .parse()
+                    .unwrap(),
             );
             if negotiated_format {
                 res_headers.insert(header::VARY, "Accept".parse().unwrap());

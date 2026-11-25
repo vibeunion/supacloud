@@ -4,7 +4,9 @@ use crate::parser::{TargetFormat, TransformOptions};
 use fast_image_resize::images::Image;
 use fast_image_resize::{PixelType, Resizer};
 use image::codecs::{avif::AvifEncoder, jpeg::JpegEncoder};
-use image::{imageops, DynamicImage, GenericImageView, ImageEncoder, ImageFormat, ImageReader, RgbaImage};
+use image::{
+    imageops, DynamicImage, GenericImageView, ImageEncoder, ImageFormat, ImageReader, RgbaImage,
+};
 use std::io::Cursor;
 
 pub const MAX_IMAGE_WIDTH: u32 = 10000;
@@ -41,7 +43,10 @@ pub struct ProcessedOutput {
 }
 
 /// Main pipeline: validates, decodes, resizes via SIMD, applies filters, and encodes.
-pub fn process_image(raw: &[u8], options: &TransformOptions) -> Result<ProcessedOutput, EngineError> {
+pub fn process_image(
+    raw: &[u8],
+    options: &TransformOptions,
+) -> Result<ProcessedOutput, EngineError> {
     if raw.len() > MAX_PAYLOAD_BYTES {
         return Err(EngineError::PayloadTooLarge(MAX_PAYLOAD_BYTES));
     }
@@ -52,24 +57,33 @@ pub fn process_image(raw: &[u8], options: &TransformOptions) -> Result<Processed
         .map_err(|e| EngineError::DecodeError(e.to_string()))?;
 
     let format_hint = reader.format();
-    let mut dyn_img = reader.decode().map_err(|e| EngineError::DecodeError(e.to_string()))?;
+    let mut dyn_img = reader
+        .decode()
+        .map_err(|e| EngineError::DecodeError(e.to_string()))?;
     let (orig_w, orig_h) = dyn_img.dimensions();
 
     let total_pixels = (orig_w as u64) * (orig_h as u64);
     if total_pixels > MAX_IMAGE_PIXELS || orig_w > MAX_IMAGE_WIDTH || orig_h > MAX_IMAGE_HEIGHT {
-        return Err(EngineError::DimensionsTooLarge(orig_w, orig_h, MAX_IMAGE_PIXELS));
+        return Err(EngineError::DimensionsTooLarge(
+            orig_w,
+            orig_h,
+            MAX_IMAGE_PIXELS,
+        ));
     }
 
     // Metadata extraction mode (info / meta)
     if options.is_meta {
         let meta = ImageMetadata {
-            format: format_hint.map(|f| format!("{:?}", f).to_lowercase()).unwrap_or_else(|| "unknown".into()),
+            format: format_hint
+                .map(|f| format!("{:?}", f).to_lowercase())
+                .unwrap_or_else(|| "unknown".into()),
             width: orig_w,
             height: orig_h,
             size_bytes: raw.len(),
             has_alpha: dyn_img.color().has_alpha(),
         };
-        let json_bytes = serde_json::to_vec_pretty(&meta).map_err(|e| EngineError::EncodeError(e.to_string()))?;
+        let json_bytes = serde_json::to_vec_pretty(&meta)
+            .map_err(|e| EngineError::EncodeError(e.to_string()))?;
         return Ok(ProcessedOutput {
             bytes: json_bytes,
             content_type: "application/json",
@@ -135,8 +149,13 @@ fn resize_simd(
     options: &TransformOptions,
 ) -> Result<DynamicImage, EngineError> {
     // If not fit_in and not stretch, crop to aspect ratio before resizing (smart/center crop)
-    let img_to_resize = if !options.fit_in && !options.stretch && options.width.is_some() && options.height.is_some() {
-        let (crop_x, crop_y, crop_w, crop_h) = calculate_crop_rect(src.width(), src.height(), target_w, target_h);
+    let img_to_resize = if !options.fit_in
+        && !options.stretch
+        && options.width.is_some()
+        && options.height.is_some()
+    {
+        let (crop_x, crop_y, crop_w, crop_h) =
+            calculate_crop_rect(src.width(), src.height(), target_w, target_h);
         src.crop_imm(crop_x, crop_y, crop_w, crop_h)
     } else {
         src.clone()
@@ -155,7 +174,12 @@ fn resize_simd(
     Ok(DynamicImage::ImageRgba8(out_rgba))
 }
 
-fn calculate_crop_rect(orig_w: u32, orig_h: u32, target_w: u32, target_h: u32) -> (u32, u32, u32, u32) {
+fn calculate_crop_rect(
+    orig_w: u32,
+    orig_h: u32,
+    target_w: u32,
+    target_h: u32,
+) -> (u32, u32, u32, u32) {
     let target_aspect = target_w as f64 / target_h as f64;
     let orig_aspect = orig_w as f64 / orig_h as f64;
 
@@ -220,19 +244,24 @@ fn apply_filters(img: &mut DynamicImage, options: &TransformOptions) {
     }
 }
 
-fn encode_image(img: &DynamicImage, format: TargetFormat, quality: u8) -> Result<Vec<u8>, EngineError> {
+fn encode_image(
+    img: &DynamicImage,
+    format: TargetFormat,
+    quality: u8,
+) -> Result<Vec<u8>, EngineError> {
     let mut buffer = Cursor::new(Vec::new());
     let result = match format {
         TargetFormat::Avif => {
             let rgba = img.to_rgba8();
             let (width, height) = rgba.dimensions();
-            AvifEncoder::new_with_speed_quality(&mut buffer, 6, quality)
-                .write_image(&rgba, width, height, image::ExtendedColorType::Rgba8)
+            AvifEncoder::new_with_speed_quality(&mut buffer, 6, quality).write_image(
+                &rgba,
+                width,
+                height,
+                image::ExtendedColorType::Rgba8,
+            )
         }
-        TargetFormat::Jpeg => {
-            JpegEncoder::new_with_quality(&mut buffer, quality)
-                .encode_image(img)
-        }
+        TargetFormat::Jpeg => JpegEncoder::new_with_quality(&mut buffer, quality).encode_image(img),
         TargetFormat::WebP => {
             // image-webp currently exposes lossless VP8L only; Imagor remains the
             // lossy WebP path when a caller needs quality-controlled output.
@@ -262,10 +291,12 @@ mod tests {
     #[test]
     fn test_process_resize_webp() {
         let png_bytes = create_test_image(200, 100);
-        let mut opt = TransformOptions::default();
-        opt.width = Some(100);
-        opt.height = Some(50);
-        opt.format = Some(TargetFormat::WebP);
+        let opt = TransformOptions {
+            width: Some(100),
+            height: Some(50),
+            format: Some(TargetFormat::WebP),
+            ..TransformOptions::default()
+        };
 
         let out = process_image(&png_bytes, &opt).unwrap();
         assert_eq!(out.content_type, "image/webp");
@@ -275,9 +306,11 @@ mod tests {
     #[test]
     fn test_process_avif() {
         let png_bytes = create_test_image(64, 32);
-        let mut opt = TransformOptions::default();
-        opt.format = Some(TargetFormat::Avif);
-        opt.quality = 72;
+        let opt = TransformOptions {
+            format: Some(TargetFormat::Avif),
+            quality: 72,
+            ..TransformOptions::default()
+        };
 
         let out = process_image(&png_bytes, &opt).unwrap();
         assert_eq!(out.content_type, "image/avif");
@@ -288,8 +321,10 @@ mod tests {
     #[test]
     fn test_process_metadata() {
         let png_bytes = create_test_image(120, 80);
-        let mut opt = TransformOptions::default();
-        opt.is_meta = true;
+        let opt = TransformOptions {
+            is_meta: true,
+            ..TransformOptions::default()
+        };
 
         let out = process_image(&png_bytes, &opt).unwrap();
         assert_eq!(out.content_type, "application/json");

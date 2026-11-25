@@ -3975,7 +3975,7 @@ install_jit_gateway_binary() {
         return 0
     elif [[ -d "${SCRIPT_DIR}/crates/jit-gateway" ]] && command -v cargo >/dev/null 2>&1; then
         log_info "Compiling crates/jit-gateway release binary..."
-        cargo build --release --manifest-path "${SCRIPT_DIR}/crates/jit-gateway/Cargo.toml" || return 1
+        cargo build --release --locked --manifest-path "${SCRIPT_DIR}/crates/jit-gateway/Cargo.toml" || return 1
         install -m 0755 "${SCRIPT_DIR}/crates/jit-gateway/target/release/supacloud-jit-gateway" "$target"
         log_info "Installed supacloud-jit-gateway to $target"
         return 0
@@ -5262,7 +5262,7 @@ install_rust_image_binary() {
         return 0
     elif [[ -d "${SCRIPT_DIR}/crates/image-service" ]] && command -v cargo >/dev/null 2>&1; then
         log_info "Compiling crates/image-service release binary..."
-        cargo build --release --manifest-path "${SCRIPT_DIR}/crates/image-service/Cargo.toml" || return 1
+        cargo build --release --locked --manifest-path "${SCRIPT_DIR}/crates/image-service/Cargo.toml" || return 1
         install -m 0755 "${SCRIPT_DIR}/crates/image-service/target/release/supacloud-image-service" "$target"
         log_info "Installed supacloud-image to $target"
         return 0

@@ -275,7 +275,7 @@ impl ChannelHub {
         let timestamp = change
             .commit_timestamp
             .clone()
-            .unwrap_or_else(|| chrono_like_now());
+            .unwrap_or_else(chrono_like_now);
 
         for conn in conns.values() {
             if conn.tenant_id != tenant_id {

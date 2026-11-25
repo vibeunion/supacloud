@@ -103,7 +103,11 @@ pub fn parse_path(path: &str) -> TransformOptions {
             options.is_meta = true;
             continue;
         }
-        if seg == "fit-in" || seg == "adaptive-fit-in" || seg == "full-fit-in" || seg == "adaptive-full-fit-in" {
+        if seg == "fit-in"
+            || seg == "adaptive-fit-in"
+            || seg == "full-fit-in"
+            || seg == "adaptive-full-fit-in"
+        {
             options.fit_in = true;
             continue;
         }
@@ -185,7 +189,11 @@ fn parse_filters(content: &str, options: &mut TransformOptions) {
                 }
                 "blur" => {
                     // blur(sigma) or blur(radius, sigma)
-                    if let Some(sigma) = args_str.split(',').next().and_then(|s| s.trim().parse::<f32>().ok()) {
+                    if let Some(sigma) = args_str
+                        .split(',')
+                        .next()
+                        .and_then(|s| s.trim().parse::<f32>().ok())
+                    {
                         options.blur_sigma = Some(sigma.max(0.1));
                     }
                 }
@@ -250,7 +258,9 @@ mod tests {
 
     #[test]
     fn test_parse_filters_and_effects() {
-        let opt = parse_path("/300x0/smart/filters:format(jpeg):quality(90):blur(2.5):grayscale():rotate(90)/");
+        let opt = parse_path(
+            "/300x0/smart/filters:format(jpeg):quality(90):blur(2.5):grayscale():rotate(90)/",
+        );
         assert_eq!(opt.width, Some(300));
         assert_eq!(opt.height, None);
         assert!(opt.smart);
