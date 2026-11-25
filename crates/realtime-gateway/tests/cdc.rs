@@ -264,8 +264,11 @@ impl Postgres {
              GRANT anon, authenticated, service_role TO supabase_admin WITH INHERIT FALSE, SET TRUE;
              GRANT supabase_admin, supabase_realtime_admin, anon, authenticated, service_role TO postgres",
         );
+        // Production bootstrap embeds this same 2.150.0 tree. The fixture
+        // reads the directory, so it cannot pass against a schema the
+        // Management API does not ship.
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../packages/management-api/src/db/realtime-tenant-schema");
+            .join("../../packages/management-api/src/db/realtime-tenant-schema/2.150.0");
         let order = std::fs::read_to_string(root.join("order.txt"))
             .expect("the pinned Realtime schema order should be present");
         for relative in order.lines().map(str::trim).filter(|line| !line.is_empty()) {

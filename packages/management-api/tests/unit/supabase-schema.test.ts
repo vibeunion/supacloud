@@ -564,6 +564,24 @@ describe("supabase bootstrap schema", () => {
     }
   });
 
+  test("rust bootstrap installs the pinned Realtime artifact without defining it in tenant SQL", () => {
+    const databaseService = readRepoFile("src/services/database.service.ts");
+    const taskWorker = readRepoFile("src/services/task.worker.ts");
+    const installer = readRepoFile("src/db/realtime-tenant-schema/index.ts");
+    expect(databaseService).toContain("ensureOfficialRealtimeTenantSchema");
+    expect(taskWorker).toContain('config.realtimeEngine !== "container"');
+    expect(installer).toContain("decideRealtimeTenantSchema");
+    expect(installer).toContain('config.realtimeEngine === "container"');
+    expect(installer).not.toMatch(/create\s+(?:or\s+replace\s+)?function\s+realtime\.(?:apply_rls|list_changes)\s*\(/i);
+    for (const source of [
+      readRepoFile("src/db/schemas/supabase.sql"),
+      readRepoFile("src/services/tenant-runtime-migration.ts"),
+      readRepoFile("src/scripts/migrate-tenant-schema.ts"),
+    ]) {
+      expect(source).not.toMatch(/create\s+(?:or\s+replace\s+)?function\s+realtime\.(?:apply_rls|list_changes)\s*\(/i);
+    }
+  });
+
   test("ordinary tenant migrations never mutate legacy Realtime protocol functions", () => {
     for (const source of [
       readRepoFile("src/services/tenant-runtime-migration.ts"),

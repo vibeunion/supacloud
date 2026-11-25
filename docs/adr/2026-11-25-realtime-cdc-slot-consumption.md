@@ -81,16 +81,22 @@ truncating the row itself.
 - `anon` and `authenticated` `postgres_changes` are delivered only through
   `realtime.subscription` and `realtime.apply_rls`. The fixture
   `row_level_security_hides_a_row_from_another_role` covers a negative case.
-- Those objects are official Realtime schema, not SupaCloud SQL. With the Rust
-  gateway as the default, project provisioning installs the pinned 2.150.0
-  tenant schema when `realtime.list_changes` is absent. `SUPACLOUD_REALTIME_ENGINE=container`
-  still leaves that install to Elixir. A database that already has the function
-  is not rewritten.
+- Those objects are official Realtime schema, not SupaCloud SQL. The pinned
+  2.150.0 tree lives at
+  `packages/management-api/src/db/realtime-tenant-schema/2.150.0/` and is the
+  artifact both project bootstrap and the CDC fixture install. Every file and
+  the tree are sha256-pinned. With the Rust gateway as the default, bootstrap
+  installs that tree when the `realtime` schema is empty or
+  `realtime.list_changes(name, name, integer, integer)` is absent. An exact pin
+  is a no-op. A database that already has `realtime.list_changes` is left
+  alone, including an Elixir-migrated tenant whose catalog differs from the
+  pin. `SUPACLOUD_REALTIME_ENGINE=container` still leaves the install to Elixir.
 
 ## Evidence
 
 `crates/realtime-gateway/tests/cdc.rs` starts a cluster with `wal_level=logical`,
-installs the pinned Realtime 2.150.0 tenant schema, creates the publication and
+installs the pinned Realtime 2.150.0 tenant schema from the shared artifact,
+creates the publication and
 two tables (one deliberately outside it), registers a tenant with the Management
 API's registration payload, and writes rows. It asserts insert/update/delete
 payloads (`record`, `old_record` identity, `columns`, ISO 8601
@@ -100,3 +106,9 @@ delivers nothing. `row_level_security_hides_a_row_from_another_role` subscribes
 as `authenticated` (two subjects), `anon`, and `service_role`, and asserts that
 a private row is delivered only to its owner and to `service_role`. A missing
 `wal2json` plugin fails the fixture; CI installs it rather than skipping.
+
+`tests/integration/realtime-tenant-schema-bootstrap.test.ts` starts from an
+empty `realtime` schema on PostgreSQL 18, applies the pinned artifact, and
+checks `realtime.subscription` ownership, a subscription row, a second pass
+that keeps the same `list_changes` OID, and that a substituted `list_changes`
+body stays in place.
