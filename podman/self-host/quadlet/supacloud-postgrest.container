@@ -5,7 +5,7 @@ Requires=supacloud-postgres.service
 After=supacloud-postgres.service
 
 [Container]
-Image=docker.io/postrust/postrust:v3.4.0@sha256:4de17b6c68403317a33c0a8ab78edb347e6b3131e9784c25b5c700554ac61809
+Image=localhost/supacloud-postrust:local
 ContainerName=supacloud-postgrest
 Network=supacloud.network
 NetworkAlias=postgrest

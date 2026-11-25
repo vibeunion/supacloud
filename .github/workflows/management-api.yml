@@ -1010,6 +1010,7 @@ jobs:
 
   integration-test:
     name: Integration & Compliance Tests
+    needs: [postrust-patched-binary]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
@@ -1025,18 +1026,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-      postgrest:
-        image: docker.io/postrust/postrust:v3.4.0@sha256:4de17b6c68403317a33c0a8ab78edb347e6b3131e9784c25b5c700554ac61809
-        ports:
-          - 127.0.0.1:3000:3000
-        env:
-          PGRST_DB_URI: postgres://supabase_admin:postgres@postgres:5432/postgres
-          PGRST_DB_SCHEMAS: public
-          PGRST_DB_ANON_ROLE: anon
-          PGRST_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
-          PGRST_COMPAT_MODE: "true"
-          PGRST_DB_CHANNEL: pgrst
-          PGRST_DB_CHANNEL_ENABLED: "true"
       gotrue:
         image: supabase/gotrue:v2.198.0
         ports:
@@ -1091,6 +1080,45 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+
+      - name: Download patched Postrust
+        uses: actions/download-artifact@v8
+        with:
+          name: postrust-v3.4.0-null-rpc
+          path: ${{ runner.temp }}/postrust-dist
+
+      - name: Start patched Postrust
+        run: |
+          set -euo pipefail
+          stamp="${RUNNER_TEMP}/postrust-dist/postrust.postrust-patch"
+          test "$(head -n 1 "$stamp")" = "postrust-v3.4.0-null-rpc-args"
+          test "$(sed -n '2p' "$stamp")" = "b6fc50a592ede5071484e5e83a5ad1b59134724dcd2d91f71bf60b5b8bc983a6"
+          test "$(sed -n '3p' "$stamp")" = "2c5de117fe288a18046776dfd0505d21845ba49b072d62bdab2c29ce3f2fe722"
+          chmod 755 "${RUNNER_TEMP}/postrust-dist/postrust"
+          actual="$(sha256sum "${RUNNER_TEMP}/postrust-dist/postrust" | awk '{print $1}')"
+          test "$actual" != "f174c84a1b3ac8a24c13a4ef7896adfc029ece8c1b206ee715e3864f5f169b7a"
+          setsid --fork "${RUNNER_TEMP}/postrust-dist/postrust" \
+            > "${RUNNER_TEMP}/postrust.log" 2>&1 < /dev/null
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:3000/ >/dev/null; then
+              echo "Patched Postrust is ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Patched Postrust did not become ready" >&2
+          cat "${RUNNER_TEMP}/postrust.log" >&2 || true
+          exit 1
+        env:
+          PGRST_DB_URI: postgres://supabase_admin:postgres@127.0.0.1:5432/postgres
+          PGRST_DB_SCHEMAS: public
+          PGRST_DB_ANON_ROLE: anon
+          PGRST_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+          PGRST_COMPAT_MODE: "true"
+          PGRST_DB_CHANNEL: pgrst
+          PGRST_DB_CHANNEL_ENABLED: "true"
+          PGRST_SERVER_HOST: 127.0.0.1
+          PGRST_SERVER_PORT: "3000"
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -1327,6 +1355,10 @@ jobs:
           S3_SECRET_KEY: minioadmin
           S3_FORCE_PATH_STYLE: true
 
+      - name: Stop patched Postrust
+        if: always()
+        run: pkill -f "${RUNNER_TEMP}/postrust-dist/postrust" || true
+
   shell-scripts-lint:
     name: Shell Scripts Lint
     runs-on: ubuntu-24.04
@@ -1450,6 +1482,7 @@ jobs:
       - docker-and-scripts-checks
       - unit-test
       - postgres-18-compatibility
+      - postrust-patched-binary
       - postrust-graphql-rls
       - integration-test
       - shell-scripts-lint
@@ -1474,6 +1507,7 @@ jobs:
           DOCKER_AND_SCRIPTS: ${{ needs.docker-and-scripts-checks.result }}
           UNIT_TESTS: ${{ needs.unit-test.result }}
           POSTGRES_18: ${{ needs.postgres-18-compatibility.result }}
+          POSTRUST_PATCHED_BINARY: ${{ needs.postrust-patched-binary.result }}
           POSTRUST_GRAPHQL_RLS: ${{ needs.postrust-graphql-rls.result }}
           INTEGRATION_TESTS: ${{ needs.integration-test.result }}
           SHELL_SCRIPTS_LINT: ${{ needs.shell-scripts-lint.result }}
@@ -1494,6 +1528,7 @@ jobs:
             "$DOCKER_AND_SCRIPTS" \
             "$UNIT_TESTS" \
             "$POSTGRES_18" \
+            "$POSTRUST_PATCHED_BINARY" \
             "$POSTRUST_GRAPHQL_RLS" \
             "$INTEGRATION_TESTS" \
             "$SHELL_SCRIPTS_LINT" \
@@ -1691,8 +1726,62 @@ jobs:
             packages/pgredis-runtime/dist/*
           retention-days: 7
 
+  postrust-patched-binary:
+    name: Patched Postrust binary
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Cache patched Postrust build
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.supacloud/rust-1.98.1
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/supacloud
+          key: postrust-v3.4.0-null-rpc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/lib/postrust_pin.sh', 'scripts/build_supacloud_postrust.sh', 'docs/patches/postrust-v3.4.0-null-rpc-args.patch') }}
+
+      - name: Build patched Postrust v3.4.0
+        run: |
+          set -euo pipefail
+          export SUPACLOUD_POSTRUST_TARGET_DIR="${HOME}/.cache/supacloud/postrust-target"
+          export OUT_DIR=dist
+          bash scripts/build_supacloud_postrust.sh
+
+      - name: Upload patched Postrust
+        uses: actions/upload-artifact@v7
+        with:
+          name: postrust-v3.4.0-null-rpc
+          path: |
+            dist/postrust
+            dist/postrust.postrust-patch
+            dist/SHA256SUMS.postrust
+          retention-days: 7
+
+      - name: Install PostgreSQL 16
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-16
+          test -x /usr/lib/postgresql/16/bin/initdb
+
+      - name: JSON null RPC arguments bind as SQL NULL
+        env:
+          SUPACLOUD_TEST_POSTRUST_NULL_RPC: "1"
+          POSTRUST_BIN: dist/postrust
+          POSTGRES_BIN: /usr/lib/postgresql/16/bin
+        run: bun test packages/management-api/tests/integration/postrust-null-rpc-args.local.test.ts
+
   postrust-graphql-rls:
     name: Postrust GraphQL RLS
+    needs: [postrust-patched-binary]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -1713,35 +1802,29 @@ jobs:
       - name: Install pinned management API dependencies
         run: bash scripts/prepare_management_api_dependencies.sh
 
-      - name: Fetch the pinned Postrust v3.4.0 binary
-        run: |
-          set -euo pipefail
-          # shellcheck disable=SC1091
-          source scripts/lib/release_assets.sh
-          # shellcheck disable=SC1091
-          source scripts/lib/postgrest_upgrade.sh
-          archive="$(mktemp)"
-          supacloud_download_postrust_artifact \
-            "https://registry-1.docker.io/v2/postrust/postrust/blobs/${SUPACLOUD_POSTRUST_LAYER_AMD64}" \
-            "$archive"
-          supacloud_install_pinned_postrust_layer "$archive" "$SUPACLOUD_POSTRUST_LAYER_MEMBER" \
-            "${SUPACLOUD_POSTRUST_LAYER_AMD64#sha256:}" "$SUPACLOUD_POSTRUST_BINARY_AMD64_SHA256" \
-            amd64 "$RUNNER_TEMP/postrust"
+      - name: Download patched Postrust
+        uses: actions/download-artifact@v8
+        with:
+          name: postrust-v3.4.0-null-rpc
+          path: ${{ runner.temp }}/postrust-dist
 
-      - name: Run public /graphql/v1 RLS through the pinned binary
+      - name: Run public /graphql/v1 RLS through the patched binary
         working-directory: packages/management-api
         env:
           SUPACLOUD_TEST_POSTRUST_GRAPHQL: "1"
-          POSTRUST_BIN: ${{ runner.temp }}/postrust
+          POSTRUST_BIN: ${{ runner.temp }}/postrust-dist/postrust
           POSTGRES_BIN: /usr/lib/postgresql/16/bin
-        run: bun test tests/integration/postrust-graphql-rls.local.test.ts
+        run: |
+          chmod 755 "$POSTRUST_BIN"
+          bun test tests/integration/postrust-graphql-rls.local.test.ts
 
       - name: Compare Lite and Postrust on the shared read contract
         working-directory: packages/supacloud-lite
         env:
           SUPACLOUD_TEST_POSTRUST_GRAPHQL: "1"
-          POSTRUST_BIN: ${{ runner.temp }}/postrust
+          POSTRUST_BIN: ${{ runner.temp }}/postrust-dist/postrust
           POSTGRES_BIN: /usr/lib/postgresql/16/bin
         run: |
           bun install --frozen-lockfile
+          chmod 755 "$POSTRUST_BIN"
           bun test test/graphql-postrust-compare.local.test.ts
