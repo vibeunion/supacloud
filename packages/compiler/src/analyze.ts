@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { relative, resolve as resolvePath, sep } from "node:path";
 import * as ts from "@supacloud/db/typescript";
-import { createIncrementalProgramSession } from "./program";
+import { acquireIncrementalProgramSession, retainTypeServers } from "./program";
 import type {
   ApplicationGraph,
   AspectRefNode,
@@ -232,16 +232,25 @@ export async function analyzeProject(
   changedPaths?: string[],
   effectOptions: EffectCompilerOptions = {},
 ): Promise<ApplicationGraph> {
-  const session = cache?.programSession ?? createIncrementalProgramSession(rootDir);
+  return retainTypeServers(() => analyzeProjectNow(rootDir, include, cache, changedPaths, effectOptions));
+}
+
+async function analyzeProjectNow(
+  rootDir: string,
+  include?: string[],
+  cache?: DependencyGraphCache,
+  changedPaths?: string[],
+  effectOptions: EffectCompilerOptions = {},
+): Promise<ApplicationGraph> {
+  const session = cache?.programSession ?? await acquireIncrementalProgramSession(rootDir, "project");
   if (cache) cache.programSession = session;
-  await using ownedSession = cache ? undefined : session;
   const rootNames = (await ts.sys.readDirectory(
     rootDir,
     [".ts", ".tsx"],
     ["node_modules", "dist"],
     include ?? DEFAULT_INCLUDE,
   ));
-  const update = await (ownedSession ?? session).update(rootNames, changedPaths);
+  const update = await session.update(rootNames, changedPaths);
   const program = update.program;
   const checker = program.getTypeChecker();
   const sourceFiles = program.getSourceFiles()

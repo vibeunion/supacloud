@@ -11,6 +11,7 @@ import type { GraphqlArtifacts } from "./graphql";
 import { validateClientSchemaBoundaries } from "./client-schema-boundaries";
 import { validateEffectPolicies, validateJobPolicies } from "./effect-governance";
 import { checkDatabaseGovernance } from "./database-governance";
+import { retainTypeServers } from "./program";
 
 function withDefaultGovernance(options: CompileOptions): CompileOptions {
   return {
@@ -39,6 +40,10 @@ async function renderOptionalGraphql(options: CompileOptions): Promise<GraphqlAr
  * Errors preserve the last working artifacts unless writeOnError is explicitly enabled.
  */
 export async function compileProject(options: CompileOptions): Promise<CompileResult> {
+  return retainTypeServers(() => compileProjectNow(options));
+}
+
+async function compileProjectNow(options: CompileOptions): Promise<CompileResult> {
   options = withDefaultGovernance(options);
   const graph = await analyzeProject(options.rootDir, options.include, options.cache, options.changedPaths, options.effect);
   const diagnostics: Diagnostic[] = [
@@ -125,6 +130,10 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
  * Analyze the AST, run governance checks, and compare application.ts and app.manifest.json.
  */
 export async function checkProject(options: CompileOptions): Promise<CheckProjectResult> {
+  return retainTypeServers(() => checkProjectNow(options));
+}
+
+async function checkProjectNow(options: CompileOptions): Promise<CheckProjectResult> {
   options = withDefaultGovernance(options);
   const graph = await analyzeProject(options.rootDir, options.include, options.cache, options.changedPaths, options.effect);
   const diagnostics: Diagnostic[] = [

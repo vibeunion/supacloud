@@ -15,9 +15,30 @@ export interface IncrementalProgramSession extends AsyncDisposable {
 }
 export interface ProgramUpdate { changedFiles: string[]; reusedFiles: string[]; program: ts.Program; }
 
+interface IncrementalProgramSessionOptions {
+  /** Server current directory. Defaults to the project root. */
+  cwd?: string;
+  /**
+   * Compiler options used instead of tsconfig.json. The production type gate
+   * passes the options it already merged so project settings cannot weaken it.
+   */
+  compilerOptions?: ts.CompilerOptions;
+}
+
 /** Retains native snapshots without Node-only synchronous transport or TS 6 objects. */
 export function createIncrementalProgramSession(projectRoot: string): IncrementalProgramSession {
+  return openIncrementalProgramSession(projectRoot);
+}
+
+function openIncrementalProgramSession(
+  projectRoot: string,
+  sessionOptions: IncrementalProgramSessionOptions = {},
+): IncrementalProgramSession {
   const rootDir = resolve(projectRoot);
+  const cwd = resolve(sessionOptions.cwd ?? rootDir);
+  const fixedOptions = sessionOptions.compilerOptions
+    ? canonicalizeOptions(sessionOptions.compilerOptions)
+    : undefined;
   let api: ts.API | undefined;
   let snapshot: ts.Snapshot | undefined;
   let program: ts.Program | undefined;
@@ -45,24 +66,29 @@ export function createIncrementalProgramSession(projectRoot: string): Incrementa
       return program;
     },
     getTypeChecker() { return session.getProgram().getTypeChecker(); },
-    update(rootNames, changedPaths = rootNames) {
+    // Omitted hints still notice edits: loaded files are hashed below.
+    // Marking every root changed would drop the retained library ASTs.
+    update(rootNames, changedPaths = []) {
       return serialize(async () => {
-        api ??= new ts.API({ cwd: rootDir });
+        api ??= new ts.API({ cwd });
         const configPath = join(rootDir, "tsconfig.json");
-        const config = existsSync(configPath) ? await api.parseConfigFile(configPath) : {
-          options: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
-            moduleResolution: ts.ModuleResolutionKind.Bundler, experimentalDecorators: true,
-            allowJs: false, skipLibCheck: true }, errors: [], projectReferences: undefined,
-        };
+        const config = fixedOptions
+          ? { options: fixedOptions, errors: [], projectReferences: undefined }
+          : existsSync(configPath) ? await api.parseConfigFile(configPath) : {
+            options: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
+              moduleResolution: ts.ModuleResolutionKind.Bundler, experimentalDecorators: true,
+              allowJs: false, skipLibCheck: true }, errors: [], projectReferences: undefined,
+          };
+        const options = canonicalizeOptions(config.options);
         const roots = [...new Set(rootNames.map(path => resolve(rootDir, path)))].sort();
-        const nextConfiguration = JSON.stringify([roots, config.options, config.projectReferences, config.errors]);
+        const nextConfiguration = JSON.stringify([roots, options, config.projectReferences, config.errors]);
         const configChanged = configuration !== nextConfiguration;
         const changed = new Set(changedPaths.map(path => resolve(rootDir, path)));
         for (const [path, previous] of versions) if (version(path) !== previous) changed.add(path);
         const previousSnapshot = snapshot;
         let next: ts.Snapshot;
         if (!snapshot || configChanged) {
-          next = await api.createSnapshot({ createPrograms: [{ rootFiles: roots, compilerOptions: config.options,
+          next = await api.createSnapshot({ createPrograms: [{ rootFiles: roots, compilerOptions: options,
             options: { projectReferences: config.projectReferences, configFileParsingDiagnostics: config.errors } }] });
         } else {
           const notifications: ts.FileNotifications = { changed: [], created: [], deleted: [] };
@@ -121,6 +147,114 @@ export function createIncrementalProgramSession(projectRoot: string): Incrementa
     async [Symbol.asyncDispose]() { return (await session.reset()); },
   };
   return session;
+}
+
+/**
+ * Analysis and the production type gate each need their own program, because the
+ * gate forces strict options. A new server for every compile copies lib.dom.d.ts
+ * again. Keep those two servers across back-to-back compiles, then shut them
+ * down. A live server holds the process open, so a CLI child never exits and
+ * the test's kill timer reports SIGTERM (143).
+ */
+const retainedSessions = new Map<string, IncrementalProgramSession>();
+const RETAINED_SESSION_LIMIT = 2;
+const RETAINED_SESSION_IDLE_MS = 200;
+let typeServerUsers = 0;
+let closeGeneration = 0;
+let idleClose: ReturnType<typeof setTimeout> | undefined;
+
+/** Holds retained servers for the whole compile, including work after the snapshot update. */
+export async function retainTypeServers<T>(run: () => Promise<T>): Promise<T> {
+  beginTypeServerUse();
+  try {
+    return await run();
+  } finally {
+    endTypeServerUse();
+  }
+}
+
+function beginTypeServerUse(): void {
+  typeServerUsers++;
+  closeGeneration++;
+  if (idleClose) {
+    clearTimeout(idleClose);
+    idleClose = undefined;
+  }
+}
+
+function endTypeServerUse(): void {
+  typeServerUsers = Math.max(0, typeServerUsers - 1);
+  if (typeServerUsers > 0) return;
+  const generation = closeGeneration;
+  idleClose = setTimeout(() => {
+    idleClose = undefined;
+    if (generation !== closeGeneration || typeServerUsers > 0) return;
+    void closeRetainedSessions(generation);
+  }, RETAINED_SESSION_IDLE_MS);
+}
+
+async function closeRetainedSessions(generation: number): Promise<void> {
+  for (const session of retainedSessions.values()) {
+    if (generation !== closeGeneration || typeServerUsers > 0) return;
+    await session.reset();
+  }
+}
+
+function trackRetainedSession(session: IncrementalProgramSession): IncrementalProgramSession {
+  return {
+    getProgram: () => session.getProgram(),
+    getTypeChecker: () => session.getTypeChecker(),
+    getTraits: () => session.getTraits(),
+    update: (rootNames, changedPaths) => retainTypeServers(() => session.update(rootNames, changedPaths)),
+    getDiagnostics: () => retainTypeServers(() => session.getDiagnostics()),
+    emit: () => retainTypeServers(() => session.emit()),
+    reset: () => session.reset(),
+    async [Symbol.asyncDispose]() { await session[Symbol.asyncDispose](); },
+  };
+}
+
+export async function acquireIncrementalProgramSession(
+  projectRoot: string,
+  identity: string,
+  options?: IncrementalProgramSessionOptions,
+): Promise<IncrementalProgramSession> {
+  const root = resolve(projectRoot);
+  const cwd = resolve(options?.cwd ?? root);
+  const optionKey = options?.compilerOptions ? stableOptionsKey(options.compilerOptions) : "";
+  const key = `${root}\0${cwd}\0${identity}\0${optionKey}`;
+  const retained = retainedSessions.get(key);
+  if (retained) {
+    retainedSessions.delete(key);
+    retainedSessions.set(key, retained);
+    return retained;
+  }
+  while (retainedSessions.size >= RETAINED_SESSION_LIMIT) {
+    const oldest = retainedSessions.keys().next().value;
+    if (oldest === undefined) break;
+    const session = retainedSessions.get(oldest);
+    retainedSessions.delete(oldest);
+    await session?.reset();
+  }
+  const session = trackRetainedSession(openIncrementalProgramSession(root, { ...options, cwd }));
+  retainedSessions.set(key, session);
+  return session;
+}
+
+function stableOptionsKey(options: ts.CompilerOptions): string {
+  return JSON.stringify(canonicalizeOptions(options));
+}
+function canonicalizeOptions(options: ts.CompilerOptions): ts.CompilerOptions {
+  return canonicalize(options) as ts.CompilerOptions;
+}
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (!value || typeof value !== "object") return value;
+  const source = value as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(source).sort()) {
+    if (source[key] !== undefined) result[key] = canonicalize(source[key]);
+  }
+  return result;
 }
 function digest(text: string): string { return createHash("sha256").update(text).digest("hex"); }
 function version(path: string): string {
