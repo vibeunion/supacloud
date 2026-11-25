@@ -5,6 +5,7 @@ pub mod presence;
 pub mod protocol;
 pub mod server;
 pub mod tenant;
+pub mod wal;
 
 pub use broadcast::{ChannelHub, PostgresChangeEvent, PostgresChangeSubscription};
 pub use filter::{ColumnFilter, FilterOp};

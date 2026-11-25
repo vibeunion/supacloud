@@ -80,13 +80,19 @@ jobs:
         working-directory: crates/${{ matrix.crate }}
         run: cargo clippy --all-targets --locked -- -D warnings
 
-      - name: Locate the PostgreSQL server binaries
-        # The realtime gateway's CDC fixtures start a throwaway PostgreSQL. The
-        # runner image ships the binaries but not on PATH, and a fixture that
-        # cannot find them fails on CI on purpose rather than skipping.
+      - name: Locate the PostgreSQL server binaries and the wal2json plugin
+        # The realtime gateway's CDC fixtures start a throwaway PostgreSQL and
+        # decode a real replication slot, so they need the server binaries and
+        # the wal2json output plugin. The runner image ships the binaries but not
+        # on PATH; the plugin comes from the matching distribution package. A
+        # fixture that cannot find them fails on CI on purpose, never skips.
         run: |
           bindir=$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -n 1)
           test -x "$bindir/initdb"
+          version=$(basename "$(dirname "$bindir")")
+          sudo apt-get update -qq
+          sudo apt-get install -y "postgresql-${version}-wal2json"
+          test -f "/usr/lib/postgresql/${version}/lib/wal2json.so"
           echo "POSTGRES_BIN=$bindir" >> "$GITHUB_ENV"
 
       - name: Test
