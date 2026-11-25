@@ -22,8 +22,9 @@ SUPACLOUD_META_DB="${SUPACLOUD_META_DB:-supacloud_meta}"
 POSTGREST_RTS="${POSTGREST_RTS:--N1 -M256m -I0.5 -A4m}"
 POSTGREST_MEMORY_MAX="${POSTGREST_MEMORY_MAX:-384M}"
 POSTGREST_CPU_WEIGHT="${POSTGREST_CPU_WEIGHT:-40}"
-POSTGREST_DEFAULT_VERSION="v3.4.0"
-# Patched v3.4.0 identity. The official unpatched binary is not the hosted default.
+POSTGREST_DEFAULT_VERSION="v3.4.0+supacloud.1"
+# Host default is the published temporary layer. Explicit POSTGREST_VERSION=v3.4.0
+# is the null-RPC source build. The official unpatched binary is not accepted.
 # shellcheck source=postrust_pin.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/postrust_pin.sh"
 # Postrust v3.4.0 publishes no official linux/arm64 image or release binary.
@@ -746,12 +747,18 @@ ensure_postgrest() {
         return 1
     }
     if [ "$installed_version" = "$version" ]; then
-        if [ "$version" = "$POSTGREST_DEFAULT_VERSION" ]; then
-            local magic
-            magic=$(od -An -t x1 -N 2 -- "$POSTGREST_BIN" | tr -d ' \n') || return 1
-            # Shell doubles used by tests print a version. An ELF must carry the
-            # null-RPC patch stamp; the official v3.4.0 member does not.
-            if [ "$magic" != "2321" ]; then
+        local magic actual_sha
+        magic=$(od -An -t x1 -N 2 -- "$POSTGREST_BIN" | tr -d ' \n') || return 1
+        # Shell doubles used by tests print a version. An ELF is checked
+        # against the artifact that version selects.
+        if [ "$magic" != "2321" ]; then
+            if [ "$version" = "$SUPACLOUD_POSTRUST_TEMPORARY_VERSION" ]; then
+                actual_sha=$(sha256sum "$POSTGREST_BIN" | awk '{print $1}' | tr '[:upper:]' '[:lower:]') || return 1
+                if [ "$actual_sha" != "$SUPACLOUD_POSTRUST_TEMPORARY_BINARY_SHA256" ]; then
+                    echo "ERROR: Postrust ${version} at $POSTGREST_BIN does not match the pinned temporary binary; run the explicit SupaCloud installer/upgrade" >&2
+                    return 1
+                fi
+            elif [ "$version" = "$SUPACLOUD_POSTRUST_UPSTREAM_VERSION" ]; then
                 supacloud_postrust_patch_stamp_matches "$POSTGREST_BIN" || {
                     echo "ERROR: Postrust ${version} at $POSTGREST_BIN is not the patched null-RPC build; run the explicit SupaCloud installer/upgrade" >&2
                     return 1

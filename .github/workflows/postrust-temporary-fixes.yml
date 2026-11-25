@@ -1,0 +1,48 @@
+name: Postrust Temporary Fixes
+
+# Build the patched Postrust v3.4.0 layer that the host installer pins while
+# the two fixes wait for an upstream release. The release tag is deliberately
+# separate from the upstream Postrust tags and from release-please's tags.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: postrust-temporary-fixes
+  cancel-in-progress: false
+
+env:
+  RUSTUP_TOOLCHAIN: "1.94.1"
+  RELEASE_TAG: postrust-v3.4.0-supacloud.1
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+
+      - name: Build the patched layer
+        run: bash scripts/build_postrust_temporary_fixes.sh dist/postrust-v3.4.0-supacloud.1
+
+      - name: Verify the published checksums
+        working-directory: dist/postrust-v3.4.0-supacloud.1
+        run: sha256sum -c SHA256SUMS
+
+      - name: Publish the temporary release assets
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" \
+              --title "Postrust v3.4.0 temporary SupaCloud patch" \
+              --notes "Temporary patched Postrust v3.4.0 layer. See docs/postrust-v3.4.0-adoption.md." \
+              --prerelease --latest=false
+          fi
+          gh release upload "$RELEASE_TAG" dist/postrust-v3.4.0-supacloud.1/* --clobber

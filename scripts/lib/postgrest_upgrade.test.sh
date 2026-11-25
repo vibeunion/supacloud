@@ -156,14 +156,67 @@ if supacloud_upgrade_postgrest_binary "$postgrest_binary" >/dev/null 2>&1; then
 fi
 [[ "$(supacloud_postgrest_binary_version "$postgrest_binary")" == v14.16 ]]
 
-# The pinned release is built from source. It must not download the official layer.
+# Explicit v3.4.0 is built from source. The default is the temporary layer.
+# Neither path downloads the official image.
 resolve_err="${tmp_dir}/resolve.err"
-if supacloud_resolve_postgrest_release "$SUPACLOUD_POSTGREST_DEFAULT_VERSION" >/dev/null 2>"$resolve_err"; then
-    echo "default Postrust version resolved to a download" >&2
+if [[ "$(uname -m)" == "x86_64" || "$(uname -m)" == "amd64" ]]; then
+    if supacloud_resolve_postgrest_release "$SUPACLOUD_POSTRUST_UPSTREAM_VERSION" >/dev/null 2>"$resolve_err"; then
+        echo "v3.4.0 resolved to a download" >&2
+        exit 1
+    fi
+    grep -Fq 'pinned source archive' "$resolve_err"
+    grep -Fq 'official image is not installed' "$resolve_err"
+
+    unset POSTGREST_SHA256 POSTRUST_RELEASE_URL POSTRUST_BINARY_SHA256
+    supacloud_resolve_postgrest_release "$SUPACLOUD_POSTRUST_TEMPORARY_VERSION"
+    [[ "$SUPACLOUD_POSTGREST_RELEASE_URL" == "$SUPACLOUD_POSTRUST_TEMPORARY_LAYER_URL" ]]
+    [[ "$SUPACLOUD_POSTGREST_RELEASE_SHA256" == "$SUPACLOUD_POSTRUST_TEMPORARY_LAYER_SHA256" ]]
+    [[ "$SUPACLOUD_POSTRUST_BINARY_SHA256" == "$SUPACLOUD_POSTRUST_TEMPORARY_BINARY_SHA256" ]]
+
+    POSTGREST_SHA256="${SUPACLOUD_POSTRUST_UNPATCHED_LAYER_AMD64#sha256:}"
+    POSTRUST_BINARY_SHA256="$SUPACLOUD_POSTRUST_UNPATCHED_BINARY_SHA256"
+    POSTRUST_RELEASE_URL="https://registry-1.docker.io/v2/postrust/postrust/blobs/${SUPACLOUD_POSTRUST_UNPATCHED_LAYER_AMD64}"
+    supacloud_resolve_postgrest_release "$SUPACLOUD_POSTRUST_TEMPORARY_VERSION"
+    [[ "$SUPACLOUD_POSTGREST_RELEASE_URL" == "$SUPACLOUD_POSTRUST_TEMPORARY_LAYER_URL" ]]
+    [[ "$SUPACLOUD_POSTGREST_RELEASE_SHA256" == "$SUPACLOUD_POSTRUST_TEMPORARY_LAYER_SHA256" ]]
+    [[ "$SUPACLOUD_POSTRUST_BINARY_SHA256" == "$SUPACLOUD_POSTRUST_TEMPORARY_BINARY_SHA256" ]]
+    unset POSTGREST_SHA256 POSTRUST_RELEASE_URL POSTRUST_BINARY_SHA256
+
+    POSTGREST_SHA256="${SUPACLOUD_POSTRUST_UNPATCHED_LAYER_AMD64#sha256:}"
+    POSTRUST_BINARY_SHA256="$SUPACLOUD_POSTRUST_UNPATCHED_BINARY_SHA256"
+    if supacloud_resolve_postgrest_release v9.9.9 >/dev/null 2>"$resolve_err"; then
+        echo "unpatched official binary digest was accepted" >&2
+        exit 1
+    fi
+    grep -Fq 'refused' "$resolve_err"
+    unset POSTGREST_SHA256 POSTRUST_BINARY_SHA256
+else
+    if supacloud_resolve_postgrest_release "$SUPACLOUD_POSTRUST_TEMPORARY_VERSION" >/dev/null 2>"$resolve_err"; then
+        echo "arm64 resolved an amd64-only Postrust layer" >&2
+        exit 1
+    fi
+    grep -Fq 'publishes no official linux/arm64 image' "$resolve_err"
+fi
+
+probe_archive="${tmp_dir}/unpatched-probe.tar.gz"
+make_postgrest_archive v3.4.0 "$probe_archive"
+probe_sha=$(sha256sum "$probe_archive" | awk '{print $1}')
+if supacloud_install_pinned_postrust_layer "$probe_archive" usr/local/bin/postrust \
+    "$probe_sha" "$SUPACLOUD_POSTRUST_UNPATCHED_BINARY_SHA256" amd64 "${tmp_dir}/refused-binary"; then
+    echo "installer accepted the unpatched binary digest" >&2
     exit 1
 fi
-if [[ "$(uname -m)" == "x86_64" || "$(uname -m)" == "amd64" ]]; then
-    grep -Fq 'pinned source archive' "$resolve_err"
+if supacloud_install_pinned_postrust_layer "$probe_archive" usr/local/bin/postrust \
+    "${SUPACLOUD_POSTRUST_UNPATCHED_LAYER_AMD64#sha256:}" "" amd64 "${tmp_dir}/refused-layer"; then
+    echo "installer accepted the unpatched layer digest" >&2
+    exit 1
+fi
+if supacloud_install_pinned_postrust_layer "$probe_archive" usr/local/bin/postrust \
+    "$SUPACLOUD_POSTRUST_TEMPORARY_LAYER_SHA256" \
+    "$SUPACLOUD_POSTRUST_TEMPORARY_BINARY_SHA256" \
+    amd64 "${tmp_dir}/refused-temporary"; then
+    echo "temporary pin accepted a stand-in archive" >&2
+    exit 1
 fi
 
 build_count_file="${tmp_dir}/postrust-build-count"
@@ -173,7 +226,7 @@ supacloud_build_patched_postrust() {
     local count
     count=$(<"$build_count_file")
     printf '%s\n' "$((count + 1))" > "$build_count_file"
-    printf '#!/bin/sh\nprintf "PostgREST %s\\n"\n' "${SUPACLOUD_POSTGREST_DEFAULT_VERSION#v}" > "$target"
+    printf '#!/bin/sh\nprintf "PostgREST %s\\n"\n' "${SUPACLOUD_POSTRUST_UPSTREAM_VERSION#v}" > "$target"
     chmod 755 "$target"
     printf '%s\n%s\n%s\n%s\n%s\n' \
         "$SUPACLOUD_POSTRUST_PATCH_ID" \
@@ -184,7 +237,7 @@ supacloud_build_patched_postrust() {
     chmod 644 "${target}.postrust-patch"
 }
 
-export POSTGREST_VERSION="$SUPACLOUD_POSTGREST_DEFAULT_VERSION"
+export POSTGREST_VERSION="$SUPACLOUD_POSTRUST_UPSTREAM_VERSION"
 unset POSTGREST_SHA256 POSTRUST_RELEASE_URL POSTRUST_BINARY_SHA256
 write_binary v14.16
 rm -f "${postgrest_binary}.postrust-patch" "${postgrest_binary}.postrust-version"
@@ -194,7 +247,7 @@ runtime_binary_current=true
 : > "$download_log"
 supacloud_upgrade_postgrest_binary "$postgrest_binary"
 [[ "$(<"$build_count_file")" -eq 1 ]]
-[[ "$(supacloud_postgrest_binary_version "$postgrest_binary")" == "$SUPACLOUD_POSTGREST_DEFAULT_VERSION" ]]
+[[ "$(supacloud_postgrest_binary_version "$postgrest_binary")" == "$SUPACLOUD_POSTRUST_UPSTREAM_VERSION" ]]
 supacloud_postrust_patch_stamp_matches "$postgrest_binary"
 [[ ! -s "$download_log" ]]
 
@@ -211,5 +264,53 @@ supacloud_upgrade_postgrest_binary "$postgrest_binary"
 [[ "$(<"$build_count_file")" -eq 2 ]]
 supacloud_postrust_patch_stamp_matches "$postgrest_binary"
 [[ ! -s "$download_log" ]]
+
+# A URL that names the official layer still source-builds v3.4.0.
+export POSTRUST_RELEASE_URL="https://registry-1.docker.io/v2/postrust/postrust/blobs/${SUPACLOUD_POSTRUST_UNPATCHED_LAYER_AMD64}"
+export POSTGREST_SHA256="${SUPACLOUD_POSTRUST_UNPATCHED_LAYER_AMD64#sha256:}"
+export POSTRUST_BINARY_SHA256="$SUPACLOUD_POSTRUST_UNPATCHED_BINARY_SHA256"
+rm -f "${postgrest_binary}.postrust-patch"
+: > "$download_log"
+supacloud_upgrade_postgrest_binary "$postgrest_binary"
+[[ "$(<"$build_count_file")" -eq 3 ]]
+supacloud_postrust_patch_stamp_matches "$postgrest_binary"
+[[ ! -s "$download_log" ]]
+unset POSTRUST_RELEASE_URL POSTGREST_SHA256 POSTRUST_BINARY_SHA256 POSTGREST_VERSION
+
+if [[ "$(uname -m)" == "x86_64" || "$(uname -m)" == "amd64" ]]; then
+    install_args="${tmp_dir}/install-args"
+    : > "$install_args"
+    : > "$download_log"
+    supacloud_download_postrust_artifact() {
+        printf '%s\n' "$1" >> "$download_log"
+        printf 'layer' > "$2"
+    }
+    supacloud_install_pinned_postrust_layer() {
+        printf '%s\n' "$3" "$4" >> "$install_args"
+        printf '#!/bin/sh\nprintf "PostgREST %s\\n"\n' "${SUPACLOUD_POSTRUST_TEMPORARY_VERSION#v}" > "$6"
+        chmod 755 "$6"
+    }
+    write_binary v14.16
+    rm -f "${postgrest_binary}.postrust-patch" "${postgrest_binary}.postrust-version"
+    runtime_active=true
+    runtime_binary_current=true
+    : > "$systemctl_log"
+    supacloud_upgrade_postgrest_binary "$postgrest_binary"
+    [[ "$(<"$build_count_file")" -eq 3 ]]
+    [[ "$(supacloud_postgrest_binary_version "$postgrest_binary")" == "$SUPACLOUD_POSTRUST_TEMPORARY_VERSION" ]]
+    grep -Fq "$SUPACLOUD_POSTRUST_TEMPORARY_LAYER_URL" "$download_log"
+    grep -Fq "$SUPACLOUD_POSTRUST_TEMPORARY_LAYER_SHA256" "$install_args"
+    grep -Fq "$SUPACLOUD_POSTRUST_TEMPORARY_BINARY_SHA256" "$install_args"
+    [[ ! -e "${postgrest_binary}.postrust-patch" ]]
+    if grep -Fq 'registry-1.docker.io' "$download_log"; then
+        echo "temporary default downloaded the official registry" >&2
+        exit 1
+    fi
+    # The stand-in binary is not the pinned digest, so the next run downloads again.
+    : > "$download_log"
+    supacloud_upgrade_postgrest_binary "$postgrest_binary"
+    grep -Fq "$SUPACLOUD_POSTRUST_TEMPORARY_LAYER_URL" "$download_log"
+    [[ "$(<"$build_count_file")" -eq 3 ]]
+fi
 
 echo "PostgREST staged global upgrade checks passed"

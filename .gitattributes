@@ -22,6 +22,9 @@ config.env      text eol=lf
 # Markdown
 *.md            text eol=lf
 
+# Unified diffs use one space for a blank context line.
+docs/patches/*.patch text eol=lf -whitespace
+
 # Binary files - do not convert
 *.png           binary
 *.jpg           binary
