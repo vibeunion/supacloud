@@ -24,6 +24,13 @@ import {
 import { uniqueStrings } from "../utils/strings";
 import { ALTER_TENANT_SQL } from "./tenant-runtime-migration";
 import {
+    assertRealtimeTenantSchemaState,
+    decideRealtimeTenantSchema,
+    loadRealtimeTenantSchemaArtifact,
+    realtimeTenantSchemaBootstrapSql,
+    realtimeTenantSchemaInspectionSql,
+} from "./realtime-tenant-schema-artifact";
+import {
     assertSafeConfigValue,
     buildPostgresUri,
     buildTenantPsqlInvocation,
@@ -2761,7 +2768,11 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         // `throw new Error(`psql exited with code ...`)` without placing secrets in argv.
         const dbName = await resolveDbName(ref);
         const connection = this.adminPsqlConnection(dbName);
-        const temporary = await this.writeTemporaryTenantSql(ref, "tenant-schema-migration", ALTER_TENANT_SQL);
+        const realtimeBootstrap = await this.realtimeTenantSchemaBootstrapSql(connection, dbName, ref);
+        const content = realtimeBootstrap === null
+            ? ALTER_TENANT_SQL
+            : `${ALTER_TENANT_SQL}\n\n${realtimeBootstrap}`;
+        const temporary = await this.writeTemporaryTenantSql(ref, "tenant-schema-migration", content);
 
         try {
             await this.runTenantPsqlOrThrow(
@@ -2777,6 +2788,50 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         } finally {
             await fs.rm(temporary.directory, { recursive: true, force: true }).catch(() => {});
         }
+    }
+
+    /**
+     * The pinned upstream Realtime tenant schema, or `null` when the database
+     * already has exactly it.
+     *
+     * `realtime.list_changes`, `realtime.apply_rls` and `realtime.subscription`
+     * belong to upstream Realtime, and this repository never hand-authors them.
+     * The Elixir container used to install them with its own migrations; the
+     * Rust gateway is the default Realtime server now and starts no such
+     * migration, so the control plane delivers the pinned artifact instead. A
+     * database whose `realtime` schema is neither empty nor the pin is refused:
+     * repairing a divergent Realtime schema is what
+     * `bun run realtime:reconcile-schema` plans, with a backup receipt.
+     */
+    private async realtimeTenantSchemaBootstrapSql(
+        connection: PostgresConnectionConfig,
+        dbName: string,
+        ref: string,
+    ): Promise<string | null> {
+        const artifact = await loadRealtimeTenantSchemaArtifact();
+        const inspection = await this.runTenantPsqlOrThrow(
+            connection,
+            ["-tAc", realtimeTenantSchemaInspectionSql()],
+            "inspect the Realtime tenant schema",
+        );
+        const raw = inspection.stdout.trim();
+        if (raw === "") {
+            throw new Error(`the Realtime tenant schema inspection returned nothing for ${dbName}`);
+        }
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(raw);
+        } catch {
+            throw new Error(`the Realtime tenant schema inspection returned invalid JSON for ${dbName}`);
+        }
+        const state = assertRealtimeTenantSchemaState(parsed);
+        const decision = decideRealtimeTenantSchema(artifact, state);
+        if (decision.mode === "pinned") {
+            logger.info(`[tenant-runtime] Realtime tenant schema already pinned for ${ref}: ${decision.reason}`);
+            return null;
+        }
+        logger.info(`[tenant-runtime] Applying the pinned Realtime ${artifact.version} tenant schema for ${ref}: ${decision.reason}`);
+        return realtimeTenantSchemaBootstrapSql(artifact);
     }
 
     public async stopRuntime(ref: string): Promise<void> {

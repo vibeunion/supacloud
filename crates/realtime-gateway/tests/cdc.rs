@@ -264,8 +264,12 @@ impl Postgres {
              GRANT anon, authenticated, service_role TO supabase_admin WITH INHERIT FALSE, SET TRUE;
              GRANT supabase_admin, supabase_realtime_admin, anon, authenticated, service_role TO postgres",
         );
-        let root =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/realtime-tenant-schema");
+        // One artifact, two consumers: the Management API applies these exact
+        // bytes during tenant bootstrap, and this fixture installs them the same
+        // way a fresh database gets them. A private copy here would be able to
+        // drift into proving something production does not have.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packages/management-api/src/db/realtime-tenant-schema/2.150.0");
         let order = std::fs::read_to_string(root.join("order.txt"))
             .expect("the pinned Realtime schema order should be present");
         for relative in order.lines().map(str::trim).filter(|line| !line.is_empty()) {

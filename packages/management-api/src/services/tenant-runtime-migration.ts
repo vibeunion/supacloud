@@ -349,7 +349,9 @@ GRANT anon, authenticated, service_role TO supabase_admin WITH INHERIT FALSE, SE
 DO $$ BEGIN
   EXECUTE format('GRANT CREATE ON DATABASE %I TO supabase_admin', current_database());
 END $$;
--- Official Realtime migrations own tables, types, and protocol functions in this schema.
+-- Upstream Realtime owns the tables, types and protocol functions in this schema.
+-- SupaCloud applies the pinned upstream artifact beside this file
+-- (services/realtime-tenant-schema-artifact.ts) instead of authoring them here.
 
 GRANT ALL ON ALL TABLES IN SCHEMA auth TO supabase_auth_admin;
 

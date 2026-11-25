@@ -63,6 +63,34 @@ cannot store the row is refused. Decoded WAL is not delivered in its place.
 `apply_rls` reports an oversized record as `Error 413` instead of this gateway
 truncating the row itself.
 
+## Tenant schema bootstrap
+
+`realtime.list_changes`, `realtime.apply_rls` and `realtime.subscription` are
+upstream objects. This repository still never hand-authors them —
+`tests/unit/supabase-schema.test.ts` keeps that rule — but it no longer inherits
+them from a running Elixir container either. The pinned 2.150.0 tenant schema
+ships as an artifact at
+`packages/management-api/src/db/realtime-tenant-schema/2.150.0/`, and the tenant
+migration applies it:
+
+- `realtime-tenant-schema-artifact.ts` pins every file by sha256 (the digests the
+  reconciler also pins) plus a tree digest, and refuses to load a tampered,
+  missing or reordered file.
+- The tenant bootstrap inspects the catalog first. An empty `realtime` schema —
+  what the migration leaves behind — is replaced and the artifact applied in
+  `order.txt` order inside one transaction. A schema that already matches the pin
+  is a no-op. Anything else raises and issues no DDL; repairing a divergent
+  Realtime schema stays the operator's `bun run realtime:reconcile-schema` plan
+  with a backup receipt.
+- The receipt is the catalog compared against these bytes (`md5(prosrc)` per
+  function, the subscription table and its owner), not a new version table. No
+  second migration ledger is introduced.
+
+Without this, a fresh `SUPACLOUD_REALTIME_ENGINE=rust` host would have had a
+poller whose `list_changes` call fails and joins refused on a missing
+`realtime.subscription`, while CI stayed green because the fixture installed a
+private copy of the schema.
+
 ## Consequences
 
 - One slot per tenant, one publication, one realtime schema ledger. A second
@@ -85,7 +113,8 @@ truncating the row itself.
 ## Evidence
 
 `crates/realtime-gateway/tests/cdc.rs` starts a cluster with `wal_level=logical`,
-installs the pinned Realtime 2.150.0 tenant schema, creates the publication and
+installs the pinned Realtime 2.150.0 tenant schema from the same artifact the
+control plane applies (no private copy), creates the publication and
 two tables (one deliberately outside it), registers a tenant with the Management
 API's registration payload, and writes rows. It asserts insert/update/delete
 payloads (`record`, `old_record` identity, `columns`, ISO 8601
@@ -95,3 +124,10 @@ delivers nothing. `row_level_security_hides_a_row_from_another_role` subscribes
 as `authenticated` (two subjects), `anon`, and `service_role`, and asserts that
 a private row is delivered only to its owner and to `service_role`. A missing
 `wal2json` plugin fails the fixture; CI installs it rather than skipping.
+
+`tests/integration/realtime-tenant-schema-bootstrap.test.ts` starts from the
+state a fresh install is actually in — roles and an empty `realtime` schema,
+nothing else — applies the artifact, and asserts `realtime.subscription` is owned
+by `supabase_realtime_admin`, a subscription row can be inserted with its
+`claims_role`, a second pass is a no-op, and a substituted `list_changes` body is
+refused instead of overwritten.

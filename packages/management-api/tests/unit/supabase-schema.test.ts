@@ -564,6 +564,18 @@ describe("supabase bootstrap schema", () => {
     }
   });
 
+  test("tenant bootstrap applies the pinned Realtime artifact instead of authoring it", () => {
+    const runtime = readRepoFile("src/services/tenant-runtime.service.ts");
+    const script = readRepoFile("src/scripts/migrate-tenant-schema.ts");
+    for (const source of [runtime, script]) {
+      expect(source).toContain("loadRealtimeTenantSchemaArtifact");
+      expect(source).toContain("decideRealtimeTenantSchema");
+      expect(source).toContain("realtimeTenantSchemaBootstrapSql");
+    }
+    // The rule above still holds: the artifact is delivered, never reseeded here.
+    expect(runtime).not.toMatch(/create\s+(?:or\s+replace\s+)?function\s+realtime\.(?:apply_rls|list_changes)/i);
+  });
+
   test("ordinary tenant migrations never mutate legacy Realtime protocol functions", () => {
     for (const source of [
       readRepoFile("src/services/tenant-runtime-migration.ts"),

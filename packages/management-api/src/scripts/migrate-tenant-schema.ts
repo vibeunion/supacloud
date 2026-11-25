@@ -3,6 +3,13 @@ import { SQL_MODULES } from '../db/sql-modules';
 import { renderPlatformRpcOwnershipSql } from '../services/platform-ownership';
 import { TENANT_PUBLIC_SCHEMA_ACCESS_SQL } from '../services/tenant-public-schema-access';
 import { logger } from '../utils/logger';
+import {
+  assertRealtimeTenantSchemaState,
+  decideRealtimeTenantSchema,
+  loadRealtimeTenantSchemaArtifact,
+  realtimeTenantSchemaBootstrapSql,
+  realtimeTenantSchemaInspectionSql,
+} from '../services/realtime-tenant-schema-artifact';
 
 const ALTER_TENANT_SQL = `
 -- 1. auth.users adds
@@ -366,7 +373,9 @@ GRANT anon, authenticated, service_role TO supabase_admin WITH INHERIT FALSE, SE
 DO $$ BEGIN
   EXECUTE format('GRANT CREATE ON DATABASE %I TO supabase_admin', current_database());
 END $$;
--- Official Realtime migrations own tables, types, and protocol functions in this schema.
+-- Upstream Realtime owns the tables, types and protocol functions in this schema.
+-- SupaCloud applies the pinned upstream artifact beside this file
+-- (services/realtime-tenant-schema-artifact.ts) instead of authoring them here.
 
 GRANT ALL ON ALL TABLES IN SCHEMA auth TO supabase_auth_admin;
 
@@ -635,6 +644,21 @@ async function main() {
        try {
           const tenantDb = getProjectDb(dbName);
           await tenantDb.unsafe(ALTER_TENANT_SQL);
+          // The pinned upstream Realtime tenant schema, the same artifact
+          // `TenantRuntimeService.ensureTenantSchemaMigrations` applies. Without
+          // it the Rust gateway has no `realtime.list_changes`, no
+          // `realtime.apply_rls` and no `realtime.subscription`, so
+          // `postgres_changes` is refused instead of delivered.
+          const artifact = await loadRealtimeTenantSchemaArtifact();
+          const [receipt] = await tenantDb.unsafe(realtimeTenantSchemaInspectionSql());
+          const decision = decideRealtimeTenantSchema(
+            artifact,
+            assertRealtimeTenantSchemaState(typeof receipt === "string" ? JSON.parse(receipt) : receipt),
+          );
+          if (decision.mode === "install") {
+            await tenantDb.unsafe(realtimeTenantSchemaBootstrapSql(artifact));
+            logger.info(`[migrate-tenant-schema] Applied the pinned Realtime ${artifact.version} tenant schema to ${project.ref}`);
+          }
           const slotName = resolveSlotName(project.ref);
           try {
             const [wal2json] = await tenantDb`SELECT EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'wal2json') AS available`;
