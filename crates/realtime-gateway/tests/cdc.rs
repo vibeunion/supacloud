@@ -264,8 +264,8 @@ impl Postgres {
              GRANT anon, authenticated, service_role TO supabase_admin WITH INHERIT FALSE, SET TRUE;
              GRANT supabase_admin, supabase_realtime_admin, anon, authenticated, service_role TO postgres",
         );
-        let root =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/realtime-tenant-schema");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packages/management-api/src/db/realtime-tenant-schema");
         let order = std::fs::read_to_string(root.join("order.txt"))
             .expect("the pinned Realtime schema order should be present");
         for relative in order.lines().map(str::trim).filter(|line| !line.is_empty()) {

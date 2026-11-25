@@ -9,7 +9,8 @@ import { logger } from "../utils/logger";
 import { createPgListener, type PgListenerHandle } from "../lib/pg-listen";
 import { config } from "../config";
 import type { Project, ProjectTask } from "../db";
-import { resolveDbName, TaskStatus, TaskType } from "../db";
+import { getProjectDb, resolveDbName, TaskStatus, TaskType } from "../db";
+import { ensureOfficialRealtimeTenantSchema } from "../db/realtime-tenant-schema";
 import { broadcastTaskUpdate } from "../routes/ws";
 import { realtimeService } from "./realtime.service";
 import {
@@ -269,6 +270,9 @@ export class TaskWorker {
                     }
 
                     const dbName = await resolveDbName(project_ref);
+                    if (config.realtimeEngine !== "container") {
+                        await ensureOfficialRealtimeTenantSchema(getProjectDb(dbName));
+                    }
                     const res = await realtimeService.registerTenant({
                         projectRef: project_ref,
                         jwtSecret: project.jwt_secret,

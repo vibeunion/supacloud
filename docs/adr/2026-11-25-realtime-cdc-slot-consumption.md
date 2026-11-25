@@ -81,6 +81,11 @@ truncating the row itself.
 - `anon` and `authenticated` `postgres_changes` are delivered only through
   `realtime.subscription` and `realtime.apply_rls`. The fixture
   `row_level_security_hides_a_row_from_another_role` covers a negative case.
+- Those objects are official Realtime schema, not SupaCloud SQL. With the Rust
+  gateway as the default, project provisioning installs the pinned 2.150.0
+  tenant schema when `realtime.list_changes` is absent. `SUPACLOUD_REALTIME_ENGINE=container`
+  still leaves that install to Elixir. A database that already has the function
+  is not rewritten.
 
 ## Evidence
 
