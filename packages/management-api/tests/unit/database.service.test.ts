@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach, mock, spyOn } from "bun:test";
+import { config } from "../../src/config";
 import {
   DatabaseService,
   renderAuthSchemaOwnershipSql,
@@ -195,22 +196,43 @@ describe("DatabaseService", () => {
 
     test("applySupabaseSchema runs ownership repair after loading tenant schema", async () => {
       applySupabaseSchemaSpy.mockRestore();
+      const previousEngine = config.realtimeEngine;
+      config.realtimeEngine = "rust";
       const service = new DatabaseService();
       const tenantSql = createMockSql();
       const transactionSql = createMockSql();
       tenantSql.begin = mock((run: (tx: MockSql) => Promise<unknown>) => run(transactionSql));
+      transactionSql.unsafe = mock((query: string) => {
+        if (query.includes("listChangesPresent")) {
+          return Promise.resolve([{
+            state: {
+              schemaExists: true,
+              empty: true,
+              listChangesPresent: false,
+              subscriptionExists: false,
+              subscriptionOwner: null,
+              functions: [],
+            },
+          }]);
+        }
+        return Promise.resolve([]);
+      });
       spyOn(DatabaseService.prototype as any, "getTenantDb").mockReturnValue(tenantSql);
       spyOn(DatabaseService.prototype as any, "loadSupabaseSchema").mockResolvedValue("SELECT 'tenant schema loaded';");
 
-      await (service as unknown as { applySupabaseSchema(dbName: string, projectRef: string, password: string): Promise<void> })
-        .applySupabaseSchema("supa_testref123", "testref123", "testpass");
+      try {
+        await (service as unknown as { applySupabaseSchema(dbName: string, projectRef: string, password: string): Promise<void> })
+          .applySupabaseSchema("supa_testref123", "testref123", "testpass");
 
-      expect(tenantSql.unsafe).not.toHaveBeenCalledWith("SELECT 'tenant schema loaded';");
-      expect(tenantSql.begin).toHaveBeenCalled();
-      expect(transactionSql.unsafe).toHaveBeenCalledWith("SELECT 'tenant schema loaded';");
-      expect(transactionSql.unsafe).toHaveBeenCalledWith(expect.stringContaining('ALTER SCHEMA auth OWNER TO "supabase_auth_admin"'));
-      expect(transactionSql.unsafe).toHaveBeenCalledWith(expect.stringContaining("function realtime.list_changes"));
-      expect(transactionSql.unsafe).toHaveBeenLastCalledWith(expect.stringContaining("INSERT INTO supacloud_platform.bootstrap_state"));
+        expect(tenantSql.unsafe).not.toHaveBeenCalledWith("SELECT 'tenant schema loaded';");
+        expect(tenantSql.begin).toHaveBeenCalled();
+        expect(transactionSql.unsafe).toHaveBeenCalledWith("SELECT 'tenant schema loaded';");
+        expect(transactionSql.unsafe).toHaveBeenCalledWith(expect.stringContaining('ALTER SCHEMA auth OWNER TO "supabase_auth_admin"'));
+        expect(transactionSql.unsafe).toHaveBeenCalledWith(expect.stringContaining("function realtime.list_changes"));
+        expect(transactionSql.unsafe).toHaveBeenLastCalledWith(expect.stringContaining("INSERT INTO supacloud_platform.bootstrap_state"));
+      } finally {
+        config.realtimeEngine = previousEngine;
+      }
     });
   });
 

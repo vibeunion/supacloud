@@ -988,6 +988,12 @@ jobs:
           absent="$(docker exec -i "${POSTGRES_CONTAINER}" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -tAc "SELECT to_regprocedure('realtime.notify_change_payload(jsonb)') IS NULL")"
           test "${absent}" = "t"
 
+      - name: Apply the pinned Realtime tenant schema to a fresh database
+        working-directory: packages/management-api
+        env:
+          REALTIME_TENANT_SCHEMA_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+        run: bun test tests/integration/realtime-tenant-schema-bootstrap.test.ts
+
       - name: Apply and verify Docker PostgreSQL compatibility
         env:
           SUPACLOUD_META_DB: postgres

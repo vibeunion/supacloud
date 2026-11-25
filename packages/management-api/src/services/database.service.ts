@@ -603,7 +603,7 @@ export class DatabaseService {
           await tx.unsafe(renderPgStatStatementsCompatibilitySql());
           // The Rust gateway reads realtime.list_changes. Elixir used to install
           // that schema; a fresh rust project has to install it here.
-          await ensureOfficialRealtimeTenantSchema(tx);
+          await ensureOfficialRealtimeTenantSchema(tx, projectRef);
         } catch (err: unknown) {
           logger.error(
             `[services/database.service] Error applying Supabase schema at ${dbName}`,
