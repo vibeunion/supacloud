@@ -8,7 +8,14 @@ RUNTIME_SCRIPT="${SCRIPT_DIR}/tenant_runtime.sh"
 grep -Eq '^umask 077$' "$RUNTIME_SCRIPT"
 grep -Fq 'PGPASSWORD="$db_password" psql' "$RUNTIME_SCRIPT"
 grep -Fq 'v3.4.0' "$RUNTIME_SCRIPT"
-grep -Fq 'f174c84a1b3ac8a24c13a4ef7896adfc029ece8c1b206ee715e3864f5f169b7a' "$RUNTIME_SCRIPT"
+grep -Fq 'postrust_pin.sh' "$RUNTIME_SCRIPT"
+grep -Fq '2c5de117fe288a18046776dfd0505d21845ba49b072d62bdab2c29ce3f2fe722' "${SCRIPT_DIR}/postrust_pin.sh"
+grep -Fq 'b6fc50a592ede5071484e5e83a5ad1b59134724dcd2d91f71bf60b5b8bc983a6' "${SCRIPT_DIR}/postrust_pin.sh"
+grep -Fq 'postrust-v3.4.0-null-rpc-args' "${SCRIPT_DIR}/postrust_pin.sh"
+if grep -Fq 'POSTGREST_X86_64_SHA256="f174c84a1b3ac8a24c13a4ef7896adfc029ece8c1b206ee715e3864f5f169b7a"' "$RUNTIME_SCRIPT"; then
+    echo "tenant runtime still pins the unpatched official Postrust binary" >&2
+    exit 1
+fi
 grep -Fq 'Postrust v3.4.0 publishes no official linux/arm64 image' "$RUNTIME_SCRIPT"
 grep -Fq 'v2.198.0' "$RUNTIME_SCRIPT"
 grep -Fq 'GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS' "$RUNTIME_SCRIPT"
@@ -585,5 +592,6 @@ grep -Fq 'userdel supacloud-legacystop' "$legacy_stop_log"
 
 bash "${SCRIPT_DIR}/gotrue_upgrade.test.sh"
 bash "${SCRIPT_DIR}/postgrest_upgrade.test.sh"
+bash "${SCRIPT_DIR}/postrust_build.test.sh"
 
 echo "tenant runtime security checks passed"

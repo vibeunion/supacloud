@@ -1,5 +1,5 @@
 // @supacloud-test-isolate
-// CI sets SUPACLOUD_TEST_POSTRUST_GRAPHQL=1 and POSTRUST_BIN to the pinned
+// CI sets SUPACLOUD_TEST_POSTRUST_GRAPHQL=1 and POSTRUST_BIN to the patched
 // Postrust v3.4.0 binary. PostgreSQL 16's initdb is POSTGRES_BIN or
 // /usr/lib/postgresql/16/bin. Without those, this file skips.
 import { createHmac, randomBytes } from "node:crypto";

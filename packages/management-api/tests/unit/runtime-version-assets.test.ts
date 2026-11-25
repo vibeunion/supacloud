@@ -1313,6 +1313,9 @@ describe("runtime companion version assets", () => {
     expect(installer).toContain('supacloud_upgrade_postgrest_binary "$POSTGREST_BIN"');
     expect(postgrestUpgrade).toContain('SUPACLOUD_POSTGREST_RELEASE_ARCH="linux-amd64"');
     expect(postgrestUpgrade).toContain("publishes no official linux/arm64 image");
+    expect(postgrestUpgrade).toContain('supacloud_build_patched_postrust "$staged_binary"');
+    expect(postgrestUpgrade).toContain("postrust-v3.4.0-null-rpc-args");
+    expect(postgrestUpgrade).not.toContain("registry-1.docker.io/v2/postrust/postrust/blobs/${SUPACLOUD_POSTRUST_LAYER_AMD64}");
     expect(postgrestUpgrade).toContain('supacloud_postgrest_active_units > "$active_units"');
     expect(postgrestUpgrade).toContain('supacloud_stop_postgrest_units "$active_units" "$stopped_units"');
     expect(postgrestUpgrade).toContain('supacloud_restart_postgrest_units "$active_units" "$binary_path" "$target_version"');
@@ -1416,8 +1419,11 @@ describe("runtime companion version assets", () => {
     }
     expect(podmanUnits[0]).toContain("localhost/supacloud-caddy:local");
     expect(podmanUnits[1]).toContain("supabase/gotrue:v2.198.0");
-    expect(podmanUnits[2]).toContain("docker.io/postrust/postrust:v3.4.0@sha256:4de17b6c68403317a33c0a8ab78edb347e6b3131e9784c25b5c700554ac61809");
-    expect(workflow).toContain("docker.io/postrust/postrust:v3.4.0@sha256:4de17b6c68403317a33c0a8ab78edb347e6b3131e9784c25b5c700554ac61809");
+    expect(podmanUnits[2]).toContain("localhost/supacloud-postrust:local");
+    expect(podmanUnits[2]).not.toContain("docker.io/postrust/postrust:");
+    expect(workflow).toContain("postrust-v3.4.0-null-rpc");
+    expect(workflow).toContain("scripts/build_supacloud_postrust.sh");
+    expect(workflow).not.toContain("docker.io/postrust/postrust:v3.4.0@sha256:4de17b6c68403317a33c0a8ab78edb347e6b3131e9784c25b5c700554ac61809");
     expect(workflow).toContain("supabase/gotrue:v2.198.0");
     expect(podmanPostgresContainerfile).toContain("FROM postgres:18-bookworm");
     expect(workflow).toContain("SupaCloud deployment remains PostgreSQL 18");
