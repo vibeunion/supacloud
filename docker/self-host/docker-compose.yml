@@ -69,7 +69,11 @@ services:
       GOTRUE_WEBAUTHN_RP_ORIGINS: ${WEBAUTHN_RP_ORIGINS:-${STUDIO_URL}}
 
   postgrest:
-    image: docker.io/postrust/postrust:v3.4.0@sha256:4de17b6c68403317a33c0a8ab78edb347e6b3131e9784c25b5c700554ac61809
+    build:
+      context: ../..
+      dockerfile: docker/self-host/postrust/Dockerfile
+    image: supacloud-postrust:3.4.0-null-rpc
+    pull_policy: build
     restart: unless-stopped
     depends_on:
       postgres:

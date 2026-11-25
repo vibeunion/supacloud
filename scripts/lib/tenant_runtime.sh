@@ -23,7 +23,9 @@ POSTGREST_RTS="${POSTGREST_RTS:--N1 -M256m -I0.5 -A4m}"
 POSTGREST_MEMORY_MAX="${POSTGREST_MEMORY_MAX:-384M}"
 POSTGREST_CPU_WEIGHT="${POSTGREST_CPU_WEIGHT:-40}"
 POSTGREST_DEFAULT_VERSION="v3.4.0"
-POSTGREST_X86_64_SHA256="f174c84a1b3ac8a24c13a4ef7896adfc029ece8c1b206ee715e3864f5f169b7a"
+# Patched v3.4.0 identity. The official unpatched binary is not the hosted default.
+# shellcheck source=postrust_pin.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/postrust_pin.sh"
 # Postrust v3.4.0 publishes no official linux/arm64 image or release binary.
 GOTRUE_DEFAULT_VERSION="v2.198.0"
 
@@ -744,6 +746,18 @@ ensure_postgrest() {
         return 1
     }
     if [ "$installed_version" = "$version" ]; then
+        if [ "$version" = "$POSTGREST_DEFAULT_VERSION" ]; then
+            local magic
+            magic=$(od -An -t x1 -N 2 -- "$POSTGREST_BIN" | tr -d ' \n') || return 1
+            # Shell doubles used by tests print a version. An ELF must carry the
+            # null-RPC patch stamp; the official v3.4.0 member does not.
+            if [ "$magic" != "2321" ]; then
+                supacloud_postrust_patch_stamp_matches "$POSTGREST_BIN" || {
+                    echo "ERROR: Postrust ${version} at $POSTGREST_BIN is not the patched null-RPC build; run the explicit SupaCloud installer/upgrade" >&2
+                    return 1
+                }
+            fi
+        fi
         return 0
     fi
     if [ "$installed_version" != "$version" ]; then

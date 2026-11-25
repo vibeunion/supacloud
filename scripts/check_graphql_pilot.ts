@@ -101,7 +101,7 @@ try {
     "-e", "PGRST_DB_POOL=4", "-e", "PGRST_DB_MAX_ROWS=100",
     "-e", "PGRST_COMPAT_MODE=true",
     "-e", "PGRST_DB_CHANNEL=pgrst", "-e", "PGRST_DB_CHANNEL_ENABLED=true",
-    "docker.io/postrust/postrust:v3.4.0@sha256:4de17b6c68403317a33c0a8ab78edb347e6b3131e9784c25b5c700554ac61809"], undefined, {
+    "supacloud-postrust:3.4.0-null-rpc"], undefined, {
       PGRST_DB_URI: `postgres://authenticator:${password}@${pg}:5432/graphql_pilot`,
       PGRST_JWT_SECRET: secret,
     });

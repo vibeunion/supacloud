@@ -2,21 +2,14 @@
 
 # Postrust v3.4.0 (MIT, Copyright 2024 Postrust Contributors).
 # Official release: https://github.com/postrust/postrust/releases/tag/v3.4.0
-# The release has no GitHub binary assets. The host installer extracts
-# /usr/local/bin/postrust from the pinned linux/amd64 image layer. v3.4.0
-# publishes no linux/arm64 image. Source archive observed 2026-11-24:
-# https://github.com/postrust/postrust/archive/refs/tags/v3.4.0.tar.gz
-# sha256 2c5de117fe288a18046776dfd0505d21845ba49b072d62bdab2c29ce3f2fe722
-# The installer does not download that archive; the OCI layer and binary
-# checksums below are the pin.
-SUPACLOUD_POSTGREST_DEFAULT_VERSION="v3.4.0"
-SUPACLOUD_POSTRUST_IMAGE="docker.io/postrust/postrust:v3.4.0"
-SUPACLOUD_POSTRUST_IMAGE_INDEX_DIGEST="sha256:4de17b6c68403317a33c0a8ab78edb347e6b3131e9784c25b5c700554ac61809"
-SUPACLOUD_POSTRUST_IMAGE_MANIFEST_AMD64="sha256:17ffc00f28a065bf228eaa74e6b823be0ae5813b4cf7b37a48f0067b9a464e2c"
-SUPACLOUD_POSTRUST_LAYER_AMD64="sha256:a2139f3563c558457f2b660bb92514a2b00d4d549392511fd127cd9669b5ef32"
-SUPACLOUD_POSTRUST_BINARY_AMD64_SHA256="f174c84a1b3ac8a24c13a4ef7896adfc029ece8c1b206ee715e3864f5f169b7a"
-SUPACLOUD_POSTRUST_LAYER_MEMBER="usr/local/bin/postrust"
-SUPACLOUD_POSTGREST_X86_64_SHA256="$SUPACLOUD_POSTRUST_BINARY_AMD64_SHA256"
+# The default installer builds that tag from the pinned source archive and
+# applies docs/patches/postrust-v3.4.0-null-rpc-args.patch. It does not
+# download the official image. Pins live in postrust_pin.sh.
+# shellcheck source=postrust_pin.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/postrust_pin.sh"
+
+SUPACLOUD_POSTGREST_DEFAULT_VERSION="$SUPACLOUD_POSTRUST_UPSTREAM_VERSION"
+SUPACLOUD_POSTRUST_BUILD_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/build_supacloud_postrust.sh"
 
 supacloud_postgrest_binary_version() {
     local binary_path="$1"
@@ -70,6 +63,47 @@ supacloud_write_postrust_version_stamp() {
     chmod 644 "$stamp"
 }
 
+supacloud_build_patched_postrust() {
+    local target="$1"
+    local out_dir machine arch_tag magic
+    out_dir=$(mktemp -d "${TMPDIR:-/tmp}/supacloud-postrust-out.XXXXXX") || return 1
+    if ! OUT_DIR="$out_dir" bash "$SUPACLOUD_POSTRUST_BUILD_SCRIPT"; then
+        rm -rf -- "$out_dir"
+        return 1
+    fi
+    install -m 0755 "${out_dir}/postrust" "$target" || {
+        rm -rf -- "$out_dir"
+        return 1
+    }
+    install -m 0644 "${out_dir}/postrust.postrust-patch" "${target}.postrust-patch" || {
+        rm -rf -- "$out_dir"
+        return 1
+    }
+    rm -rf -- "$out_dir"
+    if ! supacloud_postrust_patch_stamp_matches "$target"; then
+        printf 'Patched Postrust stamp does not match the pinned null-RPC patch\n' >&2
+        return 1
+    fi
+    machine=$(uname -m)
+    case "$machine" in
+        x86_64|amd64) arch_tag="amd64" ;;
+        aarch64|arm64) arch_tag="arm64" ;;
+        *)
+            printf 'Unsupported architecture for patched Postrust: %s\n' "$machine" >&2
+            return 1
+            ;;
+    esac
+    if command -v file >/dev/null 2>&1; then
+        supacloud_validate_binary "$target" "pinned-linux-${arch_tag}" || return 1
+    else
+        magic=$(od -An -t x1 -N 4 -- "$target" | tr -d ' \n') || return 1
+        [[ "$magic" == "7f454c46" ]] || {
+            printf 'Patched Postrust output is not an ELF binary\n' >&2
+            return 1
+        }
+    fi
+}
+
 supacloud_resolve_postgrest_release() {
     local target_version="$1"
     local machine
@@ -84,8 +118,8 @@ supacloud_resolve_postgrest_release() {
             SUPACLOUD_POSTGREST_VALIDATION_ARCH="amd64"
             ;;
         aarch64|arm64)
-            printf 'Postrust %s publishes no official linux/arm64 image or release binary (index %s is amd64 only)\n' \
-                "$target_version" "$SUPACLOUD_POSTRUST_IMAGE_INDEX_DIGEST" >&2
+            printf 'Postrust %s publishes no official linux/arm64 image or release binary (unpatched index %s is amd64 only)\n' \
+                "$target_version" "$SUPACLOUD_POSTRUST_UNPATCHED_INDEX_DIGEST" >&2
             return 1
             ;;
         *)
@@ -93,16 +127,15 @@ supacloud_resolve_postgrest_release() {
             return 1
             ;;
     esac
-    SUPACLOUD_POSTRUST_BINARY_SHA256=""
     if [[ "$target_version" == "$SUPACLOUD_POSTGREST_DEFAULT_VERSION" ]]; then
-        SUPACLOUD_POSTGREST_RELEASE_SHA256="${POSTGREST_SHA256:-${SUPACLOUD_POSTRUST_LAYER_AMD64#sha256:}}"
-        SUPACLOUD_POSTRUST_BINARY_SHA256="${POSTRUST_BINARY_SHA256:-$SUPACLOUD_POSTRUST_BINARY_AMD64_SHA256}"
-        SUPACLOUD_POSTGREST_RELEASE_URL="https://registry-1.docker.io/v2/postrust/postrust/blobs/${SUPACLOUD_POSTRUST_LAYER_AMD64}"
-    else
-        SUPACLOUD_POSTGREST_RELEASE_SHA256="${POSTGREST_SHA256:-}"
-        SUPACLOUD_POSTRUST_BINARY_SHA256="${POSTRUST_BINARY_SHA256:-}"
-        SUPACLOUD_POSTGREST_RELEASE_URL="${POSTRUST_RELEASE_URL:-https://example.invalid/postrust/${target_version}.layer.tar.gz}"
+        printf 'Postrust %s is built from the pinned source archive with %s; the official image is not installed\n' \
+            "$target_version" "$SUPACLOUD_POSTRUST_PATCH_ID" >&2
+        return 1
     fi
+    SUPACLOUD_POSTRUST_BINARY_SHA256=""
+    SUPACLOUD_POSTGREST_RELEASE_SHA256="${POSTGREST_SHA256:-}"
+    SUPACLOUD_POSTRUST_BINARY_SHA256="${POSTRUST_BINARY_SHA256:-}"
+    SUPACLOUD_POSTGREST_RELEASE_URL="${POSTRUST_RELEASE_URL:-https://example.invalid/postrust/${target_version}.layer.tar.gz}"
     [[ "$SUPACLOUD_POSTGREST_RELEASE_SHA256" =~ ^[0-9a-fA-F]{64}$ ]] || {
         printf 'POSTGREST_SHA256 is required for unpinned Postrust version %s\n' "$target_version" >&2
         return 1
@@ -317,6 +350,11 @@ supacloud_rollback_postgrest_upgrade() {
     else
         rm -f -- "${binary_path}.postrust-version"
     fi
+    if [[ -d "${backup_dir}/patch-stamp" ]]; then
+        supacloud_restore_file_snapshot "${binary_path}.postrust-patch" "${backup_dir}/patch-stamp" || return 1
+    else
+        rm -f -- "${binary_path}.postrust-patch"
+    fi
     systemctl daemon-reload || return 1
     [[ -z "$previous_version" ]] || supacloud_restart_postgrest_units "$units_file" "$binary_path" "$previous_version"
 }
@@ -325,8 +363,8 @@ supacloud_upgrade_postgrest_binary_transaction() (
     local binary_path="$1"
     local result_file="$2"
     local target_version="${POSTGREST_VERSION:-$SUPACLOUD_POSTGREST_DEFAULT_VERSION}"
-    local current_version="" transaction_dir archive staged_binary="" backup_dir active_units stopped_units status=0
-    local binary_requires_upgrade=false
+    local current_version="" transaction_dir archive staged_binary="" staged_patch="" backup_dir active_units stopped_units status=0
+    local binary_requires_upgrade=false use_source_build=false
 
     [[ "$target_version" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?([+-][A-Za-z0-9._-]+)?$ ]] || {
         printf 'Invalid Postrust version (expected v-prefixed release): %s\n' "$target_version" >&2
@@ -345,8 +383,15 @@ supacloud_upgrade_postgrest_binary_transaction() (
             }
         fi
     fi
+    if [[ "$target_version" == "$SUPACLOUD_POSTGREST_DEFAULT_VERSION" ]]; then
+        use_source_build=true
+    fi
     if [[ "$current_version" != "$target_version" ]]; then
         binary_requires_upgrade=true
+    elif [[ "$use_source_build" == true ]] && ! supacloud_postrust_patch_stamp_matches "$binary_path"; then
+        binary_requires_upgrade=true
+    fi
+    if [[ "$binary_requires_upgrade" == true && "$use_source_build" == false ]]; then
         supacloud_resolve_postgrest_release "$target_version" || return 1
     fi
 
@@ -354,7 +399,7 @@ supacloud_upgrade_postgrest_binary_transaction() (
     chmod 700 "$transaction_dir"
     active_units="${transaction_dir}/active-units"
     stopped_units="${transaction_dir}/stopped-units"
-    trap 'rm -rf -- "${transaction_dir:-}"; [[ -z "${staged_binary:-}" ]] || rm -f -- "$staged_binary"' EXIT HUP INT TERM
+    trap 'rm -rf -- "${transaction_dir:-}"; [[ -z "${staged_binary:-}" ]] || rm -f -- "$staged_binary"; [[ -z "${staged_patch:-}" ]] || rm -f -- "$staged_patch"' EXIT HUP INT TERM
     supacloud_postgrest_active_units > "$active_units" || return 1
     chmod 600 "$active_units"
 
@@ -364,17 +409,23 @@ supacloud_upgrade_postgrest_binary_transaction() (
     fi
 
     if [[ "$binary_requires_upgrade" == true ]]; then
-        archive="${transaction_dir}/postrust-layer.tar.gz"
         staged_binary="${binary_path}.staged.$$"
-        supacloud_download_postrust_artifact "$SUPACLOUD_POSTGREST_RELEASE_URL" "$archive" || return 1
-        supacloud_install_pinned_postrust_layer "$archive" "$SUPACLOUD_POSTRUST_LAYER_MEMBER" \
-            "$SUPACLOUD_POSTGREST_RELEASE_SHA256" "$SUPACLOUD_POSTRUST_BINARY_SHA256" \
-            "$SUPACLOUD_POSTGREST_VALIDATION_ARCH" "$staged_binary" || return 1
-        if [[ -z "$SUPACLOUD_POSTRUST_BINARY_SHA256" ]]; then
-            [[ "$(supacloud_postgrest_binary_version "$staged_binary")" == "$target_version" ]] || {
-                printf 'Staged Postrust binary version does not match %s\n' "$target_version" >&2
-                return 1
-            }
+        staged_patch="${staged_binary}.postrust-patch"
+        if [[ "$use_source_build" == true ]]; then
+            printf 'Building Postrust %s with %s\n' "$target_version" "$SUPACLOUD_POSTRUST_PATCH_ID"
+            supacloud_build_patched_postrust "$staged_binary" || return 1
+        else
+            archive="${transaction_dir}/postrust-layer.tar.gz"
+            supacloud_download_postrust_artifact "$SUPACLOUD_POSTGREST_RELEASE_URL" "$archive" || return 1
+            supacloud_install_pinned_postrust_layer "$archive" "$SUPACLOUD_POSTRUST_LAYER_MEMBER" \
+                "$SUPACLOUD_POSTGREST_RELEASE_SHA256" "$SUPACLOUD_POSTRUST_BINARY_SHA256" \
+                "$SUPACLOUD_POSTGREST_VALIDATION_ARCH" "$staged_binary" || return 1
+            if [[ -z "$SUPACLOUD_POSTRUST_BINARY_SHA256" ]]; then
+                [[ "$(supacloud_postgrest_binary_version "$staged_binary")" == "$target_version" ]] || {
+                    printf 'Staged Postrust binary version does not match %s\n' "$target_version" >&2
+                    return 1
+                }
+            fi
         fi
     fi
 
@@ -383,6 +434,7 @@ supacloud_upgrade_postgrest_binary_transaction() (
     backup_dir=$(mktemp -d "${SUPACLOUD_POSTGREST_BACKUP_ROOT:-/var/lib/supacloud/backups/postgrest}/${target_version}-$(date -u +%Y%m%dT%H%M%SZ).XXXXXX") || return 1
     supacloud_capture_file_snapshot "$binary_path" "${backup_dir}/binary" || return 1
     supacloud_capture_file_snapshot "${binary_path}.postrust-version" "${backup_dir}/version-stamp" || return 1
+    supacloud_capture_file_snapshot "${binary_path}.postrust-patch" "${backup_dir}/patch-stamp" || return 1
 
     if ! supacloud_stop_postgrest_units "$active_units" "$stopped_units"; then
         [[ -z "$current_version" ]] || supacloud_restart_postgrest_units "$stopped_units" "$binary_path" "$current_version" || true
@@ -396,10 +448,26 @@ supacloud_upgrade_postgrest_binary_transaction() (
         else
             status=$?
         fi
+        if (( status == 0 )); then
+            if [[ "$use_source_build" == true ]]; then
+                if [[ -f "$staged_patch" ]] && mv -f "$staged_patch" "${binary_path}.postrust-patch"; then
+                    staged_patch=""
+                else
+                    status=1
+                fi
+            else
+                rm -f -- "${binary_path}.postrust-patch"
+                staged_patch=""
+            fi
+        fi
     fi
     if (( status == 0 )); then chmod 755 "$binary_path" || status=$?; fi
     if (( status == 0 )); then supacloud_write_postrust_version_stamp "$binary_path" "$target_version" || status=$?; fi
     if (( status == 0 )) && [[ "$(supacloud_postgrest_binary_version "$binary_path" 2>/dev/null || true)" != "$target_version" ]]; then
+        status=1
+    fi
+    if (( status == 0 )) && [[ "$use_source_build" == true ]] && ! supacloud_postrust_patch_stamp_matches "$binary_path"; then
+        printf 'Installed Postrust binary is missing the %s stamp\n' "$SUPACLOUD_POSTRUST_PATCH_ID" >&2
         status=1
     fi
     if (( status == 0 )); then systemctl daemon-reload || status=$?; fi

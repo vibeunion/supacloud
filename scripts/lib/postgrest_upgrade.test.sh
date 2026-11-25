@@ -156,4 +156,60 @@ if supacloud_upgrade_postgrest_binary "$postgrest_binary" >/dev/null 2>&1; then
 fi
 [[ "$(supacloud_postgrest_binary_version "$postgrest_binary")" == v14.16 ]]
 
+# The pinned release is built from source. It must not download the official layer.
+resolve_err="${tmp_dir}/resolve.err"
+if supacloud_resolve_postgrest_release "$SUPACLOUD_POSTGREST_DEFAULT_VERSION" >/dev/null 2>"$resolve_err"; then
+    echo "default Postrust version resolved to a download" >&2
+    exit 1
+fi
+if [[ "$(uname -m)" == "x86_64" || "$(uname -m)" == "amd64" ]]; then
+    grep -Fq 'pinned source archive' "$resolve_err"
+fi
+
+build_count_file="${tmp_dir}/postrust-build-count"
+printf '0\n' > "$build_count_file"
+supacloud_build_patched_postrust() {
+    local target="$1"
+    local count
+    count=$(<"$build_count_file")
+    printf '%s\n' "$((count + 1))" > "$build_count_file"
+    printf '#!/bin/sh\nprintf "PostgREST %s\\n"\n' "${SUPACLOUD_POSTGREST_DEFAULT_VERSION#v}" > "$target"
+    chmod 755 "$target"
+    printf '%s\n%s\n%s\n%s\n%s\n' \
+        "$SUPACLOUD_POSTRUST_PATCH_ID" \
+        "$SUPACLOUD_POSTRUST_PATCH_SHA256" \
+        "$SUPACLOUD_POSTRUST_SOURCE_SHA256" \
+        "$SUPACLOUD_POSTRUST_RUSTC_VERSION" \
+        "$SUPACLOUD_POSTRUST_FEATURES" > "${target}.postrust-patch"
+    chmod 644 "${target}.postrust-patch"
+}
+
+export POSTGREST_VERSION="$SUPACLOUD_POSTGREST_DEFAULT_VERSION"
+unset POSTGREST_SHA256 POSTRUST_RELEASE_URL POSTRUST_BINARY_SHA256
+write_binary v14.16
+rm -f "${postgrest_binary}.postrust-patch" "${postgrest_binary}.postrust-version"
+runtime_active=true
+runtime_binary_current=true
+: > "$systemctl_log"
+: > "$download_log"
+supacloud_upgrade_postgrest_binary "$postgrest_binary"
+[[ "$(<"$build_count_file")" -eq 1 ]]
+[[ "$(supacloud_postgrest_binary_version "$postgrest_binary")" == "$SUPACLOUD_POSTGREST_DEFAULT_VERSION" ]]
+supacloud_postrust_patch_stamp_matches "$postgrest_binary"
+[[ ! -s "$download_log" ]]
+
+: > "$systemctl_log"
+: > "$download_log"
+supacloud_upgrade_postgrest_binary "$postgrest_binary"
+[[ "$(<"$build_count_file")" -eq 1 ]]
+[[ ! -s "$systemctl_log" ]]
+[[ ! -s "$download_log" ]]
+
+rm -f "${postgrest_binary}.postrust-patch"
+: > "$download_log"
+supacloud_upgrade_postgrest_binary "$postgrest_binary"
+[[ "$(<"$build_count_file")" -eq 2 ]]
+supacloud_postrust_patch_stamp_matches "$postgrest_binary"
+[[ ! -s "$download_log" ]]
+
 echo "PostgREST staged global upgrade checks passed"

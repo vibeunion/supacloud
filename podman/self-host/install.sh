@@ -336,6 +336,7 @@ if [[ "$SKIP_BUILD" != "true" && "$DRY_RUN" != "true" ]]; then
   podman build --pull=missing -f "$SCRIPT_DIR/edge-runtime.Containerfile" -t localhost/supacloud-edge-runtime:local "$REPO_ROOT"
   podman build --pull=missing -f "$SCRIPT_DIR/pgredis-runtime.Containerfile" -t localhost/supacloud-pgredis-runtime:local "$REPO_ROOT"
   podman build --pull=missing -f "$SCRIPT_DIR/caddy/Containerfile" -t localhost/supacloud-caddy:local "$SCRIPT_DIR/caddy"
+  podman build --pull=missing -f "$REPO_ROOT/docker/self-host/postrust/Dockerfile" -t localhost/supacloud-postrust:local "$REPO_ROOT"
 fi
 
 realtime_engine="$(read_env SUPACLOUD_REALTIME_ENGINE)"

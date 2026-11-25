@@ -24,7 +24,7 @@ Prerequisites: Bun, Docker, and installed compiler dependencies. From the reposi
 
 ```sh
 docker build -t supacloud-graphql-test:pg18 docker/graphql-test
-docker pull docker.io/postrust/postrust:v3.4.0@sha256:4de17b6c68403317a33c0a8ab78edb347e6b3131e9784c25b5c700554ac61809
+docker build -f docker/self-host/postrust/Dockerfile -t supacloud-postrust:3.4.0-null-rpc .
 bun run scripts/check_graphql_pilot.ts
 # Run the same acceptance suite and retain the local page until Ctrl-C:
 bun run scripts/check_graphql_pilot.ts --serve

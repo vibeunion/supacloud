@@ -17,7 +17,6 @@ test("public integration fixtures initialize without unavailable fork PR secrets
   const services = object(integration.services);
   for (const [name, image] of [
     ["postgres", "supabase/postgres:17.11.0.011"],
-    ["postgrest", "docker.io/postrust/postrust:v3.4.0@sha256:4de17b6c68403317a33c0a8ab78edb347e6b3131e9784c25b5c700554ac61809"],
     ["gotrue", "supabase/gotrue:v2.198.0"],
   ]) {
     const service = object(services[name!]);
@@ -25,6 +24,10 @@ test("public integration fixtures initialize without unavailable fork PR secrets
     expect(service.credentials).toBeUndefined();
     expect(service.env).toBeDefined();
   }
+  expect(services.postgrest).toBeUndefined();
+  const needs = integration.needs;
+  const needList = Array.isArray(needs) ? needs : [needs];
+  expect(needList).toContain("postrust-patched-binary");
   expect(integration.if).toBeUndefined();
 });
 
