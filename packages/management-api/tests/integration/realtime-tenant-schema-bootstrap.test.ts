@@ -6,7 +6,7 @@
  * proves the objects the Rust gateway depends on are there. A later pass, and
  * a database whose `realtime.list_changes` body is not the pin, issue no DDL.
  */
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { SQL } from "bun";
 import { randomUUID } from "node:crypto";
 import { config } from "../../src/config";
@@ -46,37 +46,7 @@ GRANT USAGE ON SCHEMA public TO supabase_admin, supabase_realtime_admin;
 GRANT anon, authenticated, service_role TO supabase_admin WITH INHERIT FALSE, SET TRUE;
 `;
 
-interface ReservedDatabase {
-  sql: SQL;
-}
-
-async function withDatabase<T>(run: (database: ReservedDatabase) => Promise<T>): Promise<T> {
-  const name = `realtime_schema_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
-  const admin = new SQL(adminUrl!, { max: 1 });
-  const url = new URL(adminUrl!);
-  url.pathname = `/${name}`;
-  let database: SQL | undefined;
-  try {
-    await admin.unsafe(`CREATE DATABASE "${name}"`);
-    database = new SQL(url.toString(), { max: 1 });
-    await database.unsafe(TENANT_REALTIME_SHELL);
-    return await run({ sql: database });
-  } finally {
-    // Close this fixture's sessions, then drop without FORCE. PostgreSQL 18's
-    // FORCE path waits on a ProcSignalBarrier from every backend, including the
-    // image's documentdb worker, and that wait blows the test timeout.
-    try {
-      await database?.close();
-    } catch {
-      /* the targeted terminate below still releases the session */
-    }
-    await admin.unsafe(
-      `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${name}' AND pid <> pg_backend_pid()`,
-    );
-    await admin.unsafe(`DROP DATABASE IF EXISTS "${name}"`);
-    await admin.close();
-  }
-}
+const FIXTURE_PROJECT = "realtime-schema-fixture";
 
 async function inspect(database: SQL) {
   const rows = await database.unsafe(realtimeTenantSchemaInspectionSql());
@@ -93,16 +63,63 @@ async function listChangesOid(database: SQL): Promise<string> {
 }
 
 describeIfDatabase("pinned Realtime tenant schema bootstrap", () => {
+  // One database for the file. PostgreSQL 18 DROP DATABASE waits on a
+  // ProcSignalBarrier from every backend, including this image's documentdb
+  // worker, and a drop per test exceeds the timeout. Each case resets the
+  // realtime schema instead.
+  const name = `realtime_schema_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+  let admin: SQL;
+  let sql: SQL;
+
+  beforeAll(async () => {
+    admin = new SQL(adminUrl!, { max: 1 });
+    await admin.unsafe(`CREATE DATABASE "${name}"`);
+    const url = new URL(adminUrl!);
+    url.pathname = `/${name}`;
+    sql = new SQL(url.toString(), { max: 1 });
+  });
+
+  beforeEach(async () => {
+    await sql.unsafe(`
+      DROP PUBLICATION IF EXISTS supabase_realtime;
+      DROP TABLE IF EXISTS public.todos;
+      DROP SCHEMA IF EXISTS realtime CASCADE;
+    `);
+    await sql.unsafe(TENANT_REALTIME_SHELL);
+  });
+
+  afterAll(async () => {
+    try {
+      await sql.unsafe(`
+        SELECT pg_drop_replication_slot(slot_name)
+        FROM pg_replication_slots
+        WHERE database = current_database() AND NOT active
+      `);
+    } catch {
+      /* the fixture slot is dropped in the test that creates it */
+    }
+    try {
+      await sql.close();
+    } catch {
+      /* the admin connection still owns the drop */
+    }
+    try {
+      await admin.unsafe(`DROP DATABASE IF EXISTS "${name}"`);
+    } finally {
+      await admin.close();
+    }
+  }, 30_000);
+
   test("a fresh tenant gets the objects postgres_changes depends on", async () => {
     const previous = config.realtimeEngine;
     config.realtimeEngine = "rust";
     try {
       const artifact = pinnedRealtimeTenantSchemaArtifact();
-      await withDatabase(async ({ sql }) => {
+      {
         const before = await inspect(sql);
         expect(before.empty).toBe(true);
         expect(decideRealtimeTenantSchema(artifact, before).mode).toBe("install");
-        expect(await ensureOfficialRealtimeTenantSchema(sql)).toBe(true);
+        expect(await ensureOfficialRealtimeTenantSchema(sql, FIXTURE_PROJECT)).toBe(true);
 
         const after = await inspect(sql);
         expect(after.subscriptionExists).toBe(true);
@@ -161,7 +178,7 @@ describeIfDatabase("pinned Realtime tenant schema bootstrap", () => {
           );
           expect(signature).toEqual({ signature: "realtime.list_changes(name,name,integer,integer)" });
         }
-      });
+      }
     } finally {
       config.realtimeEngine = previous;
     }
@@ -171,13 +188,11 @@ describeIfDatabase("pinned Realtime tenant schema bootstrap", () => {
     const previous = config.realtimeEngine;
     config.realtimeEngine = "rust";
     try {
-      await withDatabase(async ({ sql }) => {
-        expect(await ensureOfficialRealtimeTenantSchema(sql)).toBe(true);
-        const first = await listChangesOid(sql);
-        expect(decideRealtimeTenantSchema(pinnedRealtimeTenantSchemaArtifact(), await inspect(sql)).mode).toBe("pinned");
-        expect(await ensureOfficialRealtimeTenantSchema(sql)).toBe(false);
-        expect(await listChangesOid(sql)).toBe(first);
-      });
+      expect(await ensureOfficialRealtimeTenantSchema(sql, FIXTURE_PROJECT)).toBe(true);
+      const first = await listChangesOid(sql);
+      expect(decideRealtimeTenantSchema(pinnedRealtimeTenantSchemaArtifact(), await inspect(sql)).mode).toBe("pinned");
+      expect(await ensureOfficialRealtimeTenantSchema(sql, FIXTURE_PROJECT)).toBe(false);
+      expect(await listChangesOid(sql)).toBe(first);
     } finally {
       config.realtimeEngine = previous;
     }
@@ -187,21 +202,19 @@ describeIfDatabase("pinned Realtime tenant schema bootstrap", () => {
     const previous = config.realtimeEngine;
     config.realtimeEngine = "rust";
     try {
-      await withDatabase(async ({ sql }) => {
-        expect(await ensureOfficialRealtimeTenantSchema(sql)).toBe(true);
-        await sql.unsafe(`
-          CREATE OR REPLACE FUNCTION realtime.list_changes (
-            publication name, slot_name name, max_changes integer, max_record_bytes integer
-          ) RETURNS TABLE (wal jsonb, is_rls_enabled boolean, subscription_ids uuid[], errors text[], slot_changes_count bigint)
-          LANGUAGE sql AS $fn$ SELECT null::jsonb, null::boolean, null::uuid[], null::text[], 0::bigint $fn$;
-        `);
-        const replaced = await listChangesOid(sql);
-        const state = await inspect(sql);
-        expect(decideRealtimeTenantSchema(pinnedRealtimeTenantSchemaArtifact(), state).mode).toBe("leave");
-        expect(await ensureOfficialRealtimeTenantSchema(sql)).toBe(false);
-        expect(await listChangesOid(sql)).toBe(replaced);
-        expect((await inspect(sql)).subscriptionExists).toBe(true);
-      });
+      expect(await ensureOfficialRealtimeTenantSchema(sql, FIXTURE_PROJECT)).toBe(true);
+      await sql.unsafe(`
+        CREATE OR REPLACE FUNCTION realtime.list_changes (
+          publication name, slot_name name, max_changes integer, max_record_bytes integer
+        ) RETURNS TABLE (wal jsonb, is_rls_enabled boolean, subscription_ids uuid[], errors text[], slot_changes_count bigint)
+        LANGUAGE sql AS $fn$ SELECT null::jsonb, null::boolean, null::uuid[], null::text[], 0::bigint $fn$;
+      `);
+      const replaced = await listChangesOid(sql);
+      const state = await inspect(sql);
+      expect(decideRealtimeTenantSchema(pinnedRealtimeTenantSchemaArtifact(), state).mode).toBe("leave");
+      expect(await ensureOfficialRealtimeTenantSchema(sql, FIXTURE_PROJECT)).toBe(false);
+      expect(await listChangesOid(sql)).toBe(replaced);
+      expect((await inspect(sql)).subscriptionExists).toBe(true);
     } finally {
       config.realtimeEngine = previous;
     }
@@ -211,14 +224,12 @@ describeIfDatabase("pinned Realtime tenant schema bootstrap", () => {
     const previous = config.realtimeEngine;
     config.realtimeEngine = "container";
     try {
-      await withDatabase(async ({ sql }) => {
-        expect(await ensureOfficialRealtimeTenantSchema(sql)).toBe(false);
-        const [signature] = await sql.unsafe(
-          "SELECT to_regprocedure('realtime.list_changes(name,name,integer,integer)')::text AS signature",
-        );
-        expect(signature).toEqual({ signature: null });
-        expect((await inspect(sql)).empty).toBe(true);
-      });
+      expect(await ensureOfficialRealtimeTenantSchema(sql, FIXTURE_PROJECT)).toBe(false);
+      const [signature] = await sql.unsafe(
+        "SELECT to_regprocedure('realtime.list_changes(name,name,integer,integer)')::text AS signature",
+      );
+      expect(signature).toEqual({ signature: null });
+      expect((await inspect(sql)).empty).toBe(true);
     } finally {
       config.realtimeEngine = previous;
     }
