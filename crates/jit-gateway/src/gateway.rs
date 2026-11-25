@@ -1,4 +1,4 @@
-use crate::policy::{CompiledPolicy, AllowedNetworksInput};
+use crate::policy::{AllowedNetworksInput, CompiledPolicy};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -306,4 +306,3 @@ mod tests {
         assert_eq!(res, 0); // EOF immediately received
     }
 }
-

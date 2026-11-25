@@ -84,6 +84,7 @@ Rust 服务可以承担：
 - [x] 统一健康响应字段。
 - [x] Realtime 统一 SIGTERM/Ctrl-C 优雅退出。
 - [x] JIT Gateway 和 Image Service 增加同等 graceful shutdown。
+- [x] 四个 crate 的 `cargo fmt --check`、`cargo clippy -D warnings`、`cargo test`、`--locked` 元数据与 release 构建纳入 CI（`.github/workflows/rust.yml`），工具链由根目录 `rust-toolchain.toml` 固定。此前四个 crate 没有任何自动构建，两个提交的 `Cargo.lock` 已经与 manifest 不一致。
 - [ ] 增加 Rust 服务的 contract/black-box HTTP fixtures。
 
 ### 第二阶段：控制面协调

@@ -13,7 +13,7 @@ if ! command -v cargo >/dev/null 2>&1; then
 fi
 
 echo "=> Building supacloud-image-service (release)..."
-cargo build --release --manifest-path "${CRATE_DIR}/Cargo.toml"
+cargo build --release --locked --manifest-path "${CRATE_DIR}/Cargo.toml"
 
 TARGET_BIN="${CRATE_DIR}/target/release/supacloud-image-service"
 if [[ ! -f "$TARGET_BIN" ]]; then

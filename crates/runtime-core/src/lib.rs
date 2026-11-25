@@ -20,7 +20,11 @@ pub struct BoundaryManifest {
 }
 
 impl BoundaryManifest {
-    pub fn new(service: impl Into<String>, version: impl Into<String>, engine: impl Into<String>) -> Self {
+    pub fn new(
+        service: impl Into<String>,
+        version: impl Into<String>,
+        engine: impl Into<String>,
+    ) -> Self {
         Self {
             schema: "supacloud.rust-boundary.v1".to_owned(),
             service: service.into(),

@@ -1,0 +1,90 @@
+name: Rust Services
+
+# The four crates under crates/ are independent packages with their own lock
+# files and their own deployment scripts, and until now nothing built them
+# automatically: scripts/build_supacloud_*.sh and install.sh were the only
+# callers. That let two committed lock files drift from their manifests, so
+# `cargo build --locked` failed in image-service and realtime-gateway. This job
+# makes format, lints, tests and lock-file consistency a gate instead of a
+# convention.
+#
+# Deliberately not part of the required-checks list in management-api.yml: it
+# only runs when the crates or the toolchain pin change, and a required check
+# that skips on most pull requests cannot be required.
+
+on:
+  pull_request:
+    paths:
+      - "crates/**"
+      - "rust-toolchain.toml"
+      - "scripts/build_supacloud_image.sh"
+      - "scripts/build_supacloud_jit_gateway.sh"
+      - "scripts/build_supacloud_realtime_gateway.sh"
+      - ".github/workflows/rust.yml"
+  push:
+    branches: [main, dev]
+    paths:
+      - "crates/**"
+      - "rust-toolchain.toml"
+      - ".github/workflows/rust.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Fail instead of silently touching a lock file. Two of them were stale.
+  CARGO_NET_RETRY: "3"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  crate:
+    name: ${{ matrix.crate }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: [runtime-core, image-service, jit-gateway, realtime-gateway]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install the pinned toolchain
+        run: |
+          rustup show active-toolchain
+          cargo --version
+          rustc --version
+
+      - name: Restore the cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Each crate is its own workspace root; cache the one being built.
+          workspaces: crates/${{ matrix.crate }} -> target
+          key: ${{ matrix.crate }}
+
+      - name: Check the lock file matches the manifest
+        working-directory: crates/${{ matrix.crate }}
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
+      - name: Check formatting
+        working-directory: crates/${{ matrix.crate }}
+        run: cargo fmt --all --check
+
+      - name: Lint
+        working-directory: crates/${{ matrix.crate }}
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Test
+        working-directory: crates/${{ matrix.crate }}
+        run: cargo test --locked
+
+      - name: Build the release binary the deploy scripts ship
+        if: matrix.crate != 'runtime-core'
+        working-directory: crates/${{ matrix.crate }}
+        run: cargo build --release --locked
