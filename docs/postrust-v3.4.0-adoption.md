@@ -67,6 +67,50 @@ The host tenant process binds `127.0.0.1`. Caddy on that host dials `127.0.0.1`,
 - **Unknown `.conf` keys.** The launcher exits if a key is not in the mapped set. The management API writer only emits mapped keys, so the generated file starts. An operator-added PostgREST setting that this mapping does not know makes the tenant REST process fail at restart. There is no fallback to the PostgREST binary.
 - **`Prefer: tx=rollback`** is not implemented.
 
+## Blocking defect: JSON null RPC arguments
+
+The pinned v3.4.0 binary does **not** preserve JSON `null` in a named RPC
+argument. `crates/postrust-core/src/plan/call_plan.rs` maps
+`serde_json::Value::Null` to `String::new()` and binds the empty string. A
+function taking a nullable `uuid`, `timestamptz`, or any other type that cannot
+parse `''` fails with PostgreSQL `22P02`:
+
+```text
+invalid input syntax for type uuid: ""
+```
+
+A request that PostgREST accepts therefore fails on Postrust:
+
+```sh
+curl -sS -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
+  -H "Content-Type: application/json" \
+  --data '{"p_actor_user_id":"...","p_actor_membership_id":"...",
+           "p_cursor_timestamp":null,"p_cursor_id":null,
+           "p_limit":50,"p_view":"all"}' \
+  "https://$PROJECT_DOMAIN/rest/v1/rpc/fa_actor_notification_view_page"
+```
+
+The measured PostgreSQL bind parameters were `$3 = ''` and `$4 = ''`. Passing
+non-null cursor values returns 200, which makes this easy to miss in a smoke
+test. It breaks optional cursor arguments, notification pages, and scheduled
+workers that call such RPCs.
+
+A source patch that represents the value as `Option<String>` and renders
+`NULL::<declared type>` is in
+[`docs/patches/postrust-v3.4.0-null-rpc-args.patch`](./patches/postrust-v3.4.0-null-rpc-args.patch).
+Applying it and rebuilding the pinned `postrust-server` features produced a
+linux/amd64 binary with SHA-256
+`136ba4f400be8b06179a7e9e89060b3a52b640778e9c8854b86ec2a05738ca54`.
+With that binary the same request returns 200, and the test project's
+notification and scheduled-worker failures stopped.
+
+This patch is evidence for an upstream fix, not a SupaCloud release. The
+official pinned binary SHA-256 remains
+`f174c84a1b3ac8a24c13a4ef7896adfc029ece8c1b206ee715e3864f5f169b7a` and still
+has the defect. Do not cut a production host over to the official v3.4.0 binary
+while any application passes `null` to a named RPC argument. Restore PostgREST
+or wait for a Postrust release that carries this change.
+
 ## Conformance
 
 Upstream [postgrest-conformance.md](https://github.com/postrust/postrust/blob/v3.4.0/docs/postgrest-conformance.md) at v3.4.0 reports 99.1% full-contract agreement over 1499 replayed PostgREST cases, and says that measurement used a binary built with `admin-ui,compat-key-order`. The image pinned here is the published `admin-ui,otel` build, which does not include `compat-key-order`. This repository has not replayed that suite. A passing compile of this pin is not that result.
