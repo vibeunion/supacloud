@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.66.2](https://github.com/vibeunion/supacloud/compare/compiler-v0.66.1...compiler-v0.66.2) (2026-11-25)
+
+
+### Bug Fixes
+
+* **compiler:** stop repeated library loads from timing out route-contract checks ([#2804](https://github.com/vibeunion/supacloud/issues/2804)) ([25f181e](https://github.com/vibeunion/supacloud/commit/25f181ec8b6aa2d92b6d277d883701c04af3f6fe))
+
 ## [0.66.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.66.0...compiler-v0.66.1) (2026-11-24)
 
 
