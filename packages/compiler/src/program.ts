@@ -152,11 +152,66 @@ function openIncrementalProgramSession(
 /**
  * Analysis and the production type gate each need their own program, because the
  * gate forces strict options. A new server for every compile copies lib.dom.d.ts
- * again, and that transfer stalls the 10s CI timeout. Keep those two servers and
- * close the oldest when a different project or option set needs the slot.
+ * again. Keep those two servers across back-to-back compiles, then shut them
+ * down. A live server holds the process open, so a CLI child never exits and
+ * the test's kill timer reports SIGTERM (143).
  */
 const retainedSessions = new Map<string, IncrementalProgramSession>();
 const RETAINED_SESSION_LIMIT = 2;
+const RETAINED_SESSION_IDLE_MS = 200;
+let typeServerUsers = 0;
+let closeGeneration = 0;
+let idleClose: ReturnType<typeof setTimeout> | undefined;
+
+/** Holds retained servers for the whole compile, including work after the snapshot update. */
+export async function retainTypeServers<T>(run: () => Promise<T>): Promise<T> {
+  beginTypeServerUse();
+  try {
+    return await run();
+  } finally {
+    endTypeServerUse();
+  }
+}
+
+function beginTypeServerUse(): void {
+  typeServerUsers++;
+  closeGeneration++;
+  if (idleClose) {
+    clearTimeout(idleClose);
+    idleClose = undefined;
+  }
+}
+
+function endTypeServerUse(): void {
+  typeServerUsers = Math.max(0, typeServerUsers - 1);
+  if (typeServerUsers > 0) return;
+  const generation = closeGeneration;
+  idleClose = setTimeout(() => {
+    idleClose = undefined;
+    if (generation !== closeGeneration || typeServerUsers > 0) return;
+    void closeRetainedSessions(generation);
+  }, RETAINED_SESSION_IDLE_MS);
+}
+
+async function closeRetainedSessions(generation: number): Promise<void> {
+  for (const session of retainedSessions.values()) {
+    if (generation !== closeGeneration || typeServerUsers > 0) return;
+    await session.reset();
+  }
+}
+
+function trackRetainedSession(session: IncrementalProgramSession): IncrementalProgramSession {
+  return {
+    getProgram: () => session.getProgram(),
+    getTypeChecker: () => session.getTypeChecker(),
+    getTraits: () => session.getTraits(),
+    update: (rootNames, changedPaths) => retainTypeServers(() => session.update(rootNames, changedPaths)),
+    getDiagnostics: () => retainTypeServers(() => session.getDiagnostics()),
+    emit: () => retainTypeServers(() => session.emit()),
+    reset: () => session.reset(),
+    async [Symbol.asyncDispose]() { await session[Symbol.asyncDispose](); },
+  };
+}
 
 export async function acquireIncrementalProgramSession(
   projectRoot: string,
@@ -180,7 +235,7 @@ export async function acquireIncrementalProgramSession(
     retainedSessions.delete(oldest);
     await session?.reset();
   }
-  const session = openIncrementalProgramSession(root, { ...options, cwd });
+  const session = trackRetainedSession(openIncrementalProgramSession(root, { ...options, cwd }));
   retainedSessions.set(key, session);
   return session;
 }

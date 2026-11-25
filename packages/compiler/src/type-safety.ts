@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import * as ts from "@supacloud/db/typescript";
-import { acquireIncrementalProgramSession } from "./program";
+import { acquireIncrementalProgramSession, retainTypeServers } from "./program";
 import type { Diagnostic, TypeSafetyOptions } from "./types";
 import { scanQuerySql, SQL_SAFETY_DIAGNOSTIC_CODES } from "./sql-safety";
 import { scanSourceSemantics, SOURCE_SEMANTIC_DIAGNOSTIC_CODES } from "./source-semantics";
@@ -64,6 +64,10 @@ export async function scanGeneratedArtifacts(
 }
 
 export async function scanProductionSource(options: TypeSafetyScanOptions): Promise<Diagnostic[]> {
+  return retainTypeServers(() => scanProductionSourceNow(options));
+}
+
+async function scanProductionSourceNow(options: TypeSafetyScanOptions): Promise<Diagnostic[]> {
   const rootDir = resolve(options.rootDir);
   const configPath = ts.findConfigFile(rootDir, ts.sys.fileExists) ?? join(rootDir, "tsconfig.json");
   const projectConfig: { options: ts.CompilerOptions; errors: readonly ts.Diagnostic[] } = existsSync(configPath)

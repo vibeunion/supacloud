@@ -117,6 +117,27 @@ describe("IncrementalProgramSession", () => {
 });
 
 describe("retained TypeScript sessions", () => {
+  test("a compile child exits after the type servers shut down", async () => {
+    const root = await fixture({ "src/main.ts": "export const value = 1;\n" });
+    const file = join(root, "src/main.ts");
+    const child = Bun.spawn([process.execPath, "--no-env-file", "-e", `
+      const { acquireIncrementalProgramSession } = await import(${JSON.stringify(join(import.meta.dir, "program.ts"))});
+      const session = await acquireIncrementalProgramSession(${JSON.stringify(root)}, "project");
+      await session.update([${JSON.stringify(file)}]);
+      console.log("compiled");
+    `], { stdout: "pipe", stderr: "pipe" });
+    const started = Date.now();
+    const timer = setTimeout(() => child.kill(), 8_000);
+    const [status, stdout, stderr] = await Promise.all([
+      child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+    ]);
+    clearTimeout(timer);
+    expect({ status, stdout, stderr, ms: Date.now() - started }).toMatchObject({
+      status: 0, stdout: "compiled\n", stderr: "",
+    });
+    expect(Date.now() - started).toBeLessThan(8_000);
+  });
+
   test("reuses one server for a project and still reads a later source edit", async () => {
     const root = await fixture({ "src/main.ts": "export const value = 1;\n" });
     const file = join(root, "src/main.ts");

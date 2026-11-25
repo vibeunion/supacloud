@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { relative, resolve as resolvePath, sep } from "node:path";
 import * as ts from "@supacloud/db/typescript";
-import { acquireIncrementalProgramSession } from "./program";
+import { acquireIncrementalProgramSession, retainTypeServers } from "./program";
 import type {
   ApplicationGraph,
   AspectRefNode,
@@ -226,6 +226,16 @@ function descendantsOfKind<T extends ts.Node>(
  * without checking import origins, so this package does not need to depend on @supacloud/app.
  */
 export async function analyzeProject(
+  rootDir: string,
+  include?: string[],
+  cache?: DependencyGraphCache,
+  changedPaths?: string[],
+  effectOptions: EffectCompilerOptions = {},
+): Promise<ApplicationGraph> {
+  return retainTypeServers(() => analyzeProjectNow(rootDir, include, cache, changedPaths, effectOptions));
+}
+
+async function analyzeProjectNow(
   rootDir: string,
   include?: string[],
   cache?: DependencyGraphCache,
