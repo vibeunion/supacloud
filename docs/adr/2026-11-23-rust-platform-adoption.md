@@ -85,7 +85,7 @@ Rust 服务可以承担：
 - [x] Realtime 统一 SIGTERM/Ctrl-C 优雅退出。
 - [x] JIT Gateway 和 Image Service 增加同等 graceful shutdown。
 - [x] 四个 crate 的 `cargo fmt --check`、`cargo clippy -D warnings`、`cargo test`、`--locked` 元数据与 release 构建纳入 CI（`.github/workflows/rust.yml`），工具链由根目录 `rust-toolchain.toml` 固定。此前四个 crate 没有任何自动构建，两个提交的 `Cargo.lock` 已经与 manifest 不一致。
-- [x] 增加 Rust 服务的 contract/black-box HTTP fixtures：三个服务各自 `tests/blackbox.rs` 启动真实二进制，断言 health/manifest/metrics 报文、控制路由的令牌边界、`REALTIME_CONTROL_TOKEN` 缺失时拒绝启动，以及 SIGTERM 优雅退出。未覆盖：WebSocket 握手、TLS、真实 PostgreSQL 连接（需要容器）。
+- [x] 增加 Rust 服务的 contract/black-box HTTP fixtures：三个服务各自 `tests/blackbox.rs` 启动真实二进制，断言 health/manifest/metrics 报文、控制路由的令牌边界、`REALTIME_CONTROL_TOKEN` 缺失时拒绝启动，以及 SIGTERM 优雅退出。Realtime 的 `/socket/websocket` 另有 `tests/websocket.rs` 覆盖 Phoenix V2 握手、heartbeat、`phx_join`、客户端广播与 `/api/broadcast` 的扇出、未授权升级被拒、以及未授权角色请求 `postgres_changes` 被拒。未覆盖：TLS、真实 PostgreSQL 连接与 CDC 投递（需要容器）。
 - [x] JIT Gateway 控制路由的鉴权前移到 axum 中间件，未授权请求不再先经过 `Json` 提取器拿到 422。
 
 ### 第二阶段：控制面协调
