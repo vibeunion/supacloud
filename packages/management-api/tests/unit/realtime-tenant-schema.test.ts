@@ -1,8 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { config } from "../../src/config";
+import { logger } from "../../src/utils/logger";
 import {
   OFFICIAL_REALTIME_APPLY_RLS_SHA256,
   OFFICIAL_REALTIME_LIST_CHANGES_SHA256,
@@ -121,7 +122,8 @@ describe("official realtime tenant schema", () => {
     const sql = officialRealtimeTenantSchemaSql();
     expect(sql).not.toMatch(/create schema\s+"realtime"/i);
     expect(sql).not.toMatch(/drop schema/i);
-    expect(sql).toContain('grant usage on schema "realtime"');
+    expect(sql).toContain('grant usage on schema "realtime" to "anon", "authenticated", "service_role"');
+    expect(sql).toContain('grant create, usage on schema "realtime" to "supabase_realtime_admin"');
     expect(sql).toContain("function realtime.list_changes");
     expect(sql).toContain("function realtime.apply_rls");
     expect(sql).toContain('create table "realtime"."subscription"');
@@ -166,6 +168,7 @@ describe("official realtime tenant schema", () => {
     const previous = config.realtimeEngine;
     const artifact = pinnedRealtimeTenantSchemaArtifact();
     const pinned = pinnedState(artifact);
+    const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
     try {
       config.realtimeEngine = "container";
       const containerCalls: string[] = [];
@@ -200,8 +203,13 @@ describe("official realtime tenant schema", () => {
           divergentCalls.push(query);
           return [{ state: divergent }];
         },
-      })).toBe(false);
+      }, "proj_elixir")).toBe(false);
       expect(divergentCalls).toHaveLength(1);
+      expect(warn).toHaveBeenCalledTimes(1);
+      const warning = String(warn.mock.calls[0]?.[0]);
+      expect(warning).toContain("proj_elixir");
+      expect(warning).toContain(REALTIME_TENANT_SCHEMA_VERSION);
+      expect(warning).toContain("realtime.list_changes body is not the pinned 2.150.0 definition");
 
       const applied: string[] = [];
       expect(await ensureOfficialRealtimeTenantSchema({
@@ -214,7 +222,9 @@ describe("official realtime tenant schema", () => {
       expect(applied[1]).toContain("function realtime.list_changes");
       expect(applied[1]).not.toMatch(/create schema\s+"realtime"/i);
       expect(applied[1]).not.toMatch(/drop schema/i);
+      expect(warn).toHaveBeenCalledTimes(1);
     } finally {
+      warn.mockRestore();
       config.realtimeEngine = previous;
     }
   });

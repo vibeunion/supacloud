@@ -271,7 +271,7 @@ export class TaskWorker {
 
                     const dbName = await resolveDbName(project_ref);
                     if (config.realtimeEngine !== "container") {
-                        await ensureOfficialRealtimeTenantSchema(getProjectDb(dbName));
+                        await ensureOfficialRealtimeTenantSchema(getProjectDb(dbName), project_ref);
                     }
                     const res = await realtimeService.registerTenant({
                         projectRef: project_ref,

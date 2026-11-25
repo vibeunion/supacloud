@@ -284,11 +284,7 @@ export function realtimeTenantSchemaStateFromRow(row: unknown): RealtimeTenantSc
   return assertRealtimeTenantSchemaState(row);
 }
 
-function catalogMatchesPin(
-  artifact: RealtimeTenantSchemaArtifact,
-  state: RealtimeTenantSchemaState,
-): boolean {
-  if (!state.subscriptionExists || state.subscriptionOwner !== REALTIME_TENANT_SCHEMA_OWNER) return false;
+function catalogByName(state: RealtimeTenantSchemaState): Map<string, { digests: string[]; owners: string[] }> {
   const catalog = new Map<string, { digests: string[]; owners: string[] }>();
   for (const entry of state.functions) {
     const known = catalog.get(entry.name) ?? { digests: [], owners: [] };
@@ -296,14 +292,44 @@ function catalogMatchesPin(
     known.owners.push(entry.owner);
     catalog.set(entry.name, known);
   }
+  return catalog;
+}
+
+/**
+ * The first receipt mismatch for a catalog that already exists, or `null` when
+ * the catalog is empty or matches the pin. Callers use this to log a divergent
+ * `realtime.list_changes` schema without changing it.
+ */
+export function firstRealtimeTenantSchemaDifference(
+  artifact: RealtimeTenantSchemaArtifact,
+  state: RealtimeTenantSchemaState,
+): string | null {
+  if (!state.schemaExists || state.empty) return null;
+  if (!state.subscriptionExists) return "realtime.subscription is absent";
+  if (state.subscriptionOwner !== REALTIME_TENANT_SCHEMA_OWNER) {
+    return `realtime.subscription is owned by ${state.subscriptionOwner ?? "nobody"}`;
+  }
+  const catalog = catalogByName(state);
   for (const [name, bodies] of artifact.functionBodies) {
     const installed = catalog.get(name);
-    if (!installed) return false;
-    if (installed.owners.some((owner) => owner !== REALTIME_TENANT_SCHEMA_OWNER)) return false;
+    if (!installed) return `realtime.${name} is absent`;
+    const foreignOwner = installed.owners.find((owner) => owner !== REALTIME_TENANT_SCHEMA_OWNER);
+    if (foreignOwner) return `realtime.${name} is owned by ${foreignOwner}`;
     const digests = [...installed.digests].sort();
-    if (digests.length !== bodies.length || digests.some((digest, index) => digest !== bodies[index])) return false;
+    if (digests.length !== bodies.length || digests.some((digest, index) => digest !== bodies[index])) {
+      return `realtime.${name} body is not the pinned ${artifact.version} definition`;
+    }
   }
-  return true;
+  return null;
+}
+
+function catalogMatchesPin(
+  artifact: RealtimeTenantSchemaArtifact,
+  state: RealtimeTenantSchemaState,
+): boolean {
+  return state.schemaExists
+    && !state.empty
+    && firstRealtimeTenantSchemaDifference(artifact, state) === null;
 }
 
 /**

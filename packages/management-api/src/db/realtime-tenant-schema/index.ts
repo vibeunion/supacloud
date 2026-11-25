@@ -1,7 +1,9 @@
 import { config } from "../../config";
+import { logger } from "../../utils/logger";
 import {
   assertRealtimeTenantSchemaFiles,
   decideRealtimeTenantSchema,
+  firstRealtimeTenantSchemaDifference,
   realtimeTenantSchemaInspectionSql,
   realtimeTenantSchemaStateFromRow,
   type RealtimeTenantSchemaArtifact,
@@ -113,13 +115,27 @@ export interface RealtimeSchemaClient {
  * An empty schema, or any catalog that is missing `realtime.list_changes`,
  * receives the pinned tree. An exact pin is left untouched. A database that
  * already has `realtime.list_changes` is left untouched as well, including an
- * Elixir-migrated tenant whose functions are not the 2.150.0 bodies.
+ * Elixir-migrated tenant whose functions are not the 2.150.0 bodies. That
+ * divergent catalog is logged once: project, pin version, and the first
+ * receipt mismatch. Bootstrap still returns without DDL.
  */
-export async function ensureOfficialRealtimeTenantSchema(sql: RealtimeSchemaClient): Promise<boolean> {
+export async function ensureOfficialRealtimeTenantSchema(
+  sql: RealtimeSchemaClient,
+  projectRef = "unknown project",
+): Promise<boolean> {
   if (config.realtimeEngine === "container") return false;
   const artifact = pinnedRealtimeTenantSchemaArtifact();
   const rows = await sql.unsafe(realtimeTenantSchemaInspectionSql());
-  const decision = decideRealtimeTenantSchema(artifact, realtimeTenantSchemaStateFromRow(rows[0]));
+  const state = realtimeTenantSchemaStateFromRow(rows[0]);
+  const decision = decideRealtimeTenantSchema(artifact, state);
+  if (decision.mode === "leave") {
+    const difference = firstRealtimeTenantSchemaDifference(artifact, state)
+      ?? "realtime.list_changes is already present";
+    logger.warn(
+      `[realtime-tenant-schema] ${projectRef} keeps its existing realtime schema; it is not the pinned ${artifact.version} artifact: ${difference}`,
+    );
+    return false;
+  }
   if (decision.mode !== "install") return false;
   await sql.unsafe(officialRealtimeTenantSchemaSql());
   return true;
