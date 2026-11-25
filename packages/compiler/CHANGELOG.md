@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.66.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.66.0...compiler-v0.66.1) (2026-11-24)
+
+
+### Bug Fixes
+
+* **db:** stop default library ASTs from stalling noImplicitThis ([#2799](https://github.com/vibeunion/supacloud/issues/2799)) ([12bdda1](https://github.com/vibeunion/supacloud/commit/12bdda13f08404626a6a881051dee2fc9b3e969b))
+
 ## [0.66.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.65.0...compiler-v0.66.0) (2026-11-24)
 
 
