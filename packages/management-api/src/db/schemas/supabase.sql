@@ -523,26 +523,8 @@ GRANT USAGE ON SCHEMA public TO supabase_admin, supabase_realtime_admin;
 GRANT anon, authenticated, service_role TO supabase_admin WITH INHERIT FALSE, SET TRUE;
 
 -- Official Realtime migrations own the schema's tables, types, and protocol functions.
--- SupaCloud only installs its LISTEN/NOTIFY and task-publication helpers here.
-
--- supacloud:sql-module:realtime-notify-payload:start
-CREATE OR REPLACE FUNCTION realtime.notify_change_payload(payload jsonb)
-RETURNS void AS $fn$
-DECLARE
-  payload_text text := payload::text;
-BEGIN
-  IF pg_catalog.octet_length(payload_text) >= 8000 THEN
-    RETURN;
-  END IF;
-
-  BEGIN
-    PERFORM pg_catalog.pg_notify('realtime_changes', payload_text);
-  EXCEPTION
-    WHEN SQLSTATE '22023' THEN RETURN;
-  END;
-END;
-$fn$ LANGUAGE plpgsql SECURITY INVOKER SET search_path = pg_catalog;
--- supacloud:sql-module:realtime-notify-payload:end
+-- SupaCloud installs the publication helper that puts public.tasks on supabase_realtime.
+-- postgres_changes delivery is the Rust gateway reading that publication's slot.
 
 DO $$
 BEGIN

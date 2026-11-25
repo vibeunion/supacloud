@@ -37,20 +37,27 @@ SELECT p.pubinsert, p.pubupdate, p.pubdelete, \
                  FROM pg_publication_tables t WHERE t.pubname = p.pubname), '') \
 FROM pg_publication p WHERE p.pubname = $1";
 
-/// Decodes the tenant's slot with the options the official
-/// `realtime.list_changes.sql` uses, so both consumers of one slot see the same
-/// changes. Kept in one place: a divergence here silently changes what
-/// `postgres_changes` reports.
-const POLL_SQL: &str = "\
-SELECT data FROM pg_logical_slot_get_changes(\
+/// Official `realtime.list_changes`: one slot read, then `realtime.apply_rls`.
+/// Rows with no matching subscription are already removed. A null `wal` is the
+/// sentinel that reports how many slot records were consumed.
+const LIST_CHANGES_SQL: &str = "\
+SELECT wal, subscription_ids::text[], errors \
+FROM realtime.list_changes($1::name, $2::name, $3::integer, $4::integer) \
+WHERE wal IS NOT NULL";
+
+/// Advances a slot whose publication does not exist yet. `list_changes` does
+/// not call `pg_logical_slot_get_changes` when the publication is missing, and
+/// a stalled slot retains WAL. Nothing from this call is delivered.
+const DISCARD_SLOT_SQL: &str = "\
+SELECT count(*) FROM pg_logical_slot_get_changes(\
 $1, NULL, $2, \
 'include-pk', 'true', \
 'include-transaction', 'false', \
 'include-timestamp', 'true', \
 'include-type-oids', 'true', \
 'format-version', '2', \
-'actions', $3, \
-'add-tables', $4)";
+'actions', '', \
+'add-tables', '')";
 
 pub struct PostgresListenerManager {
     hub: Arc<ChannelHub>,
@@ -234,6 +241,7 @@ async fn poll_changes(
     };
 
     let mut publication: Option<PublicationFilter> = None;
+    let mut publication_missing = false;
     let mut refresh_at = std::time::Instant::now();
     let mut warned_missing_publication = false;
 
@@ -250,6 +258,7 @@ async fn poll_changes(
             refresh_at = std::time::Instant::now() + PUBLICATION_REFRESH;
             match load_publication(client, &feed.publication).await {
                 Ok(Some(filter)) => {
+                    publication_missing = false;
                     if filter.is_empty() && !warned_missing_publication {
                         warned_missing_publication = true;
                         warn!(
@@ -261,6 +270,7 @@ async fn poll_changes(
                     publication = Some(filter);
                 }
                 Ok(None) => {
+                    publication_missing = true;
                     if !warned_missing_publication {
                         warned_missing_publication = true;
                         warn!(
@@ -275,11 +285,21 @@ async fn poll_changes(
             }
         }
 
-        let filter = publication.clone().unwrap_or_default();
+        if publication_missing {
+            if let Err(error) = client
+                .query(DISCARD_SLOT_SQL, &[&slot, &feed.max_changes])
+                .await
+            {
+                return Outcome::Retry(error.to_string());
+            }
+            continue;
+        }
+
+        let max_bytes = i32::try_from(feed.max_record_bytes).unwrap_or(i32::MAX);
         let rows = match client
             .query(
-                POLL_SQL,
-                &[&slot, &feed.max_changes, &filter.actions, &filter.tables],
+                LIST_CHANGES_SQL,
+                &[&feed.publication, &slot, &feed.max_changes, &max_bytes],
             )
             .await
         {
@@ -288,33 +308,13 @@ async fn poll_changes(
         };
 
         for (index, row) in rows.iter().enumerate() {
-            let Some(data) = row.get::<_, Option<String>>(0) else {
-                continue;
-            };
-            let Ok(wal) = serde_json::from_str::<Value>(&data) else {
-                warn!(tenant = %tenant_id, "Skipping a change that is not JSON");
-                continue;
-            };
-            let Some(change) = wal::change_from_wal(&wal) else {
-                continue;
-            };
-            // `realtime.apply_rls` truncates records to this budget. This
-            // gateway does not route through it, so an oversized record is
-            // dropped with a log line instead of being sent whole.
-            let record_bytes = serde_json::to_vec(&change.record)
-                .map(|encoded| encoded.len())
-                .unwrap_or_default();
-            if record_bytes > feed.max_record_bytes {
-                warn!(
-                    tenant = %tenant_id,
-                    table = %change.table,
-                    bytes = record_bytes,
-                    budget = feed.max_record_bytes,
-                    "Skipping a change whose record exceeds the poll budget"
-                );
+            let wal: Value = row.get(0);
+            let subscription_ids: Vec<String> = row.get(1);
+            let errors: Vec<String> = row.get::<_, Option<Vec<String>>>(2).unwrap_or_default();
+            if subscription_ids.is_empty() {
                 continue;
             }
-            hub.dispatch_cdc(tenant_id, &change);
+            hub.dispatch_applied(tenant_id, &wal, &errors, &subscription_ids);
             if index + 1 >= POLL_YIELD_AFTER {
                 tokio::task::yield_now().await;
             }

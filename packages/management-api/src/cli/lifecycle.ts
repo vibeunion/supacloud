@@ -3,7 +3,13 @@ import * as p from "@clack/prompts";
 import { logger } from "../utils/logger";
 
 const GATEWAY_UNIT = "supacloud-caddy";
-const CONTROL_UNITS = ["supacloud", GATEWAY_UNIT, "supacloud-realtime"];
+const REALTIME_UNIT = process.env.SUPACLOUD_REALTIME_ENGINE === "container"
+  ? "supacloud-realtime"
+  : "supacloud-realtime-gateway";
+const RETIRED_REALTIME_UNIT = REALTIME_UNIT === "supacloud-realtime"
+  ? "supacloud-realtime-gateway"
+  : "supacloud-realtime";
+const CONTROL_UNITS = ["supacloud", GATEWAY_UNIT, REALTIME_UNIT];
 
 async function unitExists(unit: string): Promise<boolean> {
   const normalized = unit.endsWith(".service") ? unit : `${unit}.service`;
@@ -42,7 +48,8 @@ export async function handleStart() {
 
   const s = p.spinner();
   s.start("Starting systemd services...");
-  const results = await runSystemctl("start", CONTROL_UNITS);
+  const stopped = await runSystemctl("stop", [RETIRED_REALTIME_UNIT]);
+  const results = [...stopped, ...await runSystemctl("start", CONTROL_UNITS)];
   s.stop("Service start command complete.");
 
   for (const line of results) p.log.info(line);
@@ -54,7 +61,7 @@ export async function handleStop() {
 
   const s = p.spinner();
   s.start("Stopping systemd services...");
-  const results = await runSystemctl("stop", ["supacloud", "supacloud-realtime"]);
+  const results = await runSystemctl("stop", ["supacloud", "supacloud-realtime", "supacloud-realtime-gateway"]);
   s.stop("Service stop command complete.");
 
   for (const line of results) p.log.info(line);

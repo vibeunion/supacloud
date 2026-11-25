@@ -1,4 +1,3 @@
-use crate::filter::ColumnFilter;
 use crate::presence::{PresenceDiff, PresenceManager};
 use crate::protocol::PhoenixV2Message;
 use parking_lot::RwLock;
@@ -17,11 +16,14 @@ pub fn next_connection_id() -> String {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PostgresChangeSubscription {
+    /// Id echoed to the client in `phx_reply` and in `postgres_changes.ids`.
     pub id: Option<String>,
+    /// `realtime.subscription.subscription_id`. Delivery is routed by this id,
+    /// which `realtime.apply_rls` returns. It is not a second filter.
+    pub db_id: Option<String>,
     pub event: String,
     pub schema: String,
     pub table: Option<String>,
-    pub filter: Option<ColumnFilter>,
 }
 
 #[derive(Debug, Clone)]
@@ -141,6 +143,29 @@ impl ChannelHub {
         self.presence
             .write()
             .untrack(tenant_id, connection_id, topic)
+    }
+
+    /// Database subscription ids held by one connection.
+    pub fn subscription_db_ids(&self, connection_id: &str) -> Vec<String> {
+        self.subscription_db_ids_for_topic(connection_id, None)
+    }
+
+    /// Database subscription ids for one topic, or for every topic when `topic` is `None`.
+    pub fn subscription_db_ids_for_topic(
+        &self,
+        connection_id: &str,
+        topic: Option<&str>,
+    ) -> Vec<String> {
+        let conns = self.connections.read();
+        let Some(conn) = conns.get(connection_id) else {
+            return Vec::new();
+        };
+        conn.subscriptions
+            .iter()
+            .filter(|(name, _)| topic.is_none_or(|wanted| wanted == name.as_str()))
+            .flat_map(|(_, sub)| sub.postgres_changes.iter())
+            .filter_map(|change| change.db_id.clone())
+            .collect()
     }
 
     /// Disconnect connection and cleanup all state
@@ -269,77 +294,47 @@ impl ChannelHub {
         self.presence.read().get_state(tenant_id, topic)
     }
 
-    /// Dispatch CDC event to all subscribers matching the change
-    pub fn dispatch_cdc(&self, tenant_id: &str, change: &PostgresChangeEvent) {
-        let conns = self.connections.read();
-        let timestamp = change
-            .commit_timestamp
-            .clone()
-            .unwrap_or_else(chrono_like_now);
+    /// Deliver one `realtime.apply_rls` output to the sockets that own its
+    /// subscription ids. The row, the column list, and who may see it were
+    /// already decided in the database. This does not filter again.
+    pub fn dispatch_applied(
+        &self,
+        tenant_id: &str,
+        wal: &Value,
+        errors: &[String],
+        subscription_ids: &[String],
+    ) {
+        if subscription_ids.is_empty() {
+            return;
+        }
+        let mut data = wal.as_object().cloned().unwrap_or_default();
+        data.insert("errors".to_owned(), json!(errors));
 
+        let conns = self.connections.read();
         for conn in conns.values() {
             if conn.tenant_id != tenant_id {
                 continue;
             }
-
             for (topic, sub) in &conn.subscriptions {
                 let mut matched_ids = Vec::new();
-
-                for pcs in &sub.postgres_changes {
-                    // 1. Check event type
-                    if pcs.event != "*" && !pcs.event.eq_ignore_ascii_case(&change.change_type) {
+                for change in &sub.postgres_changes {
+                    let Some(db_id) = change.db_id.as_deref() else {
                         continue;
+                    };
+                    if subscription_ids.iter().any(|id| id == db_id) {
+                        matched_ids.push(change.id.clone().unwrap_or_else(|| db_id.to_owned()));
                     }
-
-                    // 2. Check schema
-                    if pcs.schema != "*" && pcs.schema != change.schema {
-                        continue;
-                    }
-
-                    // 3. Check table
-                    if let Some(ref tbl) = pcs.table {
-                        if tbl != "*" && tbl != &change.table {
-                            continue;
-                        }
-                    }
-
-                    // 4. Check filter against record (or old_record if DELETE)
-                    if let Some(ref flt) = pcs.filter {
-                        let target_record = if change.change_type.eq_ignore_ascii_case("DELETE") {
-                            change.old_record.as_ref().unwrap_or(&change.record)
-                        } else {
-                            &change.record
-                        };
-                        if !flt.matches(target_record) {
-                            continue;
-                        }
-                    }
-
-                    matched_ids.push(pcs.id.clone().unwrap_or_else(|| "0".to_string()));
                 }
-
-                if !matched_ids.is_empty() {
-                    let mut payload_map = serde_json::Map::new();
-                    let data = json!({
-                        "schema": change.schema,
-                        "table": change.table,
-                        "type": change.change_type,
-                        "commit_timestamp": timestamp,
-                        "record": change.record,
-                        "old_record": change.old_record,
-                        "columns": change.columns.clone().unwrap_or(json!([])),
-                        "errors": []
-                    });
-
-                    payload_map.insert("data".to_string(), data);
-                    payload_map.insert("ids".to_string(), json!(matched_ids));
-
-                    let msg = PhoenixV2Message::postgres_changes(
-                        topic.clone(),
-                        Value::Object(payload_map),
-                    );
-                    let _ = conn.tx.send(msg);
+                if matched_ids.is_empty() {
+                    continue;
                 }
+                let payload = json!({
+                    "data": data,
+                    "ids": matched_ids,
+                });
+                let _ = conn
+                    .tx
+                    .send(PhoenixV2Message::postgres_changes(topic.clone(), payload));
             }
         }
     }
@@ -353,17 +348,6 @@ impl ChannelHub {
     pub fn topic_count(&self) -> usize {
         self.topic_subscribers.read().len()
     }
-}
-
-fn chrono_like_now() -> String {
-    // Generate ISO8601 timestamp string without heavy external chrono crate
-    use std::time::SystemTime;
-    let dur = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = dur.as_secs();
-    let millis = dur.subsec_millis();
-    format!("{}.{:03}Z", secs, millis)
 }
 
 #[cfg(test)]
@@ -454,7 +438,6 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         hub.add_connection("c1".into(), "tenant_a".into(), "service_role".into(), tx);
 
-        let filter = ColumnFilter::parse("id=eq.42").unwrap();
         hub.subscribe(
             "c1",
             "tenant_a",
@@ -466,41 +449,34 @@ mod tests {
                 presence_key: None,
                 postgres_changes: vec![PostgresChangeSubscription {
                     id: Some("sub_1".into()),
+                    db_id: Some("11111111-1111-1111-1111-111111111111".into()),
                     event: "INSERT".into(),
                     schema: "public".into(),
                     table: Some("messages".into()),
-                    filter: Some(filter),
                 }],
             },
         );
 
-        // Non-matching change (id = 99)
-        hub.dispatch_cdc(
+        let row = json!({
+            "schema": "public",
+            "table": "messages",
+            "type": "INSERT",
+            "record": {"id": 42, "text": "match!"},
+            "commit_timestamp": "2026-01-01T00:00:00.000Z"
+        });
+        hub.dispatch_applied(
             "tenant_a",
-            &PostgresChangeEvent {
-                schema: "public".into(),
-                table: "messages".into(),
-                change_type: "INSERT".into(),
-                record: json!({"id": 99, "text": "no match"}),
-                old_record: None,
-                columns: None,
-                commit_timestamp: None,
-            },
+            &row,
+            &[],
+            &["22222222-2222-2222-2222-222222222222".into()],
         );
         assert!(rx.try_recv().is_err());
 
-        // Matching change (id = 42)
-        hub.dispatch_cdc(
+        hub.dispatch_applied(
             "tenant_a",
-            &PostgresChangeEvent {
-                schema: "public".into(),
-                table: "messages".into(),
-                change_type: "INSERT".into(),
-                record: json!({"id": 42, "text": "match!"}),
-                old_record: None,
-                columns: None,
-                commit_timestamp: None,
-            },
+            &row,
+            &[],
+            &["11111111-1111-1111-1111-111111111111".into()],
         );
 
         let event = rx.try_recv().unwrap();

@@ -148,7 +148,7 @@ This contract does not flatten those differences.
 | --- | --- | --- |
 | Auth process | In-process Auth in the Lite Bun process. Email/password, sessions, and bcrypt are covered by Lite tests. OTP, magic link, anonymous users, OAuth, and MFA stay experimental. | Stock GoTrue v2.198.0 as its own process, including its embedded auth migrations and `supabase_auth_admin`. |
 | API | Lite's PostgREST-compatible handler in the same process. | PostgREST on the project database. This contract does not retarget that process. |
-| Realtime | Lite realtime. RLS DELETE events in V1 go to `service_role` subscribers only. | Management API proxies `wss://<project-api-host>/realtime/v1/websocket` to the existing Elixir Realtime. |
+| Realtime | Lite realtime. RLS DELETE events in V1 go to `service_role` subscribers only. | Management API proxies `wss://<project-api-host>/realtime/v1/websocket` to the Rust Realtime gateway. `anon` and `authenticated` `postgres_changes` go through `realtime.subscription` and `realtime.apply_rls`. |
 | Extensions | PGlite bundles its Lite set (`pgvector`, experimental PostGIS, `pg_textsearch`, `pgmq`). Lite GraphQL reads do not need `pg_graphql`. `pg_cron` and other native extensions need an operator PostgreSQL. | The platform image set, including test and check extensions such as `pgtap` and `plpgsql_check` where that image installs them. Postrust v3.4.0 serves hosted `/graphql/v1`. |
 | Control plane | No Management API, no project provision API, no Pigsty HBA edits. | Management API, one database per project, plan-only production MCP. |
 | Privileged key | Operator-only local print. Absent from the agent handoff. | Stored for the project. Not forwarded into model context by the handoff. |

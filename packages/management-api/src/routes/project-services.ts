@@ -3,6 +3,7 @@
  * Handles: health, status, usage, restart, individual service control
  */
 import { Elysia, t, status } from "elysia";
+import { config } from "../config";
 import { projectService } from "../services";
 import {
   getAuthContext,
@@ -332,7 +333,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       };
       const sharedUnitMap: Record<string, string> = {
         postgresql: "patroni",
-        realtime: "supacloud-realtime",
+        realtime: config.realtimeEngine === "container" ? "supacloud-realtime" : "supacloud-realtime-gateway",
         storage: "supacloud-storage",
         gateway: "supacloud-caddy",
         caddy: "supacloud-caddy",

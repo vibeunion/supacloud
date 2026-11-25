@@ -4,6 +4,7 @@ pub mod postgres;
 pub mod presence;
 pub mod protocol;
 pub mod server;
+mod subscriptions;
 pub mod tenant;
 pub mod wal;
 

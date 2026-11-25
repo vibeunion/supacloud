@@ -9,9 +9,9 @@ import {
 
 const root = join(import.meta.dir, "../..");
 
-test("the published socket is an Elixir proxy with no LISTEN/NOTIFY failover", () => {
+test("the published socket is proxied to the Rust gateway with no LISTEN/NOTIFY failover", () => {
   expect(PUBLIC_REALTIME_CLIENT_PATH).toBe("/realtime/v1/websocket");
-  expect(PUBLIC_REALTIME_SOCKET_OWNER).toBe("elixir-realtime");
+  expect(PUBLIC_REALTIME_SOCKET_OWNER).toBe("rust-realtime-gateway");
   expect(publicRealtimeUpstream(
     "http://127.0.0.1:4000",
     "/realtime/v1/websocket",

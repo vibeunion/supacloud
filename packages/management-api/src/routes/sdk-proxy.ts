@@ -918,7 +918,7 @@ const graphqlHandler = async ({ request }: { request: Request }) => {
     });
 };
 
-// HTTP /realtime/v1 is the Elixir admin proxy. WebSocket upgrades are owned by
+// HTTP /realtime/v1 is the Realtime admin proxy. WebSocket upgrades are owned by
 // the Bun.serve handler in index.ts and use the same REALTIME_ADMIN_URL.
 const realtimeHandler = async ({ request }: { request: Request }) => {
     const ref = await getProjectRef(request);

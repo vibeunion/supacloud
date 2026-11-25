@@ -1,10 +1,9 @@
 use crate::broadcast::{
-    next_connection_id, ChannelHub, PostgresChangeEvent, PostgresChangeSubscription,
-    TopicSubscriptionConfig,
+    next_connection_id, ChannelHub, PostgresChangeSubscription, TopicSubscriptionConfig,
 };
-use crate::filter::ColumnFilter;
 use crate::postgres::PostgresListenerManager;
 use crate::protocol::PhoenixV2Message;
+use crate::subscriptions::{self, ChangeSpec};
 use crate::tenant::{TenantConfig, TenantRegistry};
 use axum::{
     extract::{
@@ -82,7 +81,10 @@ pub fn create_router(state: AppState) -> Router {
 
     let control = Router::new()
         .route("/api/tenants", post(register_tenant).get(list_tenants))
-        .route("/api/tenants/{id}", get(get_tenant).delete(delete_tenant))
+        .route(
+            "/api/tenants/{id}",
+            get(get_tenant).put(update_tenant).delete(delete_tenant),
+        )
         .route("/api/tenants/{id}/cdc", post(ingest_cdc))
         .route("/api/broadcast", post(api_broadcast))
         .route_layer(from_fn_with_state(state.clone(), require_control_token));
@@ -180,13 +182,46 @@ async fn delete_tenant(State(state): State<AppState>, Path(id): Path<String>) ->
     }
 }
 
-async fn ingest_cdc(
+async fn update_tenant(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(event): Json<PostgresChangeEvent>,
-) -> impl IntoResponse {
-    state.hub.dispatch_cdc(&id, &event);
-    Json(json!({ "status": "dispatched" }))
+    Json(payload): Json<Value>,
+) -> Response {
+    let tenant = match TenantConfig::from_registration(payload) {
+        Ok(tenant) => tenant,
+        Err(error) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({ "error": error })),
+            )
+                .into_response();
+        }
+    };
+    if tenant.id != id && tenant.external_id.as_deref() != Some(id.as_str()) {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "tenant id does not match the URL" })),
+        )
+            .into_response();
+    }
+    info!(id = %tenant.id, "Updating tenant in native Realtime Gateway");
+    state.pg_manager.start_listener(tenant.clone());
+    state.registry.register(tenant);
+    (
+        StatusCode::OK,
+        Json(json!({ "message": "Tenant updated successfully" })),
+    )
+        .into_response()
+}
+
+/// Retired. Injecting a decoded row here skipped `realtime.apply_rls`.
+async fn ingest_cdc() -> impl IntoResponse {
+    (
+        StatusCode::GONE,
+        Json(json!({
+            "error": "postgres_changes are read from the tenant replication slot and filtered by realtime.apply_rls"
+        })),
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -243,16 +278,33 @@ async fn ws_handler(
     if apikey.is_empty() {
         return StatusCode::UNAUTHORIZED.into_response();
     }
-    let Some(claims) = state.registry.verify_jwt(&apikey, Some(&tenant.jwt_secret)) else {
+    let Some(mut claims) = state
+        .registry
+        .verify_jwt_payload(&apikey, Some(&tenant.jwt_secret))
+    else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let role = claims.role.unwrap_or_else(|| "anon".to_string());
+    let role = claims
+        .get("role")
+        .and_then(Value::as_str)
+        .filter(|role| !role.is_empty())
+        .unwrap_or("anon")
+        .to_owned();
+    if claims.get("role").and_then(Value::as_str).is_none() {
+        claims["role"] = json!(role);
+    }
     let tenant_id = tenant.id;
 
-    ws.on_upgrade(move |socket| handle_socket(socket, state, tenant_id, role))
+    ws.on_upgrade(move |socket| handle_socket(socket, state, tenant_id, role, claims))
 }
 
-async fn handle_socket(socket: WebSocket, state: AppState, tenant_id: String, role: String) {
+async fn handle_socket(
+    socket: WebSocket,
+    state: AppState,
+    tenant_id: String,
+    role: String,
+    claims: Value,
+) {
     let conn_id = next_connection_id();
     let (mut ws_sender, mut ws_receiver) = socket.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<PhoenixV2Message>();
@@ -290,10 +342,10 @@ async fn handle_socket(socket: WebSocket, state: AppState, tenant_id: String, ro
                 match PhoenixV2Message::decode(text_str) {
                     Ok(parsed) => {
                         handle_client_message(
-                            &hub,
-                            &state.registry,
+                            &state,
                             &tenant_id,
                             &role,
+                            &claims,
                             &conn_id_recv,
                             parsed,
                         )
@@ -313,8 +365,15 @@ async fn handle_socket(socket: WebSocket, state: AppState, tenant_id: String, ro
         }
     }
 
-    // Client disconnected
+    // Client disconnected. Drop the subscription rows first so a later poll
+    // cannot hand this socket a change it has already left.
     send_task.abort();
+    let subscription_ids = hub.subscription_db_ids(&conn_id);
+    if let Some(tenant) = state.registry.get(&tenant_id) {
+        if let Err(error) = subscriptions::delete_subscriptions(&tenant, &subscription_ids).await {
+            warn!(conn_id = %conn_id, error = %error, "Failed to delete realtime.subscription rows");
+        }
+    }
     let presence_diffs = hub.remove_connection(&conn_id);
     for (topic, diff) in presence_diffs {
         let diff_msg =
@@ -325,13 +384,14 @@ async fn handle_socket(socket: WebSocket, state: AppState, tenant_id: String, ro
 }
 
 async fn handle_client_message(
-    hub: &Arc<ChannelHub>,
-    registry: &TenantRegistry,
+    state: &AppState,
     tenant_id: &str,
-    role: &str,
+    _role: &str,
+    claims: &Value,
     conn_id: &str,
     msg: PhoenixV2Message,
 ) {
+    let hub = &state.hub;
     let topic = &msg.topic;
     let event = &msg.event;
     let join_ref = msg.join_ref.clone();
@@ -365,69 +425,72 @@ async fn handle_client_message(
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        // Parse postgres_changes
-        let mut change_subs = Vec::new();
-        let mut response_postgres_changes = Vec::new();
-
-        if let Some(changes_val) = config.get("postgres_changes").and_then(|v| v.as_array()) {
+        let mut specs: Vec<ChangeSpec> = Vec::new();
+        if let Some(changes_val) = config.get("postgres_changes").and_then(Value::as_array) {
             for (idx, item) in changes_val.iter().enumerate() {
-                if let Some(obj) = item.as_object() {
-                    let id = obj
-                        .get("id")
-                        .map(|v| match v {
-                            Value::String(s) => s.clone(),
-                            Value::Number(n) => n.to_string(),
-                            _ => v.to_string(),
-                        })
-                        .unwrap_or_else(|| idx.to_string());
-
-                    let event = obj
-                        .get("event")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("*")
-                        .to_string();
-
-                    let schema = obj
-                        .get("schema")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("public")
-                        .to_string();
-
-                    let table = obj
-                        .get("table")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
-
-                    let filter = obj
-                        .get("filter")
-                        .and_then(|v| v.as_str())
-                        .and_then(ColumnFilter::parse);
-
-                    change_subs.push(PostgresChangeSubscription {
-                        id: Some(id.clone()),
-                        event,
-                        schema,
-                        table,
-                        filter,
-                    });
-
-                    response_postgres_changes.push(json!({ "id": id }));
+                let Some(obj) = item.as_object() else {
+                    continue;
+                };
+                match subscriptions::change_spec_from_config(obj, idx) {
+                    Ok(spec) => specs.push(spec),
+                    Err(reason) => {
+                        let reply = PhoenixV2Message::reply(
+                            join_ref,
+                            reference,
+                            topic,
+                            "error",
+                            json!({ "reason": reason }),
+                        );
+                        hub.send_to_connection(conn_id, reply);
+                        return;
+                    }
                 }
             }
         }
 
-        if !change_subs.is_empty() && role != "service_role" && role != "supabase_admin" {
-            let reply = PhoenixV2Message::reply(
-                join_ref,
-                reference,
-                topic,
-                "error",
-                json!({
-                    "reason": "postgres_changes requires service_role until per-tenant RLS filtering is implemented"
-                }),
-            );
-            hub.send_to_connection(conn_id, reply);
-            return;
+        let stored = if specs.is_empty() {
+            Vec::new()
+        } else {
+            let Some(tenant) = state.registry.get(tenant_id) else {
+                let reply = PhoenixV2Message::reply(
+                    join_ref,
+                    reference,
+                    topic,
+                    "error",
+                    json!({
+                        "reason": "postgres_changes subscription was not stored: tenant is not registered"
+                    }),
+                );
+                hub.send_to_connection(conn_id, reply);
+                return;
+            };
+            match subscriptions::store_subscriptions(&tenant, claims, &specs).await {
+                Ok(stored) => stored,
+                Err(reason) => {
+                    let reply = PhoenixV2Message::reply(
+                        join_ref,
+                        reference,
+                        topic,
+                        "error",
+                        json!({ "reason": reason }),
+                    );
+                    hub.send_to_connection(conn_id, reply);
+                    return;
+                }
+            }
+        };
+
+        let mut change_subs = Vec::new();
+        let mut response_postgres_changes = Vec::new();
+        for (spec, row) in specs.iter().zip(stored.iter()) {
+            response_postgres_changes.push(json!({ "id": spec.client_id }));
+            change_subs.push(PostgresChangeSubscription {
+                id: Some(spec.client_id.clone()),
+                db_id: Some(row.db_id.clone()),
+                event: spec.action_filter.clone(),
+                schema: spec.schema.clone(),
+                table: Some(spec.table.clone()),
+            });
         }
 
         let sub_config = TopicSubscriptionConfig {
@@ -463,6 +526,14 @@ async fn handle_client_message(
 
     // 3. phx_leave
     if event == "phx_leave" {
+        let subscription_ids = hub.subscription_db_ids_for_topic(conn_id, Some(topic));
+        if let Some(tenant) = state.registry.get(tenant_id) {
+            if let Err(error) =
+                subscriptions::delete_subscriptions(&tenant, &subscription_ids).await
+            {
+                warn!(conn_id = %conn_id, error = %error, "Failed to delete realtime.subscription rows");
+            }
+        }
         let diff = hub.unsubscribe(conn_id, tenant_id, topic);
         if let Some(diff) = diff {
             let diff_msg =
@@ -527,9 +598,13 @@ async fn handle_client_message(
             .get("access_token")
             .and_then(|value| value.as_str())
             .unwrap_or_default();
-        let tenant_secret = registry.get(tenant_id).map(|tenant| tenant.jwt_secret);
+        let tenant_secret = state
+            .registry
+            .get(tenant_id)
+            .map(|tenant| tenant.jwt_secret);
         let valid = !token.is_empty()
-            && registry
+            && state
+                .registry
                 .verify_jwt(token, tenant_secret.as_deref())
                 .is_some();
         if let Some(ref r) = reference {

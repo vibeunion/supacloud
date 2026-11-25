@@ -115,54 +115,24 @@ describe("supabase bootstrap schema", () => {
     expect(autoAttachSql).not.toContain("WHEN OTHERS");
   });
 
-  test("all realtime trigger generators reuse the byte-safe notify module", () => {
-    const notifyPayloadSql = SQL_MODULES["realtime-notify-payload"];
+  test("bootstrap does not install the retired NOTIFY payload helper", () => {
     const migrationPaths = [
       "src/services/tenant-runtime-migration.ts",
       "src/scripts/migrate-tenant-schema.ts",
+      "src/db/schemas/supabase.sql",
     ];
-
-    expect(notifyPayloadSql).toContain("payload_text text := payload::text");
-    expect(notifyPayloadSql).toContain("octet_length(payload_text) >= 8000");
-    expect(notifyPayloadSql).toContain(
-      "pg_catalog.pg_notify('realtime_changes', payload_text)",
-    );
-    expect(notifyPayloadSql).toContain("WHEN SQLSTATE '22023' THEN RETURN");
-    expect(notifyPayloadSql).toContain(
-      "LANGUAGE plpgsql SECURITY INVOKER SET search_path = pg_catalog",
-    );
-    expect(notifyPayloadSql).not.toContain("SECURITY DEFINER");
-    expect(notifyPayloadSql).not.toContain("WHEN OTHERS");
 
     for (const filePath of migrationPaths) {
       const migrationSource = readRepoFile(filePath);
-      expect(migrationSource).not.toContain(sqlModuleInterpolation("realtime-notify-payload"));
+      expect(migrationSource).not.toContain("-- supacloud:sql-module:realtime-notify-payload:");
+      expect(migrationSource).not.toContain("CREATE OR REPLACE FUNCTION realtime.notify_change_payload");
       expect(migrationSource).not.toContain("PERFORM realtime.notify_change_payload(payload)");
       expect(migrationSource).not.toContain(
         "PERFORM pg_notify('realtime_changes', payload::text)",
       );
     }
 
-    expect(ALTER_TENANT_SQL).not.toContain(notifyPayloadSql);
-
-    const realtimeBunSource = readRepoFile("src/internal/realtime-listen/service.ts");
-    expect(realtimeBunSource).toContain(sqlModuleInterpolation("realtime-notify-payload"));
-    expect(realtimeBunSource).toContain("PERFORM realtime.notify_change_payload(payload)");
-    const realtimeBunTriggerStart = realtimeBunSource.indexOf(
-      "CREATE OR REPLACE FUNCTION realtime_supacloud_notify()",
-    );
-    const realtimeBunTriggerEnd = realtimeBunSource.indexOf(
-      "$$ LANGUAGE plpgsql SECURITY INVOKER;",
-      realtimeBunTriggerStart,
-    );
-    expect(realtimeBunTriggerStart).toBeGreaterThanOrEqual(0);
-    expect(realtimeBunTriggerEnd).toBeGreaterThan(realtimeBunTriggerStart);
-    expect(realtimeBunSource).not.toContain(
-      "PERFORM pg_notify('realtime_changes', payload::text)",
-    );
-
-    const initialSchema = readRepoFile("src/db/schemas/supabase.sql");
-    expect(initialSchema).toContain(notifyPayloadSql);
+    expect(ALTER_TENANT_SQL).not.toContain("realtime.notify_change_payload");
   });
 
   test("auth helpers preserve claims-only user identity for modern PostgREST", () => {
@@ -405,7 +375,7 @@ describe("supabase bootstrap schema", () => {
     const source = readRepoFile("src/services/tenant-runtime.service.ts");
 
     expect(source).toContain("private async checkContainerService");
-    expect(source).toContain('container: "supacloud-realtime"');
+    expect(source).toContain('config.realtimeEngine === "container" ? "supacloud-realtime" : "supacloud-realtime-gateway"');
     expect(source).toContain('typeof containerName !== "string"');
     expect(source).toContain("return this.checkContainerService(containerName);");
   });
@@ -582,11 +552,11 @@ describe("supabase bootstrap schema", () => {
       }
     }
 
-    expect(bootstrap).toContain("CREATE OR REPLACE FUNCTION realtime.notify_change_payload(payload jsonb)");
+    expect(bootstrap).not.toContain("CREATE OR REPLACE FUNCTION realtime.notify_change_payload(payload jsonb)");
     expect(bootstrap).toContain("CREATE OR REPLACE FUNCTION realtime.ensure_tasks_publication()");
     expect(bootstrap).toContain("CREATE OR REPLACE FUNCTION realtime.auto_publish_tasks_table()");
     for (const source of tenantMigrationSources) {
-      expect(source).not.toContain(sqlModuleInterpolation("realtime-notify-payload"));
+      expect(source).not.toContain("-- supacloud:sql-module:realtime-notify-payload:");
       expect(source).not.toContain(sqlModuleInterpolation("realtime-auto-attach-trigger"));
       expect(source).not.toContain("CREATE OR REPLACE FUNCTION realtime.notify_postgres_changes()");
       expect(source).not.toContain("CREATE OR REPLACE FUNCTION realtime.ensure_tasks_publication()");

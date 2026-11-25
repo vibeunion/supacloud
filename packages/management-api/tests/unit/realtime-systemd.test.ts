@@ -107,7 +107,7 @@ describe("Realtime systemd deployment", () => {
   test("installer validates a complete candidate before activation and rolls back failures", () => {
     const installer = readFileSync(join(repoRoot, "install.sh"), "utf8");
     const realtimeSection = installer.slice(
-      installer.indexOf("# --- 2. Deploy Supabase Realtime"),
+      installer.indexOf("# --- 2. Deploy Realtime"),
       installer.indexOf("# --- 3. Atomically merge management API container references"),
     );
 
@@ -116,6 +116,10 @@ describe("Realtime systemd deployment", () => {
       installer.indexOf("\n)\n\nstart_realtime_container()"),
     );
 
+    expect(installer).toContain('SUPACLOUD_REALTIME_ENGINE:-rust');
+    expect(realtimeSection).toContain('SUPACLOUD_REALTIME_ENGINE:-rust');
+    expect(realtimeSection).toContain('== "container"');
+    expect(realtimeSection).toContain("deploy_rust_realtime_gateway");
     expect(realtimeSection).toContain("REALTIME_IMAGE_VALUE");
     expect(realtimeSection).toContain("deploy_realtime_service_transaction");
     expect(realtimeSection).not.toContain("start_realtime_container");

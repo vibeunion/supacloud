@@ -11,19 +11,20 @@ The native Rust Realtime gateway served `postgres_changes` by `LISTEN`ing on a
 `realtime_changes` NOTIFY channel per tenant. Three facts made that a dead end:
 
 - Nothing publishes that channel. The only code that created the triggers
-  (`CREATE TRIGGER … PERFORM realtime.notify_change_payload(payload)`) was
-  `packages/management-api/src/internal/realtime-listen`, which is deliberately
-  not wired into the Management API, and the tenant-schema reconciler drops the
-  legacy function.
+  (`CREATE TRIGGER … PERFORM realtime.notify_change_payload(payload)`) lived in
+  `packages/management-api/src/internal/realtime-listen`. That directory and
+  `realtime.notify_change_payload` are removed. The tenant-schema reconciler
+  still drops the legacy function where an older database has it.
 - The platform's real change stream is the upstream one: a `supabase_realtime`
   publication and a `wal2json` replication slot per tenant, read by the official
   Elixir Realtime through `realtime.list_changes` / `realtime.apply_rls`. The
   acceptance fixture asserts that slot exists
   (`packages/management-api/tests/fixtures/platform-gateway-smoke.ts`).
-- `install.sh` (`SUPACLOUD_REALTIME_ENGINE=rust`) stops and decommissions the
-  Elixir container and binds this gateway to port 4000. In that mode the gateway
-  *is* the Realtime server behind `REALTIME_ADMIN_URL`, so it has to honour that
-  contract rather than keep a second, unpopulated stream.
+- The installer default is this gateway on port 4000.
+  `SUPACLOUD_REALTIME_ENGINE=container` is the explicit Elixir rollback and is
+  the only path that starts that container. The gateway is the Realtime server
+  behind `REALTIME_ADMIN_URL`, so it has to honour that contract rather than
+  keep a second, unpopulated stream.
 
 A NOTIFY channel also caps a payload at 8000 bytes and never sees replica
 identity, so the two mechanisms were never equivalent.
@@ -52,18 +53,15 @@ The gateway owns consumption only:
 - The published NOTIFY channel is retired. A `pg_notify('realtime_changes', …)`
   is not a source of deliveries, and the fixtures assert that.
 
-Deliberate divergence inside phase 1: `realtime.list_changes` routes every change
-through `realtime.apply_rls`, which drops changes whose `subscription_ids` are
-empty because upstream keeps subscriptions in the tenant's
-`realtime.subscription` table. This gateway keeps subscriptions in memory, per
-socket, so that indirection has nothing to match against. `postgres_changes`
-therefore stays `service_role`-only (`server.rs` refuses it for other roles) and
-RLS is not applied on this path. Logical decoding does not apply RLS; that
-refusal, not a hidden filter, is what keeps other roles out.
+`realtime.list_changes` routes every change through `realtime.apply_rls`, which
+drops changes whose `subscription_ids` are empty. On `phx_join` the gateway
+inserts the caller's JWT claims into the tenant `realtime.subscription` table
+and deletes those rows on leave or disconnect. `anon` and `authenticated`
+receive a row only when `apply_rls` returns their subscription id. A join that
+cannot store the row is refused. Decoded WAL is not delivered in its place.
 
-A record larger than the poll budget (`poll_max_record_bytes`) is dropped with a
-log line instead of being truncated per row as `apply_rls` does. Truncation
-changes the row the client sees; a dropped change is visible in the log.
+`apply_rls` reports an oversized record as `Error 413` instead of this gateway
+truncating the row itself.
 
 ## Consequences
 
@@ -75,23 +73,25 @@ changes the row the client sees; a dropped change is visible in the log.
   later also need the plugin in `output_plugin_libraries`.
 - A stalled poller retains WAL. The poller is paced by `poll_interval_ms` from
   the registration payload and never holds a transaction open while idle.
-- `packages/management-api/src/internal/realtime-listen`,
-  `realtime.notify_change_payload` and its publication helpers are now dead
-  weight. Removing them is the next change, not this one.
-- `packages/management-api/src/services/realtime-public-contract.ts` still names
-  Elixir as the socket owner. With `SUPACLOUD_REALTIME_ENGINE=rust` the owner is
-  this gateway; the constant is stale, not load-bearing.
-- Authenticated (`anon` / `authenticated`) `postgres_changes` delivery needs
-  tenant-side subscription rows and `realtime.apply_rls`. Until then the refusal
-  stands; it is not a compatibility gap to be papered over.
+- `packages/management-api/src/internal/realtime-listen` and
+  `realtime.notify_change_payload` are removed. `realtime.ensure_tasks_publication`
+  stays: it puts `public.tasks` on `supabase_realtime`, which this slot reads.
+- `PUBLIC_REALTIME_SOCKET_OWNER` is `rust-realtime-gateway`. Elixir is not the
+  hosted default.
+- `anon` and `authenticated` `postgres_changes` are delivered only through
+  `realtime.subscription` and `realtime.apply_rls`. The fixture
+  `row_level_security_hides_a_row_from_another_role` covers a negative case.
 
 ## Evidence
 
 `crates/realtime-gateway/tests/cdc.rs` starts a cluster with `wal_level=logical`,
-creates the publication and two tables (one deliberately outside it), registers a
-tenant with the Management API's registration payload, subscribes as
-`service_role`, and writes rows. It asserts insert/update/delete payloads
-(`record`, `old_record` identity, `columns`, ISO 8601 `commit_timestamp`, matching
-`ids`), subscription scoping, a `task=eq.keep` column filter, tenant-database
-isolation, and that the retired NOTIFY channel delivers nothing. A missing
+installs the pinned Realtime 2.150.0 tenant schema, creates the publication and
+two tables (one deliberately outside it), registers a tenant with the Management
+API's registration payload, and writes rows. It asserts insert/update/delete
+payloads (`record`, `old_record` identity, `columns`, ISO 8601
+`commit_timestamp`, matching `ids`), subscription scoping, a `task=eq.keep`
+column filter, tenant-database isolation, and that the retired NOTIFY channel
+delivers nothing. `row_level_security_hides_a_row_from_another_role` subscribes
+as `authenticated` (two subjects), `anon`, and `service_role`, and asserts that
+a private row is delivered only to its owner and to `service_role`. A missing
 `wal2json` plugin fails the fixture; CI installs it rather than skipping.

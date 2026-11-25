@@ -25,7 +25,6 @@ export const SQL_MODULE_TARGETS = [
     moduleIds: [
       "auth-jwt-helpers",
       "storage-path-helpers",
-      "realtime-notify-payload",
       "postgrest-request-context",
       "pgmq-public",
       "workflows-public",

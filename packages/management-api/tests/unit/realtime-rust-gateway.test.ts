@@ -231,15 +231,6 @@ describe.skipIf(!binaryAvailable)("Native Rust Realtime Gateway (crates/realtime
           config: {
             broadcast: { ack: true, self: true },
             presence: { key: "user_alice" },
-            postgres_changes: [
-              {
-                id: "sub_high_prio",
-                event: "INSERT",
-                schema: "public",
-                table: "todos",
-                filter: "priority=eq.high",
-              },
-            ],
           },
         },
       ])
@@ -290,26 +281,35 @@ describe.skipIf(!binaryAvailable)("Native Rust Realtime Gateway (crates/realtime
     );
     expect(presDiff[4].joins).toBeDefined();
 
-    // 5. CDC event dispatch
-    // Ingest low-priority change (should NOT trigger subscription)
-    await controlFetch(`http://127.0.0.1:${TEST_PORT}/api/tenants/test-project/cdc`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        schema: "public",
-        table: "todos",
-        type: "INSERT",
-        record: { id: 101, title: "Low prio task", priority: "low" },
-      }),
-    });
-    await Bun.sleep(100);
-    const nonMatch = incomingMessages.find(
-      (m) => m[3] === "postgres_changes" && m[4]?.data?.record?.id === 101
+    // postgres_changes without a tenant database that has realtime.subscription
+    // must be refused. Injecting a decoded row is not a substitute for apply_rls.
+    ws.send(
+      JSON.stringify([
+        "1",
+        "join_cdc",
+        "realtime:public:todos",
+        "phx_join",
+        {
+          config: {
+            postgres_changes: [
+              {
+                id: "sub_high_prio",
+                event: "INSERT",
+                schema: "public",
+                table: "todos",
+                filter: "priority=eq.high",
+              },
+            ],
+          },
+        },
+      ])
     );
-    expect(nonMatch).toBeUndefined();
+    await waitForMessage((m) => m[3] === "phx_reply" && m[1] === "join_cdc");
+    const cdcJoin = incomingMessages.find((m) => m[1] === "join_cdc");
+    expect(cdcJoin[4].status).toBe("error");
+    expect(String(cdcJoin[4].response.reason)).toContain("postgres_changes subscription was not stored");
 
-    // Ingest high-priority change (should MATCH filter priority=eq.high)
-    await controlFetch(`http://127.0.0.1:${TEST_PORT}/api/tenants/test-project/cdc`, {
+    const injected = await controlFetch(`http://127.0.0.1:${TEST_PORT}/api/tenants/test-project/cdc`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -319,15 +319,7 @@ describe.skipIf(!binaryAvailable)("Native Rust Realtime Gateway (crates/realtime
         record: { id: 102, title: "Critical fix", priority: "high" },
       }),
     });
-    await waitForMessage(
-      (m) => m[3] === "postgres_changes" && m[4]?.data?.record?.id === 102
-    );
-    const cdcMsg = incomingMessages.find(
-      (m) => m[3] === "postgres_changes" && m[4]?.data?.record?.id === 102
-    );
-    expect(cdcMsg).toBeDefined();
-    expect(cdcMsg[4].data.record.title).toBe("Critical fix");
-    expect(cdcMsg[4].ids).toContain("sub_high_prio");
+    expect(injected.status).toBe(410);
 
     // 6. Leave channel
     ws.send(JSON.stringify(["1", "leave_1", "realtime:chat_room", "phx_leave", {}]));

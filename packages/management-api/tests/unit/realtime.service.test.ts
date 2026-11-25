@@ -137,15 +137,16 @@ describe("RealtimeService tenant payloads", () => {
     }
   });
 
-  test("fails closed when the container env file is missing or omits API_JWT_SECRET", () => {
+  test("the Elixir rollback still requires the container API JWT secret", () => {
     const dir = mkdtempSync(join(tmpdir(), "supacloud-realtime-secret-"));
     try {
-      expect(() => validateRealtimeSecretConfiguration(join(dir, "missing.env")))
+      expect(() => validateRealtimeSecretConfiguration(join(dir, "missing.env"), "container"))
         .toThrow("container API JWT secret is missing");
       const emptyFile = join(dir, "empty.env");
       writeFileSync(emptyFile, "OTHER_SECRET=value\n");
-      expect(() => validateRealtimeSecretConfiguration(emptyFile))
+      expect(() => validateRealtimeSecretConfiguration(emptyFile, "container"))
         .toThrow("container API JWT secret is missing");
+      expect(() => validateRealtimeSecretConfiguration(emptyFile, "rust")).not.toThrow();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

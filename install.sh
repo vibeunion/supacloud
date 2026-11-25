@@ -3755,7 +3755,7 @@ install_management_api() {
         REALTIME_SECRET_KEY_BASE "$REALTIME_SECRET_KEY_BASE" \
         REALTIME_DB_ENC_KEY "$REALTIME_DB_ENC_KEY" \
         REALTIME_API_SECRET "$JWT_SECRET" \
-        SUPACLOUD_REALTIME_ENGINE "${SUPACLOUD_REALTIME_ENGINE:-container}" \
+        SUPACLOUD_REALTIME_ENGINE "${SUPACLOUD_REALTIME_ENGINE:-rust}" \
         REALTIME_ADMIN_URL "${REALTIME_ADMIN_URL:-http://127.0.0.1:4000}" \
         SUPACLOUD_REALTIME_CONTAINER_ENV_FILE "${SUPACLOUD_REALTIME_CONTAINER_ENV_FILE:-/etc/supabase/realtime-container.env}" \
         REALTIME_IMAGE "${REALTIME_IMAGE:-$REALTIME_PINNED_IMAGE}" \
@@ -5335,7 +5335,7 @@ install_realtime_gateway_binary() {
 deploy_rust_realtime_gateway() {
     log_info "Deploying native Rust Realtime Push Gateway service..."
     if ! install_realtime_gateway_binary; then
-        log_warn "Failed to install native Realtime gateway binary; falling back to container"
+        log_error "The Rust Realtime gateway binary is missing. It is the default Realtime server. Set SUPACLOUD_REALTIME_ENGINE=container only to roll back to the Elixir container."
         return 1
     fi
 
@@ -5442,19 +5442,30 @@ deploy_service_containers() {
     fi
     supacloud_wait_http_health "http://127.0.0.1:9010/healthcheck" || return 1
 
-    # --- 2. Deploy Supabase Realtime (Multi-tenant WebSocket) ---
-    if [[ "${SUPACLOUD_REALTIME_ENGINE:-container}" == "rust" ]] && deploy_rust_realtime_gateway; then
-        log_info "Native Rust Realtime gateway is active; skipping the legacy container"
-    else
+    # --- 2. Deploy Realtime (Multi-tenant WebSocket) ---
+    # Rust is the default and the only server on port 4000. Elixir starts only
+    # when SUPACLOUD_REALTIME_ENGINE=container, and that path stops the gateway
+    # first so the two processes cannot both bind the port.
+    if [[ "${SUPACLOUD_REALTIME_ENGINE:-rust}" == "container" ]]; then
+        if systemctl is-active --quiet supacloud-realtime-gateway 2>/dev/null || systemctl is-enabled --quiet supacloud-realtime-gateway 2>/dev/null; then
+            log_info "Stopping the Rust Realtime gateway before the Elixir rollback"
+            systemctl stop supacloud-realtime-gateway 2>/dev/null || true
+            systemctl disable supacloud-realtime-gateway 2>/dev/null || true
+        fi
         local REALTIME_UNIT_SRC="${SCRIPT_DIR}/infrastructure/systemd/supacloud-realtime.service"
         local REALTIME_IMAGE_VALUE="${REALTIME_IMAGE:-$REALTIME_PINNED_IMAGE}"
         if [[ -f "$REALTIME_UNIT_SRC" ]]; then
-            log_info "Building and activating a transactional SupaCloud Realtime generation..."
+            log_info "Rolling back to the Elixir Realtime container because SUPACLOUD_REALTIME_ENGINE=container"
             deploy_realtime_service_transaction "$RUNTIME" "$REALTIME_IMAGE_VALUE" "$REALTIME_UNIT_SRC" || return 1
         else
             log_error "SupaCloud Realtime systemd unit is missing; refusing an unpatched container fallback"
             return 1
         fi
+    elif ! deploy_rust_realtime_gateway; then
+        log_error "The Rust Realtime gateway did not start. Set SUPACLOUD_REALTIME_ENGINE=container only to roll back to the Elixir container."
+        return 1
+    else
+        log_info "Native Rust Realtime gateway is active on port 4000"
     fi
 
     # --- 3. Atomically merge management API container references ---

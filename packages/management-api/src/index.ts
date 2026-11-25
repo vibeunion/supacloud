@@ -1419,8 +1419,8 @@ async function bootstrap() {
         const url = new URL(request.url);
 
         // ── Realtime WebSocket proxy ──────────────────────────────
-        // Published supabase-js upgrades for /realtime/v1 are an Elixir proxy.
-        // Do not import src/internal/realtime-listen. LISTEN/NOTIFY is not failover.
+        // Published supabase-js upgrades for /realtime/v1 are proxied to the
+        // Realtime gateway (Rust by default). There is no LISTEN/NOTIFY failover.
         if (
           url.pathname === "/ws/tasks" &&
           request.headers.get("upgrade")?.toLowerCase() === "websocket"
@@ -1463,7 +1463,7 @@ async function bootstrap() {
             candidateKey: apikey,
             resolved: resolvedApiKey,
           });
-          // Elixir Realtime expects /socket/websocket, not /realtime/v1/websocket.
+          // The Realtime gateway expects /socket/websocket, not /realtime/v1/websocket.
           const upstreamUrl = publicRealtimeUpstream(
             config.realtimeAdminUrl,
             url.pathname,
@@ -1475,7 +1475,7 @@ async function bootstrap() {
           // from the Host header and matching it against registered external_id
           // (which is the project ref). Custom domains like "sapi.aorist.net" would
           // extract "sapi" instead of the project ref, breaking tenant resolution.
-          // Therefore, the Host header to Elixir must always use the ref-based format.
+          // Therefore, the Host header to the Realtime gateway must always use the ref-based format.
           const isCI = process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true";
           const tenantHost = isCI
             ? "realtime-dev.supabase-realtime"
