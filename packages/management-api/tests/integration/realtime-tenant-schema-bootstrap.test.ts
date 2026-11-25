@@ -53,19 +53,27 @@ interface ReservedDatabase {
 async function withDatabase<T>(run: (database: ReservedDatabase) => Promise<T>): Promise<T> {
   const name = `realtime_schema_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
   const admin = new SQL(adminUrl!, { max: 1 });
+  const url = new URL(adminUrl!);
+  url.pathname = `/${name}`;
+  let database: SQL | undefined;
   try {
     await admin.unsafe(`CREATE DATABASE "${name}"`);
-    const url = new URL(adminUrl!);
-    url.pathname = `/${name}`;
-    const database = new SQL(url.toString(), { max: 1 });
-    try {
-      await database.unsafe(TENANT_REALTIME_SHELL);
-      return await run({ sql: database });
-    } finally {
-      await database.close();
-    }
+    database = new SQL(url.toString(), { max: 1 });
+    await database.unsafe(TENANT_REALTIME_SHELL);
+    return await run({ sql: database });
   } finally {
-    await admin.unsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
+    // Close this fixture's sessions, then drop without FORCE. PostgreSQL 18's
+    // FORCE path waits on a ProcSignalBarrier from every backend, including the
+    // image's documentdb worker, and that wait blows the test timeout.
+    try {
+      await database?.close();
+    } catch {
+      /* the targeted terminate below still releases the session */
+    }
+    await admin.unsafe(
+      `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${name}' AND pid <> pg_backend_pid()`,
+    );
+    await admin.unsafe(`DROP DATABASE IF EXISTS "${name}"`);
     await admin.close();
   }
 }
