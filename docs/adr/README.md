@@ -9,3 +9,4 @@ ADR 记录已选择的方向、责任边界与取舍；状态为 Approved 不代
 | [ADR-2026-11-23-RUST：Rust 平台能力引入与 PostgREST 边界](2026-11-23-rust-platform-adoption.md) | Approved | 第一阶段已实施；第 4 节已由 ADR-2026-11-24-DATA-PLANE 部分取代 |
 | [ADR-2026-11-24-DATA-PLANE：统一 Data API，退役每项目 PostgREST 进程](2026-11-24-postgrest-dataplane-unification.md) | Approved | 第一阶段已实施（数据面进程 + 契约测试）；控制面切换与拆除未开始 |
 | [Public GraphQL moves to Postrust Hasura](2026-11-24-postrust-graphql-public-cutover.md) | Accepted | Hosted `/graphql/v1` and Lite reads use the Hasura dialect. `/rest/v1/rpc/graphql` is 404. Not a production deploy. |
+| [ADR-2026-11-25-REALTIME-CDC：Realtime 消费租户复制槽](2026-11-25-realtime-cdc-slot-consumption.md) | Accepted | 第一阶段已实施（`wal2json` 槽轮询 + 黑盒 fixture）；NOTIFY 触发器路径退役，`anon`/`authenticated` 投递仍拒绝 |

@@ -27,6 +27,30 @@ pub struct TenantConfig {
     pub db_password: String,
     #[serde(default)]
     pub slot_name: Option<String>,
+    #[serde(default = "default_publication")]
+    pub publication: String,
+    #[serde(default = "default_poll_interval_ms")]
+    pub poll_interval_ms: u64,
+    #[serde(default = "default_poll_max_changes")]
+    pub poll_max_changes: i32,
+    #[serde(default = "default_poll_max_record_bytes")]
+    pub poll_max_record_bytes: i32,
+}
+
+fn default_publication() -> String {
+    crate::wal::DEFAULT_PUBLICATION.to_string()
+}
+
+fn default_poll_interval_ms() -> u64 {
+    crate::wal::DEFAULT_POLL_INTERVAL_MS
+}
+
+fn default_poll_max_changes() -> i32 {
+    crate::wal::DEFAULT_POLL_MAX_CHANGES
+}
+
+fn default_poll_max_record_bytes() -> i32 {
+    crate::wal::DEFAULT_POLL_MAX_RECORD_BYTES as i32
 }
 
 fn default_db_host() -> String {
@@ -102,6 +126,14 @@ impl TenantConfig {
             })
         };
 
+        let integer = |key: &str| -> Option<i64> {
+            read(key).and_then(|value| match value {
+                Value::Number(number) => number.as_i64(),
+                Value::String(text) => text.parse::<i64>().ok(),
+                _ => None,
+            })
+        };
+
         let db_port = read("db_port")
             .and_then(|value| match value {
                 Value::Number(port) => port.as_u64(),
@@ -121,6 +153,19 @@ impl TenantConfig {
             db_user: text("db_user").unwrap_or_else(default_db_user),
             db_password: text("db_password").unwrap_or_default(),
             slot_name: text("slot_name"),
+            publication: text("publication").unwrap_or_else(default_publication),
+            poll_interval_ms: integer("poll_interval_ms")
+                .and_then(|value| u64::try_from(value).ok())
+                .filter(|value| *value > 0)
+                .unwrap_or_else(default_poll_interval_ms),
+            poll_max_changes: integer("poll_max_changes")
+                .and_then(|value| i32::try_from(value).ok())
+                .filter(|value| *value > 0)
+                .unwrap_or_else(default_poll_max_changes),
+            poll_max_record_bytes: integer("poll_max_record_bytes")
+                .and_then(|value| i32::try_from(value).ok())
+                .filter(|value| *value > 0)
+                .unwrap_or_else(default_poll_max_record_bytes),
         })
     }
 }
@@ -346,6 +391,10 @@ mod tests {
             db_user: "postgres".to_string(),
             db_password: "pw".to_string(),
             slot_name: None,
+            publication: default_publication(),
+            poll_interval_ms: default_poll_interval_ms(),
+            poll_max_changes: default_poll_max_changes(),
+            poll_max_record_bytes: default_poll_max_record_bytes(),
         });
 
         assert!(registry.get("proj_123").is_some());

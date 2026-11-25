@@ -87,7 +87,7 @@ Rust 服务可以承担：
 - [x] 四个 crate 的 `cargo fmt --check`、`cargo clippy -D warnings`、`cargo test`、`--locked` 元数据与 release 构建纳入 CI（`.github/workflows/rust.yml`），工具链由根目录 `rust-toolchain.toml` 固定。此前四个 crate 没有任何自动构建，两个提交的 `Cargo.lock` 已经与 manifest 不一致。
 - [x] 增加 Rust 服务的 contract/black-box HTTP fixtures：三个服务各自 `tests/blackbox.rs` 启动真实二进制，断言 health/manifest/metrics 报文、控制路由的令牌边界、`REALTIME_CONTROL_TOKEN` 缺失时拒绝启动，以及 SIGTERM 优雅退出。Realtime 的 `/socket/websocket` 另有 `tests/websocket.rs` 覆盖 Phoenix V2 握手、heartbeat、`phx_join`、客户端广播与 `/api/broadcast` 的扇出、未授权升级被拒、以及未授权角色请求 `postgres_changes` 被拒。未覆盖：TLS。
 - [x] JIT Gateway 控制路由的鉴权前移到 axum 中间件，未授权请求不再先经过 `Json` 提取器拿到 422。
-- [x] Realtime 的 CDC 投递端到端 fixture（`crates/realtime-gateway/tests/cdc.rs`）：测试自行 `initdb`/`pg_ctl` 起一个临时 PostgreSQL，注册租户、以 `service_role` 订阅、`NOTIFY realtime_changes` 发送平台触发器产出的 JSON，断言记录内容、`ids` 与 `commit_timestamp` 原样到达、事件/表/列过滤只放行匹配行、以及另一租户的数据库收不到这一行。该 fixture 立刻暴露了两个生产缺陷：一是空密码租户的连接串被 `tokio-postgres` 判为非法，CDC 静默不工作；二是 `LISTEN` 期间没有轮询 `Connection`，客户端调用永远等不到响应，`LISTEN` 从未完成——`postgres_changes` 在此之前实际上从未投递过任何事件。
+- [x] Realtime 的 CDC 投递端到端 fixture（`crates/realtime-gateway/tests/cdc.rs`）：测试自行 `initdb`/`pg_ctl` 起一个带 `wal_level=logical` 的临时 PostgreSQL，建立 `supabase_realtime` publication 与表，按 Management API 的注册报文注册租户，以 `service_role` 订阅后写入行数据，断言 insert/update/delete 的 `record`、`old_record` 身份、`columns`、ISO 8601 `commit_timestamp`、匹配到的 `ids`、订阅作用域、`task=eq.keep` 列过滤、租户数据库隔离，以及已退役的 `realtime_changes` NOTIFY 频道不再产生投递。该 fixture 曾暴露两个生产缺陷：空密码租户的连接串被 `tokio-postgres` 判为非法，以及 `LISTEN` 期间不轮询 `Connection` 导致 `LISTEN` 永不完成。投递机制本身已改由 [ADR-2026-11-25-REALTIME-CDC](2026-11-25-realtime-cdc-slot-consumption.md) 取代。
 
 ### 第二阶段：控制面协调
 

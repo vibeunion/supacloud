@@ -1,23 +1,26 @@
 //! Black-box fixtures for the Postgres CDC delivery path.
 //!
 //! `tests/websocket.rs` proves the socket and the authorization refusal. What it
-//! could not prove is that a `NOTIFY realtime_changes` on a real database
-//! reaches a subscribed client with the right row, and only when the
-//! subscription asks for it. `PostgresListenerManager` had no end-to-end test at
-//! all, which is uncomfortable for the component whose failure mode is another
-//! tenant's rows arriving on a socket.
+//! could not prove is that a table write on a real database reaches a subscribed
+//! client with the right row, and only when the subscription asks for it.
+//! `PostgresListenerManager` had no end-to-end test at all, which is
+//! uncomfortable for the component whose failure mode is another tenant's rows
+//! arriving on a socket.
 //!
-//! Each test starts its own PostgreSQL with `initdb`/`pg_ctl` in a temporary
-//! directory, registers a tenant that points at it, subscribes over the socket
-//! as `service_role`, and sends `pg_notify` with the JSON payload the platform's
-//! triggers emit.
+//! The gateway consumes the tenant's `wal2json` replication slot for the
+//! `supabase_realtime` publication — the same slot and the same decoding options
+//! the official Realtime `realtime.list_changes.sql` uses. The fixture therefore
+//! starts a cluster with `wal_level=logical`, creates the publication and a
+//! table, registers a tenant that points at it, subscribes over the socket as
+//! `service_role`, and writes rows.
 //!
-//! Requires the PostgreSQL server binaries, found via `POSTGRES_BIN`, then
-//! `pg_config --bindir`, then the usual installation prefixes. When none of
-//! those exist the test prints why it did nothing and returns, so a developer
-//! without PostgreSQL does not see a red suite. When `POSTGRES_BIN` is set but
-//! the binaries are missing, or when nothing is found on CI, the test fails:
-//! CI must not skip this silently.
+//! Requires the PostgreSQL server binaries **and** the `wal2json` output plugin.
+//! The binaries are found via `POSTGRES_BIN`, then `pg_config --bindir`, then the
+//! usual installation prefixes. When none of those exist the test prints why it
+//! did nothing and returns, so a developer without PostgreSQL does not see a red
+//! suite. When `POSTGRES_BIN` is set but the binaries or the plugin are missing,
+//! or when nothing is found on CI, the test fails: CI must not skip this
+//! silently.
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -34,6 +37,7 @@ const READY_TIMEOUT: Duration = Duration::from_secs(20);
 const FRAME_TIMEOUT: Duration = Duration::from_secs(15);
 const CONTROL_TOKEN: &str = "fixture-realtime-control-token";
 const TENANT_SECRET: &str = "fixture-tenant-jwt-secret-at-least-32-characters";
+const PUBLICATION: &str = "supabase_realtime";
 
 // ---------------------------------------------------------------------------
 // PostgreSQL
@@ -52,7 +56,7 @@ impl Postgres {
         let bin_dir = match std::env::var("POSTGRES_BIN") {
             Ok(value) if !value.trim().is_empty() => {
                 let bin_dir = PathBuf::from(value);
-                for binary in ["initdb", "pg_ctl"] {
+                for binary in ["initdb", "pg_ctl", "psql"] {
                     assert!(
                         bin_dir.join(binary).is_file(),
                         "POSTGRES_BIN is set but {binary} is missing from {}",
@@ -122,63 +126,145 @@ impl Postgres {
                 "start",
                 "-o",
                 &format!(
-                    "-k {} -p {port} -c listen_addresses=127.0.0.1",
+                    "-k {} -p {port} -c listen_addresses=127.0.0.1 -c timezone=UTC \
+                     -c wal_level=logical -c max_replication_slots=8 -c max_wal_senders=8",
                     data_dir.display()
                 ),
             ],
         );
-        Some(Self {
+        let postgres = Self {
             data_dir,
             bin_dir,
             port,
-        })
+        };
+        postgres.allow_wal2json();
+        postgres.assert_wal2json();
+        Some(postgres)
+    }
+
+    /// PostgreSQL 17 and later accept an output plugin only when it is listed in
+    /// `output_plugin_libraries`. Older releases have no such setting and reject
+    /// the statement, which is why the failure is ignored.
+    fn allow_wal2json(&self) {
+        let _ = self.try_psql(
+            "postgres",
+            "ALTER SYSTEM SET output_plugin_libraries = 'wal2json'",
+        );
+        let _ = self.try_psql("postgres", "SELECT pg_reload_conf()");
+    }
+
+    /// Creating a slot is the only honest availability check: `wal2json` is an
+    /// output plugin, not an extension, so `pg_available_extensions` cannot see
+    /// it. A missing plugin fails here instead of looking like a delivery bug.
+    fn assert_wal2json(&self) {
+        let created = self.try_psql(
+            "postgres",
+            "SELECT pg_create_logical_replication_slot('wal2json_probe', 'wal2json')",
+        );
+        match created {
+            Ok(_) => {
+                self.psql(
+                    "postgres",
+                    "SELECT pg_drop_replication_slot('wal2json_probe')",
+                );
+            }
+            Err(error) => panic!(
+                "the CDC fixtures need the wal2json output plugin in {}: {error}",
+                self.bin_dir.display()
+            ),
+        }
+    }
+
+    fn psql(&self, database: &str, sql: &str) -> String {
+        self.try_psql(database, sql)
+            .unwrap_or_else(|error| panic!("psql failed in {database} ({sql}): {error}"))
+    }
+
+    fn try_psql(&self, database: &str, sql: &str) -> Result<String, String> {
+        let output = Command::new(self.bin_dir.join("psql"))
+            .args([
+                "-h",
+                "127.0.0.1",
+                "-p",
+                &self.port.to_string(),
+                "-U",
+                "postgres",
+                "-d",
+                database,
+                "-qAt",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-c",
+                sql,
+            ])
+            .output()
+            .map_err(|error| format!("psql did not run: {error}"))?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
     }
 
     fn create_database(&self, name: &str) {
-        let port = self.port;
-        let name = name.to_owned();
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("a current-thread runtime should build");
-        runtime.block_on(async move {
-            let (client, connection) = tokio_postgres::connect(
-                &format!("host=127.0.0.1 port={port} dbname=postgres user=postgres"),
-                tokio_postgres::NoTls,
-            )
-            .await
-            .expect("the fixture should connect to its own PostgreSQL");
-            tokio::spawn(connection);
-            client
-                .execute(&format!(r#"CREATE DATABASE "{name}""#), &[])
-                .await
-                .expect("the tenant database should be created");
-        });
+        self.psql("postgres", &format!(r#"CREATE DATABASE "{name}""#));
     }
 
-    fn notify_in(&self, database: &str, payload: &str) {
-        // `tokio-postgres` is already a dependency of this crate, so the fixture
-        // does not need `psql` on the host or a shell quoting convention.
-        let port = self.port;
-        let database = database.to_owned();
-        let payload = payload.to_owned();
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("a current-thread runtime should build");
-        runtime.block_on(async move {
-            let (client, connection) = tokio_postgres::connect(
-                &format!("host=127.0.0.1 port={port} dbname={database} user=postgres"),
-                tokio_postgres::NoTls,
-            )
-            .await
-            .expect("the fixture should connect to its own PostgreSQL");
-            tokio::spawn(connection);
-            client
-                .execute("SELECT pg_notify('realtime_changes', $1)", &[&payload])
-                .await
-                .expect("pg_notify should be delivered");
-        });
+    /// The two tables every scenario uses: one published, one deliberately not.
+    fn create_tables(&self, database: &str) {
+        self.psql(
+            database,
+            "CREATE TABLE todos (id serial primary key, task text, done boolean); \
+             CREATE TABLE notes (id serial primary key, body text)",
+        );
+    }
+
+    fn publish(&self, database: &str, tables: &[&str]) {
+        self.psql(database, &format!("CREATE PUBLICATION {PUBLICATION}"));
+        for table in tables {
+            self.psql(
+                database,
+                &format!("ALTER PUBLICATION {PUBLICATION} ADD TABLE {table}"),
+            );
+        }
+    }
+
+    fn insert_todo(&self, database: &str, task: &str) -> String {
+        self.psql(
+            database,
+            &format!("INSERT INTO todos (task, done) VALUES ('{task}', false)"),
+        )
+    }
+
+    /// The slot exists only once the gateway has connected, adopted or created
+    /// it, so a write before that point would be delivered from a slot that does
+    /// not exist yet.
+    fn wait_for_slot(&self, database: &str) -> String {
+        let deadline = Instant::now() + READY_TIMEOUT;
+        loop {
+            let slot = self.psql(
+                database,
+                "SELECT coalesce((SELECT slot_name FROM pg_replication_slots \
+                 WHERE database = current_database() AND plugin = 'wal2json' \
+                 ORDER BY slot_name LIMIT 1), '')",
+            );
+            if !slot.is_empty() {
+                return slot;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the gateway did not open a wal2json slot on {database} within {READY_TIMEOUT:?}"
+            );
+            sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// The channel the previous implementation listened on. Nothing publishes it
+    /// any more, and a client must not receive it.
+    fn notify_legacy_channel(&self, database: &str) {
+        self.psql(
+            database,
+            r#"SELECT pg_notify('realtime_changes', '{"schema":"public","table":"todos","type":"INSERT","record":{"id":999,"task":"notify"}}')"#,
+        );
     }
 }
 
@@ -314,8 +400,10 @@ impl Server {
     }
 
     fn register_tenant_in(&self, tenant: &str, postgres: &Postgres, database: &str) {
+        // The registration payload is the Management API's: the CDC settings
+        // travel the same way they reach the Elixir Realtime container.
         let body = format!(
-            r#"{{"id":"{tenant}","jwt_secret":"{TENANT_SECRET}","db_host":"127.0.0.1","db_port":{},"db_name":"{database}","db_user":"postgres","db_password":""}}"#,
+            r#"{{"id":"{tenant}","jwt_secret":"{TENANT_SECRET}","db_host":"127.0.0.1","db_port":{},"db_name":"{database}","db_user":"postgres","db_password":"","publication":"{PUBLICATION}","poll_interval_ms":50}}"#,
             postgres.port
         );
         let (status, response) = self
@@ -452,27 +540,15 @@ impl Socket {
             .expect("the socket read timeout should be settable");
     }
 
-    /// Sends `payload` and waits for the matching frame, re-sending a few times.
+    /// Waits for the next frame the matcher accepts.
     ///
-    /// The gateway's `LISTEN` is issued in a background task after registration,
-    /// and a `NOTIFY` that arrives before it is lost rather than queued. Polling
-    /// the server's own session from the outside is not portable, so the fixture
-    /// re-sends instead: the assertion is that the event is delivered, not that
-    /// it was delivered on the first attempt.
-    fn expect_event(
-        &mut self,
-        postgres: &Postgres,
-        database: &str,
-        payload: &str,
-        matches: impl Fn(&serde_json::Value) -> bool,
-    ) -> serde_json::Value {
-        for _ in 0..25 {
-            postgres.notify_in(database, payload);
-            if let Some(frame) = self.read_frame(&matches) {
-                return frame;
-            }
-        }
-        panic!("the subscribed client never received the event");
+    /// The change stream is a slot, not a broadcast: a write that happens after
+    /// the slot exists is retained until the gateway reads it, so there is
+    /// nothing to re-send here.
+    fn expect_event(&mut self, matches: impl Fn(&serde_json::Value) -> bool) -> serde_json::Value {
+        self.set_read_timeout(FRAME_TIMEOUT);
+        self.read_frame(matches)
+            .expect("the subscribed client never received the event")
     }
 
     /// Subscribes as `service_role`, which `postgres_changes` requires.
@@ -523,47 +599,108 @@ fn now_seconds() -> u64 {
         .as_secs()
 }
 
-fn insert_event(table: &str, id: u64) -> String {
-    format!(
-        r#"{{"schema":"public","table":"{table}","type":"INSERT","record":{{"id":{id},"task":"fixture-{id}"}},"commit_timestamp":"2026-01-01T00:00:00Z"}}"#
-    )
-}
-
 #[test]
 fn an_insert_reaches_a_service_role_subscriber() {
     let Some(postgres) = Postgres::start() else {
         return;
     };
+    postgres.create_tables("postgres");
+    postgres.publish("postgres", &["todos"]);
     let server = Server::start();
-    let tenant = "cdc-insert";
-    server.register_tenant(tenant, &postgres);
+    server.register_tenant("cdc-insert", &postgres);
+    postgres.wait_for_slot("postgres");
 
-    let mut socket = server.socket(&token("service_role"), tenant);
+    let mut socket = server.socket(&token("service_role"), "cdc-insert");
     socket.subscribe(
         "realtime:public:todos",
         r#"{"id":"sub-insert","event":"INSERT","schema":"public","table":"todos"}"#,
     );
-    socket.set_read_timeout(Duration::from_millis(400));
 
-    let delivered = socket.expect_event(
-        &postgres,
-        "postgres",
-        &insert_event("todos", 7),
-        is_postgres_change,
-    );
+    // The previous implementation listened on this channel. Nothing publishes it
+    // any more, so it must not be able to satisfy the assertion below.
+    postgres.notify_legacy_channel("postgres");
+    postgres.insert_todo("postgres", "write the fixture");
+
+    let delivered = socket.expect_event(is_postgres_change);
     assert_eq!(delivered[2], "realtime:public:todos");
     assert_eq!(delivered[4]["data"]["schema"], "public");
     assert_eq!(delivered[4]["data"]["table"], "todos");
     assert_eq!(delivered[4]["data"]["type"], "INSERT");
-    assert_eq!(delivered[4]["data"]["record"]["id"], 7);
+    assert_eq!(delivered[4]["data"]["record"]["task"], "write the fixture");
+    assert_eq!(delivered[4]["data"]["record"]["done"], false);
     assert_eq!(
-        delivered[4]["data"]["commit_timestamp"], "2026-01-01T00:00:00Z",
-        "the trigger's timestamp should be relayed"
+        delivered[4]["data"]["columns"],
+        serde_json::json!([
+            {"name": "id", "type": "integer"},
+            {"name": "task", "type": "text"},
+            {"name": "done", "type": "boolean"}
+        ]),
+        "the client needs the column list to build its typed rows"
     );
     assert_eq!(
         delivered[4]["ids"],
         serde_json::json!(["sub-insert"]),
         "the delivery must name the subscription that matched"
+    );
+    let timestamp = delivered[4]["data"]["commit_timestamp"]
+        .as_str()
+        .expect("a change carries its commit timestamp");
+    assert!(
+        timestamp.contains('T') && timestamp.ends_with("+00:00"),
+        "the commit timestamp should be ISO 8601 in the cluster time zone: {timestamp}"
+    );
+}
+
+#[test]
+fn updates_and_deletes_carry_the_row_identity() {
+    let Some(postgres) = Postgres::start() else {
+        return;
+    };
+    postgres.create_tables("postgres");
+    postgres.publish("postgres", &["todos"]);
+    let server = Server::start();
+    server.register_tenant("cdc-mutations", &postgres);
+    postgres.wait_for_slot("postgres");
+
+    let mut socket = server.socket(&token("service_role"), "cdc-mutations");
+    socket.subscribe(
+        "realtime:public:todos",
+        r#"{"id":"sub-mutations","event":"*","schema":"public","table":"todos"}"#,
+    );
+
+    postgres.insert_todo("postgres", "first");
+    let inserted = socket.expect_event(is_postgres_change);
+    assert_eq!(inserted[4]["data"]["type"], "INSERT");
+    let id = inserted[4]["data"]["record"]["id"].clone();
+    assert_eq!(
+        inserted[4]["data"]["old_record"],
+        serde_json::Value::Null,
+        "an insert has no previous row"
+    );
+
+    postgres.psql(
+        "postgres",
+        &format!("UPDATE todos SET task = 'second', done = true WHERE id = {id}"),
+    );
+    let updated = socket.expect_event(is_postgres_change);
+    assert_eq!(updated[4]["data"]["type"], "UPDATE");
+    assert_eq!(updated[4]["data"]["record"]["task"], "second");
+    assert_eq!(
+        updated[4]["data"]["old_record"]["id"], id,
+        "an update has to name the row it replaced: {updated}"
+    );
+
+    postgres.psql("postgres", &format!("DELETE FROM todos WHERE id = {id}"));
+    let deleted = socket.expect_event(is_postgres_change);
+    assert_eq!(deleted[4]["data"]["type"], "DELETE");
+    assert_eq!(
+        deleted[4]["data"]["record"],
+        serde_json::json!({}),
+        "a delete has no new row"
+    );
+    assert_eq!(
+        deleted[4]["data"]["old_record"]["id"], id,
+        "a delete has to name the row it removed: {deleted}"
     );
 }
 
@@ -572,42 +709,39 @@ fn a_subscriber_only_receives_the_table_and_event_it_asked_for() {
     let Some(postgres) = Postgres::start() else {
         return;
     };
+    postgres.create_tables("postgres");
+    // `notes` exists but is not a publication member, so no change to it is even
+    // decoded.
+    postgres.publish("postgres", &["todos"]);
     let server = Server::start();
-    let tenant = "cdc-scope";
-    server.register_tenant(tenant, &postgres);
+    server.register_tenant("cdc-scope", &postgres);
+    postgres.wait_for_slot("postgres");
 
-    let mut socket = server.socket(&token("service_role"), tenant);
+    let mut socket = server.socket(&token("service_role"), "cdc-scope");
     socket.subscribe(
         "realtime:public:todos",
         r#"{"id":"sub-scope","event":"INSERT","schema":"public","table":"todos"}"#,
     );
     socket.set_read_timeout(Duration::from_millis(400));
 
-    // Wrong event type, wrong table, wrong schema. None may be delivered, so the
-    // first frame that does arrive has to be the one the subscription asked for.
-    for _ in 0..5 {
-        postgres.notify_in(
-            "postgres",
-            r#"{"schema":"public","table":"todos","type":"DELETE","record":{},"old_record":{"id":1}}"#,
-        );
-        postgres.notify_in("postgres", &insert_event("notes", 2));
-        postgres.notify_in(
-            "postgres",
-            r#"{"schema":"storage","table":"todos","type":"INSERT","record":{"id":3}}"#,
-        );
-    }
-
-    let delivered = socket.expect_event(
-        &postgres,
+    postgres.psql(
         "postgres",
-        &insert_event("todos", 4),
-        is_postgres_change,
+        "INSERT INTO notes (body) VALUES ('unpublished')",
     );
+    postgres.psql("postgres", "UPDATE todos SET done = true");
+    assert!(
+        socket.read_frame(is_postgres_change).is_none(),
+        "a non-member table or an unsubscribed event was delivered"
+    );
+
+    socket.set_read_timeout(FRAME_TIMEOUT);
+    postgres.insert_todo("postgres", "right event");
+    let delivered = socket.expect_event(is_postgres_change);
+    assert_eq!(delivered[4]["data"]["type"], "INSERT");
     assert_eq!(
-        delivered[4]["data"]["record"]["id"], 4,
-        "an earlier non-matching event was delivered: {delivered}"
+        delivered[4]["data"]["record"]["task"], "right event",
+        "an earlier event was delivered: {delivered}"
     );
-    assert_eq!(delivered[4]["data"]["table"], "todos");
 }
 
 #[test]
@@ -615,33 +749,29 @@ fn a_column_filter_limits_delivery_to_matching_rows() {
     let Some(postgres) = Postgres::start() else {
         return;
     };
+    postgres.create_tables("postgres");
+    postgres.publish("postgres", &["todos"]);
     let server = Server::start();
-    let tenant = "cdc-filter";
-    server.register_tenant(tenant, &postgres);
+    server.register_tenant("cdc-filter", &postgres);
+    postgres.wait_for_slot("postgres");
 
-    let mut socket = server.socket(&token("service_role"), tenant);
+    let mut socket = server.socket(&token("service_role"), "cdc-filter");
     socket.subscribe(
         "realtime:public:todos",
-        r#"{"id":"sub-filter","event":"INSERT","schema":"public","table":"todos","filter":"id=eq.42"}"#,
+        r#"{"id":"sub-filter","event":"INSERT","schema":"public","table":"todos","filter":"task=eq.keep"}"#,
     );
     socket.set_read_timeout(Duration::from_millis(400));
 
-    // The non-matching row is sent first, and repeatedly: the first delivered
-    // frame must be the matching one.
-    for _ in 0..5 {
-        postgres.notify_in("postgres", &insert_event("todos", 7));
-    }
+    postgres.insert_todo("postgres", "skip");
+    assert!(
+        socket.read_frame(is_postgres_change).is_none(),
+        "the filter let a non-matching row through"
+    );
 
-    let delivered = socket.expect_event(
-        &postgres,
-        "postgres",
-        &insert_event("todos", 42),
-        is_postgres_change,
-    );
-    assert_eq!(
-        delivered[4]["data"]["record"]["id"], 42,
-        "the filter let a non-matching row through: {delivered}"
-    );
+    socket.set_read_timeout(FRAME_TIMEOUT);
+    postgres.insert_todo("postgres", "keep");
+    let delivered = socket.expect_event(is_postgres_change);
+    assert_eq!(delivered[4]["data"]["record"]["task"], "keep");
     assert_eq!(delivered[4]["ids"], serde_json::json!(["sub-filter"]));
 }
 
@@ -650,11 +780,16 @@ fn one_tenant_database_does_not_reach_another_tenant() {
     let Some(postgres) = Postgres::start() else {
         return;
     };
-    postgres.create_database("tenant_owner");
-    postgres.create_database("tenant_other");
+    for database in ["tenant_owner", "tenant_other"] {
+        postgres.create_database(database);
+        postgres.create_tables(database);
+        postgres.publish(database, &["todos"]);
+    }
     let server = Server::start();
     server.register_tenant_in("cdc-owner", &postgres, "tenant_owner");
     server.register_tenant_in("cdc-other", &postgres, "tenant_other");
+    postgres.wait_for_slot("tenant_owner");
+    postgres.wait_for_slot("tenant_other");
 
     let mut owner = server.socket(&token("service_role"), "cdc-owner");
     owner.subscribe(
@@ -667,19 +802,15 @@ fn one_tenant_database_does_not_reach_another_tenant() {
         "realtime:public:todos",
         r#"{"id":"sub-other","event":"INSERT","schema":"public","table":"todos"}"#,
     );
-    owner.set_read_timeout(Duration::from_millis(400));
-    other.set_read_timeout(Duration::from_millis(400));
+    other.set_read_timeout(Duration::from_millis(600));
 
-    let delivered = owner.expect_event(
-        &postgres,
-        "tenant_owner",
-        &insert_event("todos", 99),
-        is_postgres_change,
+    postgres.insert_todo("tenant_owner", "only the owner may see this");
+    let delivered = owner.expect_event(is_postgres_change);
+    assert_eq!(
+        delivered[4]["data"]["record"]["task"],
+        "only the owner may see this"
     );
-    assert_eq!(delivered[4]["data"]["record"]["id"], 99);
     assert_eq!(delivered[4]["ids"], serde_json::json!(["sub-owner"]));
-
-    // Nothing may follow for the other tenant. The read timeout is the assertion.
     assert!(
         other.read_frame(is_postgres_change).is_none(),
         "tenant isolation failed: another tenant received the row"
