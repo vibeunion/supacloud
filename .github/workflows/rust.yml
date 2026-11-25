@@ -80,6 +80,15 @@ jobs:
         working-directory: crates/${{ matrix.crate }}
         run: cargo clippy --all-targets --locked -- -D warnings
 
+      - name: Locate the PostgreSQL server binaries
+        # The realtime gateway's CDC fixtures start a throwaway PostgreSQL. The
+        # runner image ships the binaries but not on PATH, and a fixture that
+        # cannot find them fails on CI on purpose rather than skipping.
+        run: |
+          bindir=$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -n 1)
+          test -x "$bindir/initdb"
+          echo "POSTGRES_BIN=$bindir" >> "$GITHUB_ENV"
+
       - name: Test
         working-directory: crates/${{ matrix.crate }}
         run: cargo test --locked
