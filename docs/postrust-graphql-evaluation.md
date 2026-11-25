@@ -1,6 +1,6 @@
 # Postrust GraphQL
 
-Public project GraphQL at `GET`/`POST /graphql/v1` is the Hasura dialect served by the pinned Postrust v3.4.0 process. This is not bit-for-bit compatibility with `pg_graphql`, and it is not a second policy engine.
+Public project GraphQL at `GET`/`POST /graphql/v1` is the Hasura dialect served by the temporarily patched Postrust v3.4.0 process (`v3.4.0+supacloud.1`). This is not bit-for-bit compatibility with `pg_graphql`, and it is not a second policy engine.
 
 The long-term shape is still one data contract: the compiler and ZenStack own the schema the model edits, and REST and GraphQL share `GRANT`, RLS, and the GoTrue JWT. Generating SDL from that catalog is not implemented. `generatedFromCatalog` stays false.
 

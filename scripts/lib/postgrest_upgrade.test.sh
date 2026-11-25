@@ -11,6 +11,16 @@ source "${SCRIPT_DIR}/release_assets.sh"
 # shellcheck source=postgrest_upgrade.sh
 source "${SCRIPT_DIR}/postgrest_upgrade.sh"
 
+# The default pin is the temporary patched layer, not the defective official
+# v3.4.0 image. The official pin stays reachable by name.
+supacloud_resolve_postgrest_release "$SUPACLOUD_POSTRUST_TEMPORARY_VERSION"
+[[ "$SUPACLOUD_POSTGREST_RELEASE_URL" == "$SUPACLOUD_POSTRUST_TEMPORARY_LAYER_URL" ]]
+[[ "$SUPACLOUD_POSTGREST_RELEASE_SHA256" == "$SUPACLOUD_POSTRUST_TEMPORARY_LAYER_SHA256" ]]
+[[ "$SUPACLOUD_POSTRUST_BINARY_SHA256" == "$SUPACLOUD_POSTRUST_TEMPORARY_BINARY_SHA256" ]]
+supacloud_resolve_postgrest_release "$SUPACLOUD_POSTRUST_OFFICIAL_VERSION"
+[[ "$SUPACLOUD_POSTGREST_RELEASE_URL" == https://registry-1.docker.io/v2/postrust/postrust/blobs/sha256:* ]]
+[[ "$SUPACLOUD_POSTRUST_BINARY_SHA256" == "$SUPACLOUD_POSTRUST_BINARY_AMD64_SHA256" ]]
+
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 

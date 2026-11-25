@@ -1,0 +1,179 @@
+--- postrust-orig/crates/postrust-core/src/plan/call_plan.rs	2026-11-18 22:30:14
++++ postrust-3.4.0/crates/postrust-core/src/plan/call_plan.rs	2026-11-25 13:11:49
+@@ -82,9 +82,9 @@
+ #[derive(Clone, Debug, Serialize, Deserialize)]
+ pub enum CallParams {
+     /// Named parameters from URL query or JSON body
+-    Named(Vec<(String, String)>),
++    Named(Vec<(String, Option<String>)>),
+     /// Positional parameters (from JSON array)
+-    Positional(Vec<String>),
++    Positional(Vec<Option<String>>),
+     /// Single JSON object passed as first argument
+     SingleObject(bytes::Bytes),
+     /// The whole request body, as the one parameter the function does not name.
+@@ -218,7 +218,7 @@
+                             .collect();
+ 
+                         // Named parameters from JSON object
+-                        let params: Vec<(String, String)> = map
++                        let params: Vec<(String, Option<String>)> = map
+                             .into_iter()
+                             .map(|(k, v)| {
+                                 // A `json` parameter takes the body's value as
+@@ -230,11 +230,16 @@
+                                 let takes_json = routine.params.iter().any(|p| {
+                                     p.name == k && matches!(p.param_type.as_str(), "json" | "jsonb")
+                                 });
++                                // JSON null is SQL NULL, not the empty string:
++                                // a UUID or timestamp parameter cannot parse
++                                // `''`, and PostgREST passes null through.
++                                if v.is_null() {
++                                    return (k, None);
++                                }
+                                 // Extract string values without JSON quotes
+                                 let value = match v {
+                                     ref value if takes_json => value.to_string(),
+                                     serde_json::Value::String(s) => s,
+-                                    serde_json::Value::Null => String::new(),
+                                     // A JSON array for a parameter the function
+                                     // declares as an array is that array, not a
+                                     // string spelled in JSON: `{"v":["a","b"]}`
+@@ -257,7 +262,7 @@
+                                     }
+                                     other => other.to_string(),
+                                 };
+-                                (k, value)
++                                (k, Some(value))
+                             })
+                             .collect();
+                         return Ok(CallParams::Named(params));
+@@ -312,7 +317,7 @@
+         // variadic parameter every value goes into the array it takes, and
+         // for any other the last one wins -- repeating it cannot mean asking
+         // for two values where the signature has room for one.
+-        let args: Vec<(String, String)> = args
++        let args: Vec<(String, Option<String>)> = args
+             .into_iter()
+             .map(|(name, values)| {
+                 let variadic = routine.params.iter().any(|p| p.name == name && p.variadic);
+@@ -320,7 +325,7 @@
+                     true => array_literal(&values),
+                     false => values.last().cloned().unwrap_or_default(),
+                 };
+-                (name, value)
++                (name, Some(value))
+             })
+             .collect();
+ 
+@@ -355,7 +360,7 @@
+         }
+     }
+ 
+-    let args: Vec<(String, String)> = grouped
++    let args: Vec<(String, Option<String>)> = grouped
+         .into_iter()
+         .map(|(name, values)| {
+             let variadic = routine.params.iter().any(|p| p.name == name && p.variadic);
+@@ -363,7 +368,7 @@
+                 true => array_literal(&values),
+                 false => values.last().cloned().unwrap_or_default(),
+             };
+-            (name, value)
++            (name, Some(value))
+         })
+         .collect();
+ 
+--- postrust-orig/crates/postrust-core/src/query/builder.rs	2026-11-18 22:30:14
++++ postrust-3.4.0/crates/postrust-core/src/query/builder.rs	2026-11-25 13:11:43
+@@ -981,11 +981,13 @@
+                         frag.push(&escape_ident(name));
+                         frag.push(" => ");
+                     }
+-                    match declared_type(name) {
+-                        Some(pg_type) => {
++                    match (value, declared_type(name)) {
++                        (None, Some(pg_type)) => frag.push(&format!("NULL::{}", pg_type)),
++                        (None, None) => frag.push("NULL"),
++                        (Some(value), Some(pg_type)) => {
+                             frag.push_typed_param(SqlParam::Text(value.clone()), &pg_type)
+                         }
+-                        None => frag.push_param(SqlParam::Text(value.clone())),
++                        (Some(value), None) => frag.push_param(SqlParam::Text(value.clone())),
+                     };
+                 }
+             }
+@@ -994,11 +996,13 @@
+                     if i > 0 {
+                         frag.push(", ");
+                     }
+-                    match plan.param_types.get(i) {
+-                        Some((_, pg_type)) => {
++                    match (value, plan.param_types.get(i)) {
++                        (None, Some((_, pg_type))) => frag.push(&format!("NULL::{}", pg_type)),
++                        (None, None) => frag.push("NULL"),
++                        (Some(value), Some((_, pg_type))) => {
+                             frag.push_typed_param(SqlParam::Text(value.clone()), pg_type)
+                         }
+-                        None => frag.push_param(SqlParam::Text(value.clone())),
++                        (Some(value), None) => frag.push_param(SqlParam::Text(value.clone())),
+                     };
+                 }
+             }
+--- postrust-orig/crates/postrust-graphql/src/types.rs	2026-11-18 22:30:14
++++ postrust-3.4.0/crates/postrust-graphql/src/types.rs	2026-11-26 00:00:00
+@@ -119,10 +119,34 @@ pub fn pg_type_to_graphql(pg_type: &str) -> GraphQLType {
+         // not exist as far as that query is concerned. This also covers user
+         // types the database defines -- an enum arrives here as its own type
+         // name and becomes a scalar under it.
+-        other => GraphQLType::Custom(other.to_string()),
++        // A schema-qualified name such as `public.fa_cases` is not a
++        // GraphQL name: the specification allows only `[_A-Za-z][_0-9A-Za-z]*`.
++        // Exposing it verbatim produces introspection that no generated
++        // client can load, so qualify the schema with an underscore instead.
++        // The spelling stays stable because both the type registration and
++        // every reference go through this one function.
++        other => GraphQLType::Custom(graphql_type_name(other)),
+     }
+ }
+ 
++/// Turn a PostgreSQL type name into one GraphQL can name.
++fn graphql_type_name(name: &str) -> String {
++    let mut sanitized: String = name
++        .chars()
++        .map(|c| {
++            if c == '_' || c.is_ascii_alphanumeric() {
++                c
++            } else {
++                '_'
++            }
++        })
++        .collect();
++    if sanitized.is_empty() || sanitized.starts_with(|c: char| c.is_ascii_digit()) {
++        sanitized.insert(0, '_');
++    }
++    sanitized
++}
++
+ /// Check if a PostgreSQL type is nullable in GraphQL context.
+ pub fn is_nullable_type(nullable: bool, is_pk: bool) -> bool {
+     // Primary keys are never null in GraphQL
+@@ -137,6 +161,18 @@ mod tests {
+     use super::*;
+     use pretty_assertions::assert_eq;
+ 
++    #[test]
++    fn test_pg_to_graphql_sanitizes_schema_qualified_type_names() {
++        assert_eq!(
++            pg_type_to_graphql("public.fa_cases"),
++            GraphQLType::Custom("public_fa_cases".to_string())
++        );
++        assert_eq!(
++            pg_type_to_graphql("\"odd type\""),
++            GraphQLType::Custom("_odd_type_".to_string())
++        );
++    }
++
+     #[test]
+     fn test_pg_to_graphql_integer_types() {
+         assert_eq!(pg_type_to_graphql("integer"), GraphQLType::Int);

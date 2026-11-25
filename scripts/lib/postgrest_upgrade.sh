@@ -7,16 +7,29 @@
 # publishes no linux/arm64 image. Source archive observed 2026-11-24:
 # https://github.com/postrust/postrust/archive/refs/tags/v3.4.0.tar.gz
 # sha256 2c5de117fe288a18046776dfd0505d21845ba49b072d62bdab2c29ce3f2fe722
-# The installer does not download that archive; the OCI layer and binary
+# The installer does not download that archive; the layer and binary
 # checksums below are the pin.
-SUPACLOUD_POSTGREST_DEFAULT_VERSION="v3.4.0"
+#
+# Temporary SupaCloud repin: the official v3.4.0 binary converts a JSON `null`
+# named RPC argument to '' and emits schema-qualified PostgreSQL type names as
+# GraphQL scalar names. Both are fixed in this locally built layer, published
+# from the pinned source plus docs/patches/postrust-v3.4.0-temporary-fixes.patch.
+# The official image stays available by setting POSTGREST_VERSION=v3.4.0,
+# optionally with the three POSTRUST_* overrides. Replace this repin with the
+# next upstream release that carries both fixes.
+SUPACLOUD_POSTRUST_OFFICIAL_VERSION="v3.4.0"
+SUPACLOUD_POSTRUST_TEMPORARY_VERSION="v3.4.0+supacloud.1"
+SUPACLOUD_POSTRUST_TEMPORARY_LAYER_SHA256="e9e721400159b4e2cce78a860b2989cb67b3eb3628a232a57a0bd8a0072be79e"
+SUPACLOUD_POSTRUST_TEMPORARY_BINARY_SHA256="647e3f3d649f96adca20db8d8b774167d8b4129d186dfa76839e6ed8866c457e"
+SUPACLOUD_POSTRUST_TEMPORARY_LAYER_URL="https://github.com/vibeunion/supacloud/releases/download/postrust-v3.4.0-supacloud.1/postrust-v3.4.0-supacloud.1-linux-amd64.tar.gz"
+SUPACLOUD_POSTGREST_DEFAULT_VERSION="$SUPACLOUD_POSTRUST_TEMPORARY_VERSION"
 SUPACLOUD_POSTRUST_IMAGE="docker.io/postrust/postrust:v3.4.0"
 SUPACLOUD_POSTRUST_IMAGE_INDEX_DIGEST="sha256:4de17b6c68403317a33c0a8ab78edb347e6b3131e9784c25b5c700554ac61809"
 SUPACLOUD_POSTRUST_IMAGE_MANIFEST_AMD64="sha256:17ffc00f28a065bf228eaa74e6b823be0ae5813b4cf7b37a48f0067b9a464e2c"
 SUPACLOUD_POSTRUST_LAYER_AMD64="sha256:a2139f3563c558457f2b660bb92514a2b00d4d549392511fd127cd9669b5ef32"
 SUPACLOUD_POSTRUST_BINARY_AMD64_SHA256="f174c84a1b3ac8a24c13a4ef7896adfc029ece8c1b206ee715e3864f5f169b7a"
 SUPACLOUD_POSTRUST_LAYER_MEMBER="usr/local/bin/postrust"
-SUPACLOUD_POSTGREST_X86_64_SHA256="$SUPACLOUD_POSTRUST_BINARY_AMD64_SHA256"
+SUPACLOUD_POSTGREST_X86_64_SHA256="$SUPACLOUD_POSTRUST_TEMPORARY_BINARY_SHA256"
 
 supacloud_postgrest_binary_version() {
     local binary_path="$1"
@@ -94,10 +107,14 @@ supacloud_resolve_postgrest_release() {
             ;;
     esac
     SUPACLOUD_POSTRUST_BINARY_SHA256=""
-    if [[ "$target_version" == "$SUPACLOUD_POSTGREST_DEFAULT_VERSION" ]]; then
+    if [[ "$target_version" == "$SUPACLOUD_POSTRUST_TEMPORARY_VERSION" ]]; then
+        SUPACLOUD_POSTGREST_RELEASE_SHA256="${POSTGREST_SHA256:-$SUPACLOUD_POSTRUST_TEMPORARY_LAYER_SHA256}"
+        SUPACLOUD_POSTRUST_BINARY_SHA256="${POSTRUST_BINARY_SHA256:-$SUPACLOUD_POSTRUST_TEMPORARY_BINARY_SHA256}"
+        SUPACLOUD_POSTGREST_RELEASE_URL="${POSTRUST_RELEASE_URL:-$SUPACLOUD_POSTRUST_TEMPORARY_LAYER_URL}"
+    elif [[ "$target_version" == "$SUPACLOUD_POSTRUST_OFFICIAL_VERSION" ]]; then
         SUPACLOUD_POSTGREST_RELEASE_SHA256="${POSTGREST_SHA256:-${SUPACLOUD_POSTRUST_LAYER_AMD64#sha256:}}"
         SUPACLOUD_POSTRUST_BINARY_SHA256="${POSTRUST_BINARY_SHA256:-$SUPACLOUD_POSTRUST_BINARY_AMD64_SHA256}"
-        SUPACLOUD_POSTGREST_RELEASE_URL="https://registry-1.docker.io/v2/postrust/postrust/blobs/${SUPACLOUD_POSTRUST_LAYER_AMD64}"
+        SUPACLOUD_POSTGREST_RELEASE_URL="${POSTRUST_RELEASE_URL:-https://registry-1.docker.io/v2/postrust/postrust/blobs/${SUPACLOUD_POSTRUST_LAYER_AMD64}}"
     else
         SUPACLOUD_POSTGREST_RELEASE_SHA256="${POSTGREST_SHA256:-}"
         SUPACLOUD_POSTRUST_BINARY_SHA256="${POSTRUST_BINARY_SHA256:-}"

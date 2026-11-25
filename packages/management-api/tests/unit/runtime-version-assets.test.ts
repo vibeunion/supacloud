@@ -1382,7 +1382,7 @@ describe("runtime companion version assets", () => {
     expect(installer).toContain('CADDY_VERSION:-2.11.9');
     expect(caddyBuilder).toContain('CADDY_VERSION="${CADDY_VERSION:-v2.11.9}"');
 
-    expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v3.4.0"');
+    expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v3.4.0+supacloud.1"');
     expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.198.0"');
     const realtimeDigest =
       "sha256:2843107437cb746edb925155504558683882e65d119c1321fda40fc43d51d847";
