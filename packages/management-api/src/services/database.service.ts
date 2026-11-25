@@ -21,6 +21,7 @@ import { assertValidIdentifier, assertValidDbName } from "../utils/validation";
 import { ensureMigrationLedgerMetadata } from "./migration-ledger";
 import { prepareProjectMigrationRole } from "./project-migration-role";
 import embeddedSupabaseSchema from "../db/schemas/supabase.sql" with { type: "text" };
+import { ensureOfficialRealtimeTenantSchema } from "../db/realtime-tenant-schema";
 
 export const EMBEDDED_SUPABASE_SCHEMA = embeddedSupabaseSchema;
 const SUPABASE_BOOTSTRAP_VERSION = "2026-09-27";
@@ -600,6 +601,9 @@ export class DatabaseService {
           await tx.unsafe(schemaSql);
           await tx.unsafe(renderAuthSchemaOwnershipSql());
           await tx.unsafe(renderPgStatStatementsCompatibilitySql());
+          // The Rust gateway reads realtime.list_changes. Elixir used to install
+          // that schema; a fresh rust project has to install it here.
+          await ensureOfficialRealtimeTenantSchema(tx);
         } catch (err: unknown) {
           logger.error(
             `[services/database.service] Error applying Supabase schema at ${dbName}`,

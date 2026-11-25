@@ -209,6 +209,7 @@ describe("DatabaseService", () => {
       expect(tenantSql.begin).toHaveBeenCalled();
       expect(transactionSql.unsafe).toHaveBeenCalledWith("SELECT 'tenant schema loaded';");
       expect(transactionSql.unsafe).toHaveBeenCalledWith(expect.stringContaining('ALTER SCHEMA auth OWNER TO "supabase_auth_admin"'));
+      expect(transactionSql.unsafe).toHaveBeenCalledWith(expect.stringContaining("function realtime.list_changes"));
       expect(transactionSql.unsafe).toHaveBeenLastCalledWith(expect.stringContaining("INSERT INTO supacloud_platform.bootstrap_state"));
     });
   });
