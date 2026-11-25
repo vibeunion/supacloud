@@ -1,6 +1,6 @@
 # Postrust GraphQL
 
-Public project GraphQL at `GET`/`POST /graphql/v1` is the Hasura dialect served by the pinned Postrust v3.4.0 process. This is not bit-for-bit compatibility with `pg_graphql`, and it is not a second policy engine.
+Public project GraphQL at `GET`/`POST /graphql/v1` is the Hasura dialect served by Postrust. The host installer and tenant runtime default to the temporary layer `v3.4.0+supacloud.1`, which includes the GraphQL type-name fix. Compose, Podman, and CI still run the null-RPC source build of v3.4.0 and do not include that second patch. This is not bit-for-bit compatibility with `pg_graphql`, and it is not a second policy engine.
 
 The long-term shape is still one data contract: the compiler and ZenStack own the schema the model edits, and REST and GraphQL share `GRANT`, RLS, and the GoTrue JWT. Generating SDL from that catalog is not implemented. `generatedFromCatalog` stays false.
 
@@ -36,7 +36,7 @@ The feature matrix reports both shapes from the snapshot it is given: Relay conn
 
 `PGRST_DB_PRE_REQUEST` is REST-only. GraphQL does not call it, so `public.set_request_context` does not write `request.jwt.claim.sub`. `GraphQLContext` still sets `request.jwt.claims` and the database role. `auth.uid()` in this repository reads the singular setting and falls back to `request.jwt.claims ->> sub`.
 
-`.github/workflows/management-api.yml` job `postrust-graphql-rls` installs PostgreSQL 16, downloads the pinned v3.4.0 layer through `supacloud_install_pinned_postrust_layer`, and runs the hosted RLS fixture plus `packages/supacloud-lite/test/graphql-postrust-compare.local.test.ts`. That comparison executes the same read documents on Lite and on the pinned binary.
+`.github/workflows/management-api.yml` job `postrust-graphql-rls` installs PostgreSQL 16, uses the patched source-built binary from the `postrust-patched-binary` job (`scripts/build_supacloud_postrust.sh`, rustc 1.98.1, null-RPC patch only), and runs the hosted RLS fixture plus `packages/supacloud-lite/test/graphql-postrust-compare.local.test.ts`. That comparison executes the same read documents on Lite and on that binary. It does not download the official image or the temporary `v3.4.0+supacloud.1` layer.
 
 ```sh
 SUPACLOUD_TEST_POSTRUST_GRAPHQL=1 POSTRUST_BIN=<pinned binary> \

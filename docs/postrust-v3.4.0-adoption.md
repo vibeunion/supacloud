@@ -4,7 +4,33 @@ SupaCloud's project REST process is [Postrust v3.4.0](https://github.com/postrus
 
 ## Pin
 
-The upstream release stays [Postrust v3.4.0](https://github.com/postrust/postrust/releases/tag/v3.4.0). The default host installer, Compose files, Podman quadlet, and CI do not install that release's official image. They build `postrust-server` from the tag archive and apply [`docs/patches/postrust-v3.4.0-null-rpc-args.patch`](./patches/postrust-v3.4.0-null-rpc-args.patch) before `cargo build --release --locked`.
+The upstream release stays [Postrust v3.4.0](https://github.com/postrust/postrust/releases/tag/v3.4.0). SupaCloud does not install that release's official image. Two patched artifacts are in use, and they are not the same binary.
+
+### Host installer and tenant runtime default
+
+The host installer and tenant runtime default to the published temporary layer `v3.4.0+supacloud.1`. That layer is built from the pinned v3.4.0 source plus [`docs/patches/postrust-v3.4.0-temporary-fixes.patch`](./patches/postrust-v3.4.0-temporary-fixes.patch), which carries both the null-RPC fix and the GraphQL type-name fix. The installer downloads the existing release asset and verifies the layer SHA-256 and the binary SHA-256 before it installs the member at `/usr/local/bin/postgrest`.
+
+| Item | Value |
+| --- | --- |
+| Version | `v3.4.0+supacloud.1` |
+| Release | https://github.com/vibeunion/supacloud/releases/tag/postrust-v3.4.0-supacloud.1 |
+| Layer asset | `postrust-v3.4.0-supacloud.1-linux-amd64.tar.gz` |
+| Layer SHA256 | `e9e721400159b4e2cce78a860b2989cb67b3eb3628a232a57a0bd8a0072be79e` |
+| Layer member | `usr/local/bin/postrust` |
+| Binary SHA256 | `647e3f3d649f96adca20db8d8b774167d8b4129d186dfa76839e6ed8866c457e` |
+| Patch | `docs/patches/postrust-v3.4.0-temporary-fixes.patch` |
+| Rebuild | `scripts/build_postrust_temporary_fixes.sh` and `.github/workflows/postrust-temporary-fixes.yml` |
+| Rebuild Rustc | 1.94.1 |
+
+`POSTGREST_SHA256`, `POSTRUST_BINARY_SHA256`, and `POSTRUST_RELEASE_URL` do not replace this pin. The layer is linux/amd64 only. An arm64 host does not install it by default.
+
+The version stamp `/usr/local/bin/postgrest.postrust-version` lists `v3.4.0+supacloud.1` and the binary SHA-256 above. Tenant start accepts that version only when an ELF at the path has that digest. The official unpatched digest is a different file, so it does not satisfy this check.
+
+### Explicit `POSTGREST_VERSION=v3.4.0`, Compose, Podman, and CI
+
+`POSTGREST_VERSION=v3.4.0` keeps the source-build path. It builds `postrust-server` from the tag archive and applies [`docs/patches/postrust-v3.4.0-null-rpc-args.patch`](./patches/postrust-v3.4.0-null-rpc-args.patch) before `cargo build --release --locked`. It does not download or install the official image, and it refuses a binary whose SHA-256 is the unpatched official member. This path does not apply the GraphQL type-name patch.
+
+Compose files, the Podman quadlet, and CI use this same source-build. They are not switched to the temporary layer, and they are not switched back to the official image.
 
 | Item | Value |
 | --- | --- |
@@ -20,9 +46,7 @@ The upstream release stays [Postrust v3.4.0](https://github.com/postrust/postrus
 | Image | `docker/self-host/postrust/Dockerfile`, tagged `supacloud-postrust:3.4.0-null-rpc` |
 | Podman tag | `localhost/supacloud-postrust:local` |
 
-The host installer writes the binary to the existing `/usr/local/bin/postgrest` path so tenant units keep their executable path. The source build runs on the host architecture. linux/amd64 uses Rust dist SHA256 `24ba1338a2d35c5a3247936546429e163fa674d726102af18bdf624582c57aea`. linux/arm64 uses `f00ba576645cef658e1deed96fab8f707958e9d58808b16343448b5d1c4f7407`. The official image index is still amd64 only; an explicit non-default download of that image fails on arm64 instead of falling back to PostgREST.
-
-The default build uses the same features as the official image: `admin-ui,otel`, not `compat-key-order`.
+The source build runs on the host architecture. linux/amd64 uses Rust dist SHA256 `24ba1338a2d35c5a3247936546429e163fa674d726102af18bdf624582c57aea`. linux/arm64 uses `f00ba576645cef658e1deed96fab8f707958e9d58808b16343448b5d1c4f7407`. Rustc 1.98.1 stays the pin for this path. The temporary-layer rebuild stays on Rust 1.94.1 so the published layer and binary digests remain reproducible. The two toolchains coexist.
 
 The built binary's SHA256 depends on the compiler output. It is recorded next to the installed binary and is not pinned as a second upstream digest. The official image remains identifiable so a drop-in of that binary is refused:
 
@@ -35,10 +59,12 @@ The built binary's SHA256 depends on the compiler output. It is recorded next to
 | Layer member | `usr/local/bin/postrust` |
 | Unpatched binary SHA256 | `f174c84a1b3ac8a24c13a4ef7896adfc029ece8c1b206ee715e3864f5f169b7a` |
 
-## How to see that the artifact is patched
+## How to see which artifact is installed
 
-- Host binary: `/usr/local/bin/postgrest.postrust-patch` lists the patch id, patch SHA256, source SHA256, rustc `1.98.1`, and features `admin-ui,otel`. `/usr/local/bin/postgrest.postrust-version` lists `v3.4.0` and the SHA256 of that built binary. The installer refuses a file whose SHA256 is the unpatched official member above.
-- Image: label `org.supacloud.postrust.patch=postrust-v3.4.0-null-rpc-args`. The same stamp is `/usr/local/lib/supacloud/postrust-patch`, and `/usr/local/lib/supacloud/SHA256SUMS.postrust` is the built binary.
+- Host default: `/usr/local/bin/postgrest.postrust-version` lists `v3.4.0+supacloud.1` and `647e3f3d649f96adca20db8d8b774167d8b4129d186dfa76839e6ed8866c457e`. That install has no null-RPC source-build stamp. The installer has already checked the layer digest `e9e721400159b4e2cce78a860b2989cb67b3eb3628a232a57a0bd8a0072be79e`.
+- Explicit `v3.4.0` source build, Compose, Podman, and CI: `/usr/local/bin/postgrest.postrust-patch` (or `/usr/local/lib/supacloud/postrust-patch` in the image) lists the patch id `postrust-v3.4.0-null-rpc-args`, patch SHA256, source SHA256, rustc `1.98.1`, and features `admin-ui,otel`. The image label is `org.supacloud.postrust.patch=postrust-v3.4.0-null-rpc-args`. `/usr/local/lib/supacloud/SHA256SUMS.postrust` is the built binary. A file whose SHA256 is `f174c84a1b3ac8a24c13a4ef7896adfc029ece8c1b206ee715e3864f5f169b7a` is refused.
+
+Both patched builds use the same features as the official image: `admin-ui,otel`, not `compat-key-order`.
 
 ## Compatibility mode
 
@@ -83,7 +109,7 @@ The host tenant process binds `127.0.0.1`. Caddy on that host dials `127.0.0.1`,
 
 ## Other deviations from PostgREST v16.6
 
-- **arm64.** `install.sh` still installs arm64 artifacts for other components. Postrust v3.4.0 publishes no linux/arm64 image or release binary. The default REST installer builds the patched source with the pinned arm64 Rust toolchain instead of leaving PostgREST in place. An explicit non-default download of the official image still fails on that architecture.
+- **arm64.** `install.sh` still installs arm64 artifacts for other components. Postrust v3.4.0 publishes no linux/arm64 image or release binary, and the temporary layer is linux/amd64 only, so the default host installer does not install it on arm64. `POSTGREST_VERSION=v3.4.0` still builds the null-RPC source with the pinned arm64 Rust toolchain. Compose, Podman, and CI keep that source-build. Downloading the official image still fails on arm64, and that image is not installed.
 - **CORS.** An empty `PGRST_SERVER_CORS_ORIGINS`, which is the default, allows every origin and sends `Access-Control-Allow-Origin` accordingly. PostgREST sends no CORS headers unless `server-cors-allowed-origins` is set. The per-tenant `.conf` still sets that key and the launcher maps it. Compose, Podman, CI, and the pilot do not, so those processes are more permissive than PostgREST was. There is no documented value that restores "send no CORS headers."
 - **Object key order and `GET /`.** The official image logs that compatibility mode still returns object keys alphabetically. `GET /` is not PostgREST's Swagger 2.0 document. Both are visible to anything that reads the REST port directly.
 - **Unknown `.conf` keys.** The launcher exits if a key is not in the mapped set. The management API writer only emits mapped keys, so the generated file starts. An operator-added PostgREST setting that this mapping does not know makes the tenant REST process fail at restart. There is no fallback to the PostgREST binary.
@@ -120,25 +146,38 @@ workers that call such RPCs.
 A source patch that represents the value as `Option<String>` and renders
 `NULL::<declared type>` is in
 [`docs/patches/postrust-v3.4.0-null-rpc-args.patch`](./patches/postrust-v3.4.0-null-rpc-args.patch).
-The default build applies that patch. An earlier local rebuild of the pinned
-`postrust-server` features produced one linux/amd64 binary with SHA-256
-`136ba4f400be8b06179a7e9e89060b3a52b640778e9c8854b86ec2a05738ca54`. A later
-linux/amd64 release build with rustc 1.98.1 and this patch produced
-`c53a85b3c60cc9329ad8603ea6047e2ac7210da07314804ecd43d36dfd78b2aa`. Neither
-digest is the checksum the installer requires. The installer checks the source
-archive, the patch, and the stamp, then records the SHA256 of the binary it
-just built.
+The host default and the explicit `v3.4.0` source build both apply this fix. The temporary layer includes it inside `docs/patches/postrust-v3.4.0-temporary-fixes.patch`. The source build applies `docs/patches/postrust-v3.4.0-null-rpc-args.patch` alone. An earlier local rebuild of the pinned `postrust-server` features produced one linux/amd64 binary with SHA-256 `136ba4f400be8b06179a7e9e89060b3a52b640778e9c8854b86ec2a05738ca54`. A later linux/amd64 release build with rustc 1.98.1 and the null-RPC patch produced `c53a85b3c60cc9329ad8603ea6047e2ac7210da07314804ecd43d36dfd78b2aa`. Neither digest is the checksum the temporary layer pins, and neither is a checksum the source-build installer requires. The source-build installer checks the source archive, the patch, and the stamp, then records the SHA256 of the binary it just built. The temporary installer checks the published layer and binary digests.
 
-The official binary SHA-256
-`f174c84a1b3ac8a24c13a4ef7896adfc029ece8c1b206ee715e3864f5f169b7a` still has
-the defect. The default installer, Compose build, Podman image, and CI artifact
-refuse that file. Do not replace the patched artifact with the official v3.4.0
-image while any application passes `null` to a named RPC argument. The version
-pin stays v3.4.0. This is not a production host upgrade.
+The official binary SHA-256 `f174c84a1b3ac8a24c13a4ef7896adfc029ece8c1b206ee715e3864f5f169b7a` still has the defect. The default installer, the `POSTGREST_VERSION=v3.4.0` source build, Compose, Podman, and CI refuse that file. Do not replace either patched artifact with the official v3.4.0 image while any application passes `null` to a named RPC argument. The upstream pin stays v3.4.0. This is not a production host upgrade.
+
+## Blocking defect: GraphQL type names
+
+The official v3.4.0 binary also exposes a PostgreSQL type name that GraphQL cannot name. `pg_type_to_graphql` falls through to `GraphQLType::Custom(format_type(...))`, and `format_type` schema-qualifies a type that is outside the connection's search path. A GraphQL name may only match `[_A-Za-z][_0-9A-Za-z]*`, so a project with a function that takes a table row type produces introspection that no generated client can load.
+
+A source patch is in [`docs/patches/postrust-v3.4.0-graphql-type-names.patch`](./patches/postrust-v3.4.0-graphql-type-names.patch). It sanitizes custom type names in `pg_type_to_graphql`, the one function both registration and every reference go through, and a leading digit gets a `_` prefix. `public.fa_cases` becomes `public_fa_cases`. The patch file includes a regression test for that spelling.
+
+The temporary layer includes this patch together with the null-RPC fix. `POSTGREST_VERSION=v3.4.0`, Compose, Podman, and CI build only the null-RPC patch. They do not include this GraphQL type-name change, and they still do not install the official image.
+
+## Temporary patched artifact
+
+Both defects are fixed together in `v3.4.0+supacloud.1`. The layer is already published at the release above and is what the host installer and tenant runtime pin by default. Rebuild it with:
+
+```sh
+bash scripts/build_postrust_temporary_fixes.sh
+```
+
+The script downloads the pinned source archive, checks its SHA-256, applies `docs/patches/postrust-v3.4.0-temporary-fixes.patch`, builds `postrust-server --features admin-ui,otel`, and verifies both the binary and the deterministic layer digest before writing `SHA256SUMS`. It requires Rust 1.94.1, `curl`, `patch`, GNU tar, and gzip. That Rust pin is the one that reproduces the published digests. Rebuilding this layer with the 1.98.1 toolchain from the `v3.4.0` source-build path does not reproduce those digests. `.github/workflows/postrust-temporary-fixes.yml` runs the same script on demand.
+
+```
+647e3f3d649f96adca20db8d8b774167d8b4129d186dfa76839e6ed8866c457e  usr/local/bin/postrust
+e9e721400159b4e2cce78a860b2989cb67b3eb3628a232a57a0bd8a0072be79e  postrust-v3.4.0-supacloud.1-linux-amd64.tar.gz
+```
+
+This layer is a temporary SupaCloud artifact, not an upstream Postrust release. It is amd64 only. Replace it with the next official Postrust release once both fixes are upstream. Until then, `POSTGREST_VERSION=v3.4.0` remains the source-build path for the null-RPC patch. It is not a download of the official image.
 
 ## Conformance
 
-Upstream [postgrest-conformance.md](https://github.com/postrust/postrust/blob/v3.4.0/docs/postgrest-conformance.md) at v3.4.0 reports 99.1% full-contract agreement over 1499 replayed PostgREST cases, and says that measurement used a binary built with `admin-ui,compat-key-order`. The default build uses `admin-ui,otel`, which does not include `compat-key-order`. This repository has not replayed that suite. A passing compile of this pin is not that result.
+Upstream [postgrest-conformance.md](https://github.com/postrust/postrust/blob/v3.4.0/docs/postgrest-conformance.md) at v3.4.0 reports 99.1% full-contract agreement over 1499 replayed PostgREST cases, and says that measurement used a binary built with `admin-ui,compat-key-order`. The temporary layer and the v3.4.0 source build use `admin-ui,otel`, which does not include `compat-key-order`. This repository has not replayed that suite. A passing compile of this pin is not that result.
 
 `docs/adr/2026-11-24-postgrest-dataplane-unification.md` describes the data-plane direction. It is not a test result for this image and it does not authorize a production cutover.
 

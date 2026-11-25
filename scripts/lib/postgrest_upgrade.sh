@@ -2,13 +2,15 @@
 
 # Postrust v3.4.0 (MIT, Copyright 2024 Postrust Contributors).
 # Official release: https://github.com/postrust/postrust/releases/tag/v3.4.0
-# The default installer builds that tag from the pinned source archive and
-# applies docs/patches/postrust-v3.4.0-null-rpc-args.patch. It does not
-# download the official image. Pins live in postrust_pin.sh.
+# The host installer default is the published temporary layer
+# v3.4.0+supacloud.1. It verifies that layer and the binary inside it.
+# POSTGREST_VERSION=v3.4.0 builds the pinned source archive and applies
+# docs/patches/postrust-v3.4.0-null-rpc-args.patch with rustc 1.98.1. That
+# path does not download the official image. Pins live in postrust_pin.sh.
 # shellcheck source=postrust_pin.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/postrust_pin.sh"
 
-SUPACLOUD_POSTGREST_DEFAULT_VERSION="$SUPACLOUD_POSTRUST_UPSTREAM_VERSION"
+SUPACLOUD_POSTGREST_DEFAULT_VERSION="$SUPACLOUD_POSTRUST_TEMPORARY_VERSION"
 SUPACLOUD_POSTRUST_BUILD_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/build_supacloud_postrust.sh"
 
 supacloud_postgrest_binary_version() {
@@ -104,6 +106,33 @@ supacloud_build_patched_postrust() {
     fi
 }
 
+# Returns 0 when url, layer digest, or binary digest is the official unpatched
+# v3.4.0 artifact. The caller must not install that artifact.
+supacloud_postrust_official_unpatched_refused() {
+    local url="${1:-}"
+    local layer_sha256="${2:-}"
+    local binary_sha256="${3:-}"
+    local unpatched_layer="${SUPACLOUD_POSTRUST_UNPATCHED_LAYER_AMD64#sha256:}"
+    layer_sha256=$(printf '%s' "$layer_sha256" | tr '[:upper:]' '[:lower:]')
+    binary_sha256=$(printf '%s' "$binary_sha256" | tr '[:upper:]' '[:lower:]')
+    if [[ -n "$binary_sha256" && "$binary_sha256" == "$SUPACLOUD_POSTRUST_UNPATCHED_BINARY_SHA256" ]]; then
+        printf 'Official unpatched Postrust binary %s is refused and is not installed\n' \
+            "$SUPACLOUD_POSTRUST_UNPATCHED_BINARY_SHA256" >&2
+        return 0
+    fi
+    if [[ -n "$layer_sha256" && "$layer_sha256" == "$unpatched_layer" ]]; then
+        printf 'Official unpatched Postrust layer %s is refused and is not installed\n' \
+            "$unpatched_layer" >&2
+        return 0
+    fi
+    if [[ -n "$url" && "$url" == *"$unpatched_layer"* ]]; then
+        printf 'Official unpatched Postrust layer %s is refused and is not installed\n' \
+            "$unpatched_layer" >&2
+        return 0
+    fi
+    return 1
+}
+
 supacloud_resolve_postgrest_release() {
     local target_version="$1"
     local machine
@@ -127,21 +156,34 @@ supacloud_resolve_postgrest_release() {
             return 1
             ;;
     esac
-    if [[ "$target_version" == "$SUPACLOUD_POSTGREST_DEFAULT_VERSION" ]]; then
+    if [[ "$target_version" == "$SUPACLOUD_POSTRUST_UPSTREAM_VERSION" ]]; then
         printf 'Postrust %s is built from the pinned source archive with %s; the official image is not installed\n' \
             "$target_version" "$SUPACLOUD_POSTRUST_PATCH_ID" >&2
         return 1
     fi
     SUPACLOUD_POSTRUST_BINARY_SHA256=""
-    SUPACLOUD_POSTGREST_RELEASE_SHA256="${POSTGREST_SHA256:-}"
-    SUPACLOUD_POSTRUST_BINARY_SHA256="${POSTRUST_BINARY_SHA256:-}"
-    SUPACLOUD_POSTGREST_RELEASE_URL="${POSTRUST_RELEASE_URL:-https://example.invalid/postrust/${target_version}.layer.tar.gz}"
-    [[ "$SUPACLOUD_POSTGREST_RELEASE_SHA256" =~ ^[0-9a-fA-F]{64}$ ]] || {
-        printf 'POSTGREST_SHA256 is required for unpinned Postrust version %s\n' "$target_version" >&2
-        return 1
-    }
-    if [[ -n "$SUPACLOUD_POSTRUST_BINARY_SHA256" && ! "$SUPACLOUD_POSTRUST_BINARY_SHA256" =~ ^[0-9a-fA-F]{64}$ ]]; then
-        printf 'POSTRUST_BINARY_SHA256 is not a SHA256 digest\n' >&2
+    if [[ "$target_version" == "$SUPACLOUD_POSTRUST_TEMPORARY_VERSION" ]]; then
+        # The published release is the pin. Env overrides cannot retarget it.
+        SUPACLOUD_POSTGREST_RELEASE_SHA256="$SUPACLOUD_POSTRUST_TEMPORARY_LAYER_SHA256"
+        SUPACLOUD_POSTRUST_BINARY_SHA256="$SUPACLOUD_POSTRUST_TEMPORARY_BINARY_SHA256"
+        SUPACLOUD_POSTGREST_RELEASE_URL="$SUPACLOUD_POSTRUST_TEMPORARY_LAYER_URL"
+    else
+        SUPACLOUD_POSTGREST_RELEASE_SHA256="${POSTGREST_SHA256:-}"
+        SUPACLOUD_POSTRUST_BINARY_SHA256="${POSTRUST_BINARY_SHA256:-}"
+        SUPACLOUD_POSTGREST_RELEASE_URL="${POSTRUST_RELEASE_URL:-https://example.invalid/postrust/${target_version}.layer.tar.gz}"
+        if [[ ! "$SUPACLOUD_POSTGREST_RELEASE_SHA256" =~ ^[0-9a-fA-F]{64}$ ]]; then
+            printf 'POSTGREST_SHA256 is required for unpinned Postrust version %s\n' "$target_version" >&2
+            return 1
+        fi
+        if [[ -n "$SUPACLOUD_POSTRUST_BINARY_SHA256" && ! "$SUPACLOUD_POSTRUST_BINARY_SHA256" =~ ^[0-9a-fA-F]{64}$ ]]; then
+            printf 'POSTRUST_BINARY_SHA256 is not a SHA256 digest\n' >&2
+            return 1
+        fi
+    fi
+    if supacloud_postrust_official_unpatched_refused \
+        "$SUPACLOUD_POSTGREST_RELEASE_URL" \
+        "$SUPACLOUD_POSTGREST_RELEASE_SHA256" \
+        "$SUPACLOUD_POSTRUST_BINARY_SHA256"; then
         return 1
     fi
     SUPACLOUD_POSTGREST_RELEASE_ASSET="$SUPACLOUD_POSTRUST_LAYER_MEMBER"
@@ -151,6 +193,9 @@ supacloud_download_postrust_artifact() {
     local url="$1"
     local output="$2"
     local token_file token
+    if supacloud_postrust_official_unpatched_refused "$url" "" ""; then
+        return 1
+    fi
     if [[ "$url" == https://registry-1.docker.io/v2/postrust/postrust/blobs/sha256:* ]]; then
         token_file=$(mktemp) || return 1
         curl -fsSL --proto '=https' --proto-redir '=https' \
@@ -186,6 +231,10 @@ supacloud_install_pinned_postrust_layer() (
     actual_sha256=$(sha256sum "$archive" | awk '{print $1}')
     actual_sha256=$(printf '%s' "$actual_sha256" | tr '[:upper:]' '[:lower:]')
     expected_sha256=$(printf '%s' "$expected_sha256" | tr '[:upper:]' '[:lower:]')
+    if supacloud_postrust_official_unpatched_refused "" "$actual_sha256" "" \
+        || supacloud_postrust_official_unpatched_refused "" "$expected_sha256" ""; then
+        return 1
+    fi
     if [[ ! "$expected_sha256" =~ ^[0-9a-f]{64}$ || "$actual_sha256" != "$expected_sha256" ]]; then
         echo "SHA256 mismatch for pinned Postrust layer" >&2
         return 1
@@ -209,9 +258,15 @@ supacloud_install_pinned_postrust_layer() (
         return 1
     fi
     candidate="${extract_dir}/${member}"
+    binary_sha256=$(sha256sum "$candidate" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
+    if supacloud_postrust_official_unpatched_refused "" "" "$binary_sha256"; then
+        return 1
+    fi
     if [[ -n "$expected_binary_sha256" ]]; then
-        binary_sha256=$(sha256sum "$candidate" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
         expected_binary_sha256=$(printf '%s' "$expected_binary_sha256" | tr '[:upper:]' '[:lower:]')
+        if supacloud_postrust_official_unpatched_refused "" "" "$expected_binary_sha256"; then
+            return 1
+        fi
         [[ "$binary_sha256" == "$expected_binary_sha256" ]] || {
             echo "SHA256 mismatch for pinned Postrust binary" >&2
             return 1
@@ -364,7 +419,7 @@ supacloud_upgrade_postgrest_binary_transaction() (
     local result_file="$2"
     local target_version="${POSTGREST_VERSION:-$SUPACLOUD_POSTGREST_DEFAULT_VERSION}"
     local current_version="" transaction_dir archive staged_binary="" staged_patch="" backup_dir active_units stopped_units status=0
-    local binary_requires_upgrade=false use_source_build=false
+    local binary_requires_upgrade=false use_source_build=false installed_sha=""
 
     [[ "$target_version" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?([+-][A-Za-z0-9._-]+)?$ ]] || {
         printf 'Invalid Postrust version (expected v-prefixed release): %s\n' "$target_version" >&2
@@ -383,13 +438,20 @@ supacloud_upgrade_postgrest_binary_transaction() (
             }
         fi
     fi
-    if [[ "$target_version" == "$SUPACLOUD_POSTGREST_DEFAULT_VERSION" ]]; then
+    # Explicit v3.4.0 is the null-RPC source build. The default temporary
+    # layer is a verified download and must not take this branch.
+    if [[ "$target_version" == "$SUPACLOUD_POSTRUST_UPSTREAM_VERSION" ]]; then
         use_source_build=true
     fi
     if [[ "$current_version" != "$target_version" ]]; then
         binary_requires_upgrade=true
     elif [[ "$use_source_build" == true ]] && ! supacloud_postrust_patch_stamp_matches "$binary_path"; then
         binary_requires_upgrade=true
+    elif [[ "$target_version" == "$SUPACLOUD_POSTRUST_TEMPORARY_VERSION" ]]; then
+        installed_sha=$(sha256sum "$binary_path" | awk '{print $1}' | tr '[:upper:]' '[:lower:]') || return 1
+        if [[ "$installed_sha" != "$SUPACLOUD_POSTRUST_TEMPORARY_BINARY_SHA256" ]]; then
+            binary_requires_upgrade=true
+        fi
     fi
     if [[ "$binary_requires_upgrade" == true && "$use_source_build" == false ]]; then
         supacloud_resolve_postgrest_release "$target_version" || return 1

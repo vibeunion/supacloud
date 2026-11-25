@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# The default Postrust build applies the null-RPC patch to the pinned v3.4.0 archive.
+# POSTGREST_VERSION=v3.4.0 applies the null-RPC patch to the pinned v3.4.0
+# archive and does not select the official image. The host installer default
+# is the temporary layer; this file checks the source-build path.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,6 +30,11 @@ if grep -Fq "SUPACLOUD_POSTRUST_BINARY_AMD64_SHA256=\"${SUPACLOUD_POSTRUST_UNPAT
     echo "default Postrust upgrade still pins the unpatched official binary" >&2
     exit 1
 fi
+grep -Fq "$SUPACLOUD_POSTRUST_TEMPORARY_LAYER_SHA256" "${SCRIPT_DIR}/postrust_pin.sh"
+grep -Fq "$SUPACLOUD_POSTRUST_TEMPORARY_BINARY_SHA256" "${SCRIPT_DIR}/postrust_pin.sh"
+grep -Fq 'RUSTUP_TOOLCHAIN: "1.94.1"' "${SCRIPT_DIR}/../../.github/workflows/postrust-temporary-fixes.yml"
+grep -Fq 'install Rust 1.94.1' "${SCRIPT_DIR}/../build_postrust_temporary_fixes.sh"
+grep -Fq 'SUPACLOUD_POSTRUST_RUSTC_VERSION="1.98.1"' "${SCRIPT_DIR}/postrust_pin.sh"
 
 cache_dir="${TMPDIR:-/tmp}/supacloud-postrust-patch-test"
 mkdir -p "$cache_dir"
