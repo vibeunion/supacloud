@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 
-# Pinned inputs for the default Postrust v3.4.0 build.
+# Pinned inputs for Postrust v3.4.0.
 # The upstream release stays v3.4.0. The official image is not installed.
+# The host installer and tenant runtime default to the temporary layer below.
+# POSTGREST_VERSION=v3.4.0 still builds the source archive with the null-RPC
+# patch and rustc 1.98.1. The temporary-layer rebuild uses Rust 1.94.1.
 # Docs: docs/postrust-v3.4.0-adoption.md
 
 SUPACLOUD_POSTRUST_UPSTREAM_VERSION="v3.4.0"
@@ -13,6 +16,15 @@ SUPACLOUD_POSTRUST_RUSTC_VERSION="1.98.1"
 SUPACLOUD_POSTRUST_FEATURES="admin-ui,otel"
 SUPACLOUD_POSTRUST_RUST_DIST_SHA256_X86_64="24ba1338a2d35c5a3247936546429e163fa674d726102af18bdf624582c57aea"
 SUPACLOUD_POSTRUST_RUST_DIST_SHA256_AARCH64="f00ba576645cef658e1deed96fab8f707958e9d58808b16343448b5d1c4f7407"
+
+# Published temporary layer. It carries the null-RPC fix and the GraphQL
+# type-name fix. scripts/build_postrust_temporary_fixes.sh reproduces these
+# digests with Rust 1.94.1. That toolchain is not SUPACLOUD_POSTRUST_RUSTC_VERSION.
+SUPACLOUD_POSTRUST_TEMPORARY_VERSION="v3.4.0+supacloud.1"
+SUPACLOUD_POSTRUST_TEMPORARY_RELEASE_TAG="postrust-v3.4.0-supacloud.1"
+SUPACLOUD_POSTRUST_TEMPORARY_LAYER_URL="https://github.com/vibeunion/supacloud/releases/download/postrust-v3.4.0-supacloud.1/postrust-v3.4.0-supacloud.1-linux-amd64.tar.gz"
+SUPACLOUD_POSTRUST_TEMPORARY_LAYER_SHA256="e9e721400159b4e2cce78a860b2989cb67b3eb3628a232a57a0bd8a0072be79e"
+SUPACLOUD_POSTRUST_TEMPORARY_BINARY_SHA256="647e3f3d649f96adca20db8d8b774167d8b4129d186dfa76839e6ed8866c457e"
 
 # Official v3.4.0 image. JSON null named RPC arguments bind as empty strings.
 # The default build refuses a binary with this SHA256.

@@ -7,8 +7,11 @@ RUNTIME_SCRIPT="${SCRIPT_DIR}/tenant_runtime.sh"
 
 grep -Eq '^umask 077$' "$RUNTIME_SCRIPT"
 grep -Fq 'PGPASSWORD="$db_password" psql' "$RUNTIME_SCRIPT"
+grep -Fq 'v3.4.0+supacloud.1' "$RUNTIME_SCRIPT"
 grep -Fq 'v3.4.0' "$RUNTIME_SCRIPT"
 grep -Fq 'postrust_pin.sh' "$RUNTIME_SCRIPT"
+grep -Fq '647e3f3d649f96adca20db8d8b774167d8b4129d186dfa76839e6ed8866c457e' "${SCRIPT_DIR}/postrust_pin.sh"
+grep -Fq 'e9e721400159b4e2cce78a860b2989cb67b3eb3628a232a57a0bd8a0072be79e' "${SCRIPT_DIR}/postrust_pin.sh"
 grep -Fq '2c5de117fe288a18046776dfd0505d21845ba49b072d62bdab2c29ce3f2fe722' "${SCRIPT_DIR}/postrust_pin.sh"
 grep -Fq 'b6fc50a592ede5071484e5e83a5ad1b59134724dcd2d91f71bf60b5b8bc983a6' "${SCRIPT_DIR}/postrust_pin.sh"
 grep -Fq 'postrust-v3.4.0-null-rpc-args' "${SCRIPT_DIR}/postrust_pin.sh"
@@ -55,6 +58,10 @@ trap 'rm -rf "$tmp_dir"' EXIT
 
 # shellcheck source=tenant_runtime.sh
 source "$RUNTIME_SCRIPT"
+[[ "$POSTGREST_DEFAULT_VERSION" == "v3.4.0+supacloud.1" ]]
+[[ "$POSTGREST_DEFAULT_VERSION" == "$SUPACLOUD_POSTRUST_TEMPORARY_VERSION" ]]
+[[ "$SUPACLOUD_POSTRUST_RUSTC_VERSION" == "1.98.1" ]]
+[[ "$SUPACLOUD_POSTRUST_UPSTREAM_VERSION" == "v3.4.0" ]]
 export SECRETS_ENCRYPTION_KEY='tenant-runtime-test-encryption-key-0123456789abcdef'
 
 canonical_unit="$tmp_dir/canonical.service"
@@ -181,7 +188,7 @@ unset GOTRUE_EXPERIMENTAL_PROVIDERS_WITH_OWN_LINKING_DOMAIN
 (
     mkdir -p "$tmp_dir/postgrest-bin"
     fake_postgrest="$tmp_dir/postgrest-bin/postgrest"
-    printf '#!/bin/sh\nprintf "PostgREST 3.4.0\\n"\n' > "$fake_postgrest"
+    printf '#!/bin/sh\nprintf "PostgREST 3.4.0+supacloud.1\\n"\n' > "$fake_postgrest"
     chmod 755 "$fake_postgrest"
     PATH="$tmp_dir/postgrest-bin:$PATH"
     POSTGREST_BIN="$fake_postgrest"
@@ -195,6 +202,31 @@ unset GOTRUE_EXPERIMENTAL_PROVIDERS_WITH_OWN_LINKING_DOMAIN
     POSTGREST_VERSION=16.6
     if ensure_postgrest >/dev/null 2>&1; then
         echo "tenant start accepted a PostgREST version without the v prefix" >&2
+        exit 1
+    fi
+
+    # Explicit v3.4.0 accepts a shell double. An ELF still needs the null-RPC stamp.
+    POSTGREST_VERSION=v3.4.0
+    printf '#!/bin/sh\nprintf "PostgREST 3.4.0\\n"\n' > "$fake_postgrest"
+    POSTGREST_BIN="$fake_postgrest"
+    ensure_postgrest
+    mkdir -p "$tmp_dir/elf-bin"
+    elf_postgrest="$tmp_dir/elf-bin/postgrest"
+    printf 'not-the-patched-build' > "$elf_postgrest"
+    chmod 755 "$elf_postgrest"
+    elf_sha=$(sha256sum "$elf_postgrest" | awk '{print $1}')
+    printf 'v3.4.0\n%s\n' "$elf_sha" > "${elf_postgrest}.postrust-version"
+    PATH="$tmp_dir/elf-bin:$PATH"
+    POSTGREST_BIN="$elf_postgrest"
+    if ensure_postgrest >/dev/null 2>&1; then
+        echo "tenant start accepted an unstamped v3.4.0 ELF" >&2
+        exit 1
+    fi
+
+    unset POSTGREST_VERSION
+    printf 'v3.4.0+supacloud.1\n%s\n' "$elf_sha" > "${elf_postgrest}.postrust-version"
+    if ensure_postgrest >/dev/null 2>&1; then
+        echo "tenant start accepted a temporary version with the wrong binary digest" >&2
         exit 1
     fi
 )
