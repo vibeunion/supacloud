@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import * as ts from "@supacloud/db/typescript";
+import { acquireIncrementalProgramSession } from "./program";
 import type { Diagnostic, TypeSafetyOptions } from "./types";
 import { scanQuerySql, SQL_SAFETY_DIAGNOSTIC_CODES } from "./sql-safety";
 import { scanSourceSemantics, SOURCE_SEMANTIC_DIAGNOSTIC_CODES } from "./source-semantics";
@@ -111,7 +112,14 @@ export async function scanProductionSource(options: TypeSafetyScanOptions): Prom
     forceConsistentCasingInFileNames: true,
     noEmit: true,
   };
-  await using program = await ts.createProgram(rootNames, compilerOptions, { cwd: dirname(configPath) });
+  // Reuse the strict server for this project. Creating one per compile copies
+  // every default library, including lib.dom.d.ts, and that stalls under CI load.
+  // Empty hints still recheck: the session hashes files it already loaded.
+  const session = await acquireIncrementalProgramSession(rootDir, "strict", {
+    cwd: dirname(configPath),
+    compilerOptions,
+  });
+  const program = (await session.update(rootNames, [])).program;
   const outDir = options.outDir ? normalizeRelative(rootDir, options.outDir) : undefined;
   const excludes = [...DEFAULT_EXCLUDES, ...(options.exclude ?? [])];
   const sourceFiles = program
@@ -296,14 +304,28 @@ async function scanSourceFile(
   }
 }
 
+const projectConfigCache = new Map<string, { text: string; value: { options: ts.CompilerOptions; errors: readonly ts.Diagnostic[] } }>();
+
 async function readProjectConfig(configPath: string): Promise<{
   options: ts.CompilerOptions;
   errors: readonly ts.Diagnostic[];
 }> {
+  const text = readFileSync(configPath, "utf8");
+  const cached = projectConfigCache.get(configPath);
+  if (cached?.text === text) return cached.value;
   const config = (await ts.readConfigFile(configPath, (file) => readFileSync(file, "utf8")));
-  if (config.error) return { options: {}, errors: [config.error] };
-  const parsed = (await ts.parseJsonConfigFileContent(config.config, ts.sys, dirname(configPath)));
-  return { options: parsed.options, errors: parsed.errors };
+  let value: { options: ts.CompilerOptions; errors: readonly ts.Diagnostic[] };
+  if (config.error) value = { options: {}, errors: [config.error] };
+  else {
+    const parsed = (await ts.parseJsonConfigFileContent(config.config, ts.sys, dirname(configPath)));
+    value = { options: parsed.options, errors: parsed.errors };
+  }
+  projectConfigCache.set(configPath, { text, value });
+  if (projectConfigCache.size > 8) {
+    const oldest = projectConfigCache.keys().next().value;
+    if (oldest !== undefined) projectConfigCache.delete(oldest);
+  }
+  return value;
 }
 
 function isProductionSource(
