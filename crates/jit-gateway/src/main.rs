@@ -31,6 +31,17 @@ fn control_authorized(headers: &HeaderMap) -> bool {
         .is_some_and(|token| token == expected)
 }
 
+/// Refuses a control request before any body extractor runs.
+async fn require_control_token(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    if !control_authorized(request.headers()) {
+        return unauthorized().into_response();
+    }
+    next.run(request).await
+}
+
 fn unauthorized() -> (StatusCode, Json<serde_json::Value>) {
     (
         StatusCode::UNAUTHORIZED,
@@ -61,15 +72,25 @@ async fn main() {
     let manager = GatewayManager::new(bind_host, upstream_host, upstream_port);
     let state = Arc::new(manager);
 
-    let app = Router::new()
-        .route("/healthcheck", get(healthcheck))
-        .route("/health", get(healthcheck))
-        .route("/manifest", get(manifest))
+    // The control routes sit behind one guard so authorization runs before the
+    // JSON extractor. Without it an unauthenticated caller reaches
+    // `Json<CreateBindingRequest>` first and gets 422 — the expected body shape —
+    // instead of 401, which both leaks the schema and answers a different
+    // question than "may I call this at all". The handlers keep their own check
+    // as the defence in depth they already had.
+    let control = Router::new()
         .route("/v1/bindings", post(create_binding).get(list_bindings))
         .route(
             "/v1/bindings/{credential_id}",
             delete(delete_binding).get(get_binding),
         )
+        .route_layer(axum::middleware::from_fn(require_control_token));
+
+    let app = Router::new()
+        .route("/healthcheck", get(healthcheck))
+        .route("/health", get(healthcheck))
+        .route("/manifest", get(manifest))
+        .merge(control)
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
