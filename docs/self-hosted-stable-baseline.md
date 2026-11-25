@@ -280,7 +280,7 @@ does not publish packages or deploy a host.
 | ZenStack | ZenStack lives in `@supacloud/db-zenstack`. The Management API production closure does not install or import ZenStack. `@supacloud/db` does not depend on it. |
 | Angular boundary | The injector and the `HttpClient` that calls `inject()` live at `@supacloud/app/runtime`. `@supacloud/app`, `@supacloud/app/core`, `@supacloud/app/http`, and `@supacloud/app/pending-work` stay Angular-free. |
 | Compose vs Pigsty | A `docker/self-host` boot is not recorded as a Gate 2 two-project Pigsty pass. |
-| Realtime share | The Elixir Realtime `:4000` production traffic share stays uncounted until the measurement table below is filled. |
+| Realtime share | The installer default on `:4000` is the Rust gateway. `SUPACLOUD_REALTIME_ENGINE=container` is the explicit Elixir rollback. The production traffic share on that port stays uncounted until the measurement table below is filled. |
 | Gates 2–4 and HA | Claimed only from a dated pass on a named real host, not from this document or a merged pull request. |
 
 ### Re-applying HBA pairing
@@ -317,16 +317,17 @@ the cluster role no longer receive `PGPASSWORD`, `PG_PASSWORD`, or
 `POSTGRES_PASSWORD`. Realtime error logs redact `db_password` fields and URI
 passwords. Neither change isolates the cluster roles.
 
-### Elixir Realtime :4000 traffic share
+### Realtime :4000 traffic share
 
-No repository metric counts how much production websocket traffic still enters
-the Elixir Realtime listener (upstream default port 4000). Leave the value
-`uncounted` until a real host supplies it. Any claim about that share is
-conditional on a filled row. Do not invent a percentage.
+The installer default is the Rust gateway on port 4000. Elixir starts only when
+`SUPACLOUD_REALTIME_ENGINE=container`. No repository metric counts how much
+production websocket traffic enters that listener. Leave the value `uncounted`
+until a real host supplies it. Any claim about that share is conditional on a
+filled row. Do not invent a percentage. A merged default is not a production cutover.
 
 | Measurement | Value | Host | Date | Method |
 | --- | --- | --- | --- | --- |
-| Elixir Realtime `:4000` share of production websocket traffic | uncounted | | | |
+| Realtime `:4000` share of production websocket traffic | uncounted | | | |
 
 ## Non-goals for the baseline
 

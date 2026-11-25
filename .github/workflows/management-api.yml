@@ -976,14 +976,17 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
         run: bun test tests/integration/project-mutation-lease.test.ts tests/integration/project-mutation-migration.test.ts
 
-      - name: Verify Realtime payload safety on PostgreSQL 18
+      - name: Verify the retired Realtime NOTIFY helper is absent on PostgreSQL 18
         working-directory: packages/management-api
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
         run: |
           export POSTGRES_CONTAINER="$(docker compose -f ../../docker/self-host/docker-compose.yml ps -q postgres)"
           test -n "${POSTGRES_CONTAINER}"
-          bun test tests/integration/realtime-notify-payload.test.ts
+          if grep -q "CREATE OR REPLACE FUNCTION realtime.notify_change_payload" src/db/schemas/supabase.sql; then
+            echo "realtime.notify_change_payload is still defined in the bootstrap schema" >&2
+            exit 1
+          fi
+          absent="$(docker exec -i "${POSTGRES_CONTAINER}" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -tAc "SELECT to_regprocedure('realtime.notify_change_payload(jsonb)') IS NULL")"
+          test "${absent}" = "t"
 
       - name: Apply and verify Docker PostgreSQL compatibility
         env:

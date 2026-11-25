@@ -259,7 +259,7 @@ ensure_env VICTORIALOGS_URL http://victorialogs:9428
 ensure_env S3_STORAGE_TYPE local
 ensure_env STORAGE_TYPE local
 ensure_env STORAGE_MOUNT_POINT /data/storage
-ensure_env SUPACLOUD_REALTIME_ENGINE container
+ensure_env SUPACLOUD_REALTIME_ENGINE rust
 ensure_env REALTIME_ADMIN_URL http://realtime:4000
 ensure_env REALTIME_API_SECRET "$jwt_secret"
 ensure_env SUPACLOUD_REALTIME_CONTAINER_ENV_FILE "$REALTIME_ENV_FILE"
@@ -338,14 +338,52 @@ if [[ "$SKIP_BUILD" != "true" && "$DRY_RUN" != "true" ]]; then
   podman build --pull=missing -f "$SCRIPT_DIR/caddy/Containerfile" -t localhost/supacloud-caddy:local "$SCRIPT_DIR/caddy"
 fi
 
+realtime_engine="$(read_env SUPACLOUD_REALTIME_ENGINE)"
+[[ -n "$realtime_engine" ]] || realtime_engine=rust
+
 if [[ "$DRY_RUN" != "true" || -n "$ROOT_PREFIX" ]]; then
   for unit in "$SCRIPT_DIR"/quadlet/*.container "$SCRIPT_DIR"/quadlet/*.network; do
-    install -m 0644 "$unit" "$QUADLET_DIR/$(basename "$unit")"
+    base="$(basename "$unit")"
+    # The Elixir quadlet is the explicit rollback. The default install does not
+    # copy it, so enabling the target cannot start a second server on port 4000.
+    if [[ "$base" == "supacloud-realtime.container" && "$realtime_engine" != "container" ]]; then
+      continue
+    fi
+    install -m 0644 "$unit" "$QUADLET_DIR/$base"
   done
   install -m 0644 "$SCRIPT_DIR/systemd/supacloud.target" "$SYSTEMD_DIR/supacloud.target"
+  if [[ "$realtime_engine" == "container" ]]; then
+    SYSTEMD_DIR="$SYSTEMD_DIR" QUADLET_DIR="$QUADLET_DIR" python3 - <<'PY'
+from pathlib import Path
+import os
+root = Path(os.environ["SYSTEMD_DIR"])
+quadlet = Path(os.environ["QUADLET_DIR"])
+for path in (root / "supacloud.target", quadlet / "supacloud-management-api.container"):
+    text = path.read_text(encoding="utf-8")
+    text = text.replace("supacloud-realtime-gateway.service", "supacloud-realtime.service")
+    text = "\n".join(line for line in text.splitlines() if not line.startswith("AddHost=realtime:")) + "\n"
+    path.write_text(text, encoding="utf-8")
+PY
+  else
+    install -m 0644 "$SCRIPT_DIR/systemd/supacloud-realtime-gateway.service" \
+      "$SYSTEMD_DIR/supacloud-realtime-gateway.service"
+    gateway_env="${CONFIG_DIR}/realtime-gateway.env"
+    if [[ ! -f "$gateway_env" ]]; then
+      token="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+      previous_umask="$(umask)"
+      umask 077
+      printf 'REALTIME_CONTROL_TOKEN=%s\n' "$token" > "$gateway_env"
+      umask "$previous_umask"
+      chmod 600 "$gateway_env"
+    fi
+  fi
 fi
 
 if [[ "$START" == "true" && "$DRY_RUN" != "true" ]]; then
+  if [[ "$realtime_engine" != "container" && ! -x /usr/local/bin/supacloud-realtime-gateway ]]; then
+    echo "The Rust Realtime gateway binary is missing at /usr/local/bin/supacloud-realtime-gateway. Build it before starting, or set SUPACLOUD_REALTIME_ENGINE=container to roll back to the Elixir container." >&2
+    exit 1
+  fi
   systemctl daemon-reload
   systemctl enable --now supacloud.target
 fi

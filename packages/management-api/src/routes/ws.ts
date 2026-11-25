@@ -309,8 +309,8 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
   })
   
   // Legacy path. supabase-js uses /realtime/v1/websocket, which the server
-  // intercepts before Elysia. This route is the same Elixir proxy and does
-  // not import the internal LISTEN/NOTIFY helper.
+  // intercepts before Elysia. This route is the same gateway proxy and does
+  // not attach a second change stream.
   .ws("/realtime/v1/websocket", {
     async open(ws) {
         const state = realtimeSocketState(ws);
@@ -350,8 +350,8 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
             const { config } = await import("../config");
             if (state.closed) return;
 
-            // Same Elixir upstream as the published /realtime/v1 socket. This
-            // legacy /ws route does not attach LISTEN/NOTIFY.
+            // Same Realtime gateway as the published /realtime/v1 socket. This
+            // legacy /ws route has no separate change stream.
             const tenantHost = `${ref}.api.${config.baseDomain}`;
             const targetUrl = publicRealtimeUpstream(
                 config.realtimeAdminUrl,
@@ -369,8 +369,8 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
 
             state.upstream = upstream;
 
-            // Elixir frames are forwarded unchanged. Do not also emit Bun
-            // LISTEN/NOTIFY events on this socket.
+            // Upstream frames are forwarded unchanged. Do not also emit a second
+            // change stream on this socket.
             upstream.onmessage = (event) => {
                 ws.send(event.data);
             };
@@ -420,7 +420,7 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
         const textMessage = typeof rawMessage === "string" ? rawMessage : JSON.stringify(rawMessage);
         if (textMessage === undefined || Buffer.byteLength(textMessage) > MAX_BROADCAST_SIZE) return;
 
-        // Elixir owns channel state. Reply locally only while the upstream
+        // The upstream gateway owns channel state. Reply locally only while the
         // socket is not open, so a slow connect does not time the client out.
         try {
             const parsed = parsePhoenixMessage(rawMessage);
@@ -434,7 +434,7 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
                 return;
             }
         } catch {
-            // Unparsed frames are still forwarded to Elixir.
+            // Unparsed frames are still forwarded to the upstream gateway.
         }
 
         if (!upstream) return;

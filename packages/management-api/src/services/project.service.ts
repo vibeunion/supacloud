@@ -528,7 +528,7 @@ export class ProjectService {
     ] = await Promise.all([
       checkService(`supacloud-pgrst@${ref}`),
       checkService(`supacloud-gotrue@${ref}`),
-      checkService("supacloud-realtime"),
+      checkService(config.realtimeEngine === "container" ? "supacloud-realtime" : "supacloud-realtime-gateway"),
       checkService("supacloud-caddy"),
       checkContainer("supacloud-realtime"),
     ]);
@@ -537,8 +537,8 @@ export class ProjectService {
 
     if (realtimeSystemd === "ACTIVE_HEALTHY") {
       realtimeStatus = "ACTIVE_HEALTHY";
-    } else {
-      // Fall back to the global Realtime container, but only when the public gateway is healthy.
+    } else if (config.realtimeEngine === "container") {
+      // Elixir rollback only. The Rust gateway does not report a leftover container as healthy.
       if (gatewaySystemd === "ACTIVE_HEALTHY") {
         if (realtimeDocker === "ACTIVE_HEALTHY") {
           const { realtimeService } = await import("./realtime.service");

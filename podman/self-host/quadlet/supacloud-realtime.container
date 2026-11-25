@@ -1,6 +1,6 @@
 [Unit]
 PartOf=supacloud.target supacloud-postgres.service
-Description=SupaCloud Realtime
+Description=SupaCloud Realtime (Elixir rollback; installed only when SUPACLOUD_REALTIME_ENGINE=container)
 Requires=supacloud-postgres.service
 After=supacloud-postgres.service
 

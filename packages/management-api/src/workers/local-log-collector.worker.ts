@@ -10,6 +10,7 @@ const JOURNAL_UNITS = [
   "supacloud-edge-runtime.service",
   "supacloud-pgredis-runtime.service",
   "supacloud-realtime.service",
+  "supacloud-realtime-gateway.service",
   "patroni.service",
   "supacloud-gotrue@*.service",
   "supacloud-pgrst@*.service",

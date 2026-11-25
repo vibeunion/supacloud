@@ -27,7 +27,7 @@ verified GoTrue JWT
 
 ZenStack row policy is the model adapter. It does not replace `GRANT` or RLS.
 The command ledger and the tenant bootstrap ledger stay separate. Management
-API, GoTrue, and Elixir Realtime are unchanged.
+API, GoTrue, and the Realtime gateway are outside this catalog.
 
 ## Public GraphQL entry
 

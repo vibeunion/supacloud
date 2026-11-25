@@ -409,10 +409,10 @@ fn the_control_api_reaches_every_subscriber() {
 }
 
 #[test]
-fn postgres_changes_subscriptions_require_a_privileged_role() {
-    // Documented behaviour: per-tenant RLS filtering for CDC is not implemented,
-    // so an `authenticated` client asking for postgres_changes must be refused
-    // rather than silently receiving another tenant's rows.
+fn postgres_changes_without_a_stored_subscription_is_refused() {
+    // There is no tenant database behind this registration, so the join cannot
+    // insert `realtime.subscription`. That must be an error. Accepting it would
+    // deliver decoded WAL without `realtime.apply_rls`.
     let server = Server::start();
     server.register_tenant();
     let mut socket = server.socket(&token("authenticated"), TENANT);
@@ -425,13 +425,13 @@ fn postgres_changes_subscriptions_require_a_privileged_role() {
         .expect("the join should be answered");
     assert_eq!(
         reply[4]["status"], "error",
-        "an unprivileged postgres_changes join must be refused: {reply}"
+        "a postgres_changes join without a stored subscription must be refused: {reply}"
     );
     let reason = reply[4]["response"]["reason"]
         .as_str()
         .unwrap_or_else(|| panic!("the refusal should carry a reason: {reply}"));
     assert!(
-        reason.contains("postgres_changes requires service_role"),
+        reason.contains("postgres_changes subscription was not stored"),
         "unexpected refusal reason: {reason}"
     );
 }

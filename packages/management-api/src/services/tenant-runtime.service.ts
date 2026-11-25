@@ -2907,7 +2907,10 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
 
     /** Check Realtime health: prefer systemd, then container HTTP healthcheck fallback */
     private async checkRealtimeHealth(): Promise<string> {
-        const systemdResult = await this.checkSystemService("supacloud-realtime");
+        const realtimeUnit = config.realtimeEngine === "container"
+            ? "supacloud-realtime"
+            : "supacloud-realtime-gateway";
+        const systemdResult = await this.checkSystemService(realtimeUnit);
         if (systemdResult === "ACTIVE_HEALTHY") return "ACTIVE_HEALTHY";
 
         try {
@@ -2941,13 +2944,13 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
             ? [
                 { id: "db", name: "db", unit: "patroni" },
                 { id: "auth", name: "auth", unit: `supacloud-gotrue@${authRuntimeRef}` },
-                { id: "realtime", name: "realtime", unit: "supacloud-realtime", container: "supacloud-realtime" },
+                { id: "realtime", name: "realtime", unit: config.realtimeEngine === "container" ? "supacloud-realtime" : "supacloud-realtime-gateway", container: config.realtimeEngine === "container" ? "supacloud-realtime" : undefined },
                 { id: "storage", name: "storage", unit: "supacloud-storage" },
             ]
             : [
                 { id: "postgresql", name: "PostgreSQL", unit: "patroni" },
                 { id: "gotrue", name: "GoTrue", unit: `supacloud-gotrue@${authRuntimeRef}` },
-                { id: "realtime", name: "Realtime", unit: "supacloud-realtime", container: "supacloud-realtime" },
+                { id: "realtime", name: "Realtime", unit: config.realtimeEngine === "container" ? "supacloud-realtime" : "supacloud-realtime-gateway", container: config.realtimeEngine === "container" ? "supacloud-realtime" : undefined },
                 { id: "storage", name: "Storage", unit: "supacloud-storage" },
                 {
                     id: "caddy",

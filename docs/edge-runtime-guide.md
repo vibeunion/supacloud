@@ -440,9 +440,9 @@ Browser websocket traffic should enter through the Management API first:
 
 - public route: `/realtime/v1/websocket`
 - upstream owner: Management API websocket proxy on `:9090`
-- Realtime container remains the internal upstream
+- internal upstream: the Rust Realtime gateway on `:4000` (`SUPACLOUD_REALTIME_ENGINE=container` is the explicit Elixir rollback)
 
-Do not route browser websocket traffic straight from Caddy to the Elixir Realtime container's `/socket` path. That older topology is prone to:
+Do not route browser websocket traffic straight from Caddy to the Realtime process's `/socket` path. That older topology is prone to:
 
 - tenant host/path mismatches
 - wrong upstream rewrite behavior

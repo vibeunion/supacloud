@@ -266,6 +266,14 @@ impl TenantRegistry {
         serde_json::from_slice::<JwtClaims>(&payload_bytes).ok()
     }
 
+    /// Verify HS256 JWT and return the payload object `realtime.subscription.claims` stores.
+    pub fn verify_jwt_payload(&self, token: &str, tenant_secret: Option<&str>) -> Option<Value> {
+        self.verify_jwt(token, tenant_secret)?;
+        let payload = token.split('.').nth(1)?;
+        let payload_bytes = URL_SAFE_NO_PAD.decode(payload).ok()?;
+        serde_json::from_slice::<Value>(&payload_bytes).ok()
+    }
+
     /// Verify HS256 JWT using tenant secret or global secret
     pub fn verify_jwt(&self, token: &str, tenant_secret: Option<&str>) -> Option<JwtClaims> {
         let parts: Vec<&str> = token.split('.').collect();

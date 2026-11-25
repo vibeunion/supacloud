@@ -7,13 +7,11 @@
 //! second one: a table in the `supabase_realtime` publication produces exactly
 //! the rows both consumers would see.
 //!
-//! `realtime.list_changes` additionally routes every change through
-//! `realtime.apply_rls` and drops the ones whose `subscription_ids` are empty,
-//! because upstream keeps subscriptions in the tenant's `realtime.subscription`
-//! table. This gateway keeps its subscriptions in memory, per socket, so that
-//! indirection would have nothing to match against. Until subscriptions become
-//! tenant rows, `postgres_changes` stays `service_role`-only and RLS is not
-//! applied here; that refusal lives in `server.rs`.
+//! `realtime.list_changes` is what the poller calls. It decodes the same slot
+//! and then routes every change through `realtime.apply_rls`, which keeps a
+//! change only when a row in `realtime.subscription` matches it. Subscriptions
+//! are written there on join and removed on leave. `change_from_wal` remains
+//! the shape reference for a raw wal2json row; it is not the delivery path.
 
 use crate::broadcast::PostgresChangeEvent;
 use serde_json::{json, Map, Value};
@@ -105,6 +103,9 @@ pub(crate) fn add_tables<'a>(tables: impl IntoIterator<Item = (&'a str, &'a str)
 ///
 /// `None` means "nothing to deliver": transaction boundaries, messages, and any
 /// action the protocol does not model.
+/// Shape of one raw wal2json row. Delivery goes through `realtime.apply_rls`,
+/// so this decoder stays for the shape checks and is not called on the poll path.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn change_from_wal(wal: &Value) -> Option<PostgresChangeEvent> {
     let action = wal.get("action")?.as_str()?;
     let change_type = match action {
@@ -161,6 +162,7 @@ pub(crate) fn change_from_wal(wal: &Value) -> Option<PostgresChangeEvent> {
     })
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn record_from_columns(columns: &[Value]) -> Option<Value> {
     let mut record = Map::new();
     for column in columns {
@@ -173,6 +175,7 @@ fn record_from_columns(columns: &[Value]) -> Option<Value> {
     Some(Value::Object(record))
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn column_metadata(columns: &[Value]) -> Value {
     Value::Array(
         columns
@@ -189,6 +192,7 @@ fn column_metadata(columns: &[Value]) -> Value {
 
 /// `wal2json` prints `2026-01-01 00:00:00.123456+08`; the wire contract is
 /// ISO 8601, so the date and time need their `T` and the offset its minutes.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn normalize_timestamp(raw: &str) -> String {
     let mut timestamp = raw.replacen(' ', "T", 1);
     let bytes = timestamp.as_bytes();

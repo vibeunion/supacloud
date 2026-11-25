@@ -71,13 +71,17 @@ export function assertRealtimeSecretAlignment(input: {
     }
 }
 
-export function validateRealtimeSecretConfiguration(containerEnvFile = config.realtimeContainerEnvFile): void {
+export function validateRealtimeSecretConfiguration(
+    containerEnvFile = config.realtimeContainerEnvFile,
+    engine = config.realtimeEngine,
+): void {
     const containerApiSecret = readEnvFileValue(containerEnvFile, "API_JWT_SECRET");
     assertRealtimeSecretAlignment({
         canonicalSecret: config.jwtSecret,
         configuredApiSecret: config.realtimeApiSecret,
         containerApiSecret,
-        requireContainerApiSecret: true,
+        // The Elixir container is the explicit rollback. The Rust gateway does not read this file.
+        requireContainerApiSecret: engine === "container",
     });
 }
 

@@ -7,12 +7,12 @@
 //! uncomfortable for the component whose failure mode is another tenant's rows
 //! arriving on a socket.
 //!
-//! The gateway consumes the tenant's `wal2json` replication slot for the
-//! `supabase_realtime` publication — the same slot and the same decoding options
-//! the official Realtime `realtime.list_changes.sql` uses. The fixture therefore
-//! starts a cluster with `wal_level=logical`, creates the publication and a
-//! table, registers a tenant that points at it, subscribes over the socket as
-//! `service_role`, and writes rows.
+//! The gateway consumes the tenant's `wal2json` replication slot by calling
+//! `realtime.list_changes`, which applies `realtime.apply_rls` to the
+//! subscriptions stored in `realtime.subscription`. The fixture therefore
+//! installs the pinned Realtime 2.150.0 tenant schema, starts a cluster with
+//! `wal_level=logical`, creates the publication and a table, registers a tenant,
+//! subscribes over the socket, and writes rows.
 //!
 //! Requires the PostgreSQL server binaries **and** the `wal2json` output plugin.
 //! The binaries are found via `POSTGRES_BIN`, then `pg_config --bindir`, then the
@@ -180,6 +180,33 @@ impl Postgres {
             .unwrap_or_else(|error| panic!("psql failed in {database} ({sql}): {error}"))
     }
 
+    fn psql_file(&self, database: &str, path: &Path) {
+        let output = Command::new(self.bin_dir.join("psql"))
+            .args([
+                "-h",
+                "127.0.0.1",
+                "-p",
+                &self.port.to_string(),
+                "-U",
+                "postgres",
+                "-d",
+                database,
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-f",
+                path.to_str().expect("utf-8 schema path"),
+            ])
+            .output()
+            .unwrap_or_else(|error| panic!("psql did not run for {}: {error}", path.display()));
+        if !output.status.success() {
+            panic!(
+                "psql failed applying {} in {database}: {}",
+                path.display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+    }
+
     fn try_psql(&self, database: &str, sql: &str) -> Result<String, String> {
         let output = Command::new(self.bin_dir.join("psql"))
             .args([
@@ -209,12 +236,52 @@ impl Postgres {
         self.psql("postgres", &format!(r#"CREATE DATABASE "{name}""#));
     }
 
+    /// The pinned Realtime 2.150.0 tenant schema (`realtime.subscription`,
+    /// `realtime.apply_rls`, `realtime.list_changes`). The gateway refuses a
+    /// `postgres_changes` join until those objects exist, and a missing file
+    /// fails the fixture.
+    fn install_realtime_schema(&self, database: &str) {
+        self.psql(
+            database,
+            "DO $$ BEGIN
+               IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_admin') THEN
+                 CREATE ROLE supabase_admin NOLOGIN;
+               END IF;
+               IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_realtime_admin') THEN
+                 CREATE ROLE supabase_realtime_admin NOLOGIN;
+               END IF;
+               IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+                 CREATE ROLE anon NOLOGIN NOINHERIT;
+               END IF;
+               IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+                 CREATE ROLE authenticated NOLOGIN NOINHERIT;
+               END IF;
+               IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+                 CREATE ROLE service_role NOLOGIN NOINHERIT BYPASSRLS;
+               END IF;
+             END $$;
+             GRANT supabase_realtime_admin TO supabase_admin WITH INHERIT TRUE, SET TRUE;
+             GRANT anon, authenticated, service_role TO supabase_admin WITH INHERIT FALSE, SET TRUE;
+             GRANT supabase_admin, supabase_realtime_admin, anon, authenticated, service_role TO postgres",
+        );
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/realtime-tenant-schema");
+        let order = std::fs::read_to_string(root.join("order.txt"))
+            .expect("the pinned Realtime schema order should be present");
+        for relative in order.lines().map(str::trim).filter(|line| !line.is_empty()) {
+            self.psql_file(database, &root.join(relative));
+        }
+    }
+
     /// The two tables every scenario uses: one published, one deliberately not.
     fn create_tables(&self, database: &str) {
+        self.install_realtime_schema(database);
         self.psql(
             database,
             "CREATE TABLE todos (id serial primary key, task text, done boolean); \
-             CREATE TABLE notes (id serial primary key, body text)",
+             CREATE TABLE notes (id serial primary key, body text); \
+             GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role; \
+             GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role",
         );
     }
 
@@ -551,7 +618,8 @@ impl Socket {
             .expect("the subscribed client never received the event")
     }
 
-    /// Subscribes as `service_role`, which `postgres_changes` requires.
+    /// Subscribes and requires the join to be accepted. A refused join means the
+    /// subscription row was not stored, so nothing may be delivered.
     fn subscribe(&mut self, topic: &str, subscription: &str) {
         self.send_text(&format!(
             r#"[null,"1","{topic}","phx_join",{{"config":{{"postgres_changes":[{subscription}]}}}}]"#
@@ -561,7 +629,7 @@ impl Socket {
             .expect("the join should be answered");
         assert_eq!(
             reply[4]["status"], "ok",
-            "a service_role CDC join should be accepted: {reply}"
+            "a CDC join should be accepted: {reply}"
         );
     }
 }
@@ -577,10 +645,14 @@ fn free_port() -> u16 {
 }
 
 fn token(role: &str) -> String {
+    token_for(role, "fixture-user")
+}
+
+fn token_for(role: &str, sub: &str) -> String {
     let header =
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"alg":"HS256","typ":"JWT"}"#);
     let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(format!(
-        r#"{{"role":"{role}","sub":"fixture-user","exp":{}}}"#,
+        r#"{{"role":"{role}","sub":"{sub}","exp":{}}}"#,
         now_seconds() + 600
     ));
     let signing_input = format!("{header}.{payload}");
@@ -631,9 +703,9 @@ fn an_insert_reaches_a_service_role_subscriber() {
     assert_eq!(
         delivered[4]["data"]["columns"],
         serde_json::json!([
-            {"name": "id", "type": "integer"},
+            {"name": "id", "type": "int4"},
             {"name": "task", "type": "text"},
-            {"name": "done", "type": "boolean"}
+            {"name": "done", "type": "bool"}
         ]),
         "the client needs the column list to build its typed rows"
     );
@@ -646,8 +718,8 @@ fn an_insert_reaches_a_service_role_subscriber() {
         .as_str()
         .expect("a change carries its commit timestamp");
     assert!(
-        timestamp.contains('T') && timestamp.ends_with("+00:00"),
-        "the commit timestamp should be ISO 8601 in the cluster time zone: {timestamp}"
+        timestamp.contains('T') && timestamp.ends_with('Z'),
+        "commit_timestamp should be the UTC value realtime.apply_rls emits: {timestamp}"
     );
 }
 
@@ -693,10 +765,9 @@ fn updates_and_deletes_carry_the_row_identity() {
     postgres.psql("postgres", &format!("DELETE FROM todos WHERE id = {id}"));
     let deleted = socket.expect_event(is_postgres_change);
     assert_eq!(deleted[4]["data"]["type"], "DELETE");
-    assert_eq!(
-        deleted[4]["data"]["record"],
-        serde_json::json!({}),
-        "a delete has no new row"
+    assert!(
+        deleted[4]["data"]["record"].is_null(),
+        "realtime.apply_rls omits the new row on DELETE: {deleted}"
     );
     assert_eq!(
         deleted[4]["data"]["old_record"]["id"], id,
@@ -819,4 +890,100 @@ fn one_tenant_database_does_not_reach_another_tenant() {
 
 fn is_postgres_change(frame: &serde_json::Value) -> bool {
     frame[3] == "postgres_changes"
+}
+
+#[test]
+fn row_level_security_hides_a_row_from_another_role() {
+    let Some(postgres) = Postgres::start() else {
+        return;
+    };
+    postgres.create_tables("postgres");
+    postgres.psql(
+        "postgres",
+        "CREATE TABLE secrets (
+            id serial primary key,
+            body text,
+            owner_id text,
+            visibility text
+         );
+         ALTER TABLE secrets ENABLE ROW LEVEL SECURITY;
+         GRANT SELECT ON secrets TO anon, authenticated, service_role;
+         CREATE POLICY anon_sees_public ON secrets
+           FOR SELECT TO anon
+           USING (visibility = 'public');
+         CREATE POLICY authenticated_sees_own ON secrets
+           FOR SELECT TO authenticated
+           USING (owner_id = current_setting('request.jwt.claims', true)::json->>'sub')",
+    );
+    postgres.publish("postgres", &["secrets"]);
+    let server = Server::start();
+    server.register_tenant("cdc-rls", &postgres);
+    postgres.wait_for_slot("postgres");
+
+    let mut alice = server.socket(&token_for("authenticated", "alice"), "cdc-rls");
+    alice.subscribe(
+        "realtime:public:secrets",
+        r#"{"id":"alice","event":"INSERT","schema":"public","table":"secrets"}"#,
+    );
+    let mut bob = server.socket(&token_for("authenticated", "bob"), "cdc-rls");
+    bob.subscribe(
+        "realtime:public:secrets",
+        r#"{"id":"bob","event":"INSERT","schema":"public","table":"secrets"}"#,
+    );
+    let mut anon = server.socket(&token_for("anon", "anon-user"), "cdc-rls");
+    anon.subscribe(
+        "realtime:public:secrets",
+        r#"{"id":"anon","event":"INSERT","schema":"public","table":"secrets"}"#,
+    );
+    let mut service = server.socket(&token("service_role"), "cdc-rls");
+    service.subscribe(
+        "realtime:public:secrets",
+        r#"{"id":"service","event":"INSERT","schema":"public","table":"secrets"}"#,
+    );
+
+    postgres.psql(
+        "postgres",
+        "INSERT INTO secrets (body, owner_id, visibility) VALUES ('alice-private', 'alice', 'private')",
+    );
+    let alice_private = alice.expect_event(is_postgres_change);
+    assert_eq!(alice_private[4]["data"]["record"]["body"], "alice-private");
+    assert_eq!(alice_private[4]["ids"], serde_json::json!(["alice"]));
+    let service_private = service.expect_event(is_postgres_change);
+    assert_eq!(
+        service_private[4]["data"]["record"]["body"],
+        "alice-private"
+    );
+    assert_eq!(service_private[4]["ids"], serde_json::json!(["service"]));
+
+    bob.set_read_timeout(Duration::from_millis(400));
+    anon.set_read_timeout(Duration::from_millis(400));
+    assert!(
+        bob.read_frame(is_postgres_change).is_none(),
+        "authenticated bob saw a row owned by alice"
+    );
+    assert!(
+        anon.read_frame(is_postgres_change).is_none(),
+        "anon saw a private row"
+    );
+
+    bob.set_read_timeout(FRAME_TIMEOUT);
+    anon.set_read_timeout(FRAME_TIMEOUT);
+    alice.set_read_timeout(FRAME_TIMEOUT);
+    service.set_read_timeout(FRAME_TIMEOUT);
+    postgres.psql(
+        "postgres",
+        "INSERT INTO secrets (body, owner_id, visibility) VALUES ('posted', 'alice', 'public')",
+    );
+    let alice_public = alice.expect_event(is_postgres_change);
+    assert_eq!(alice_public[4]["data"]["record"]["body"], "posted");
+    let anon_public = anon.expect_event(is_postgres_change);
+    assert_eq!(anon_public[4]["data"]["record"]["body"], "posted");
+    assert_eq!(anon_public[4]["ids"], serde_json::json!(["anon"]));
+    let service_public = service.expect_event(is_postgres_change);
+    assert_eq!(service_public[4]["ids"], serde_json::json!(["service"]));
+    bob.set_read_timeout(Duration::from_millis(400));
+    assert!(
+        bob.read_frame(is_postgres_change).is_none(),
+        "authenticated bob saw alice's public row"
+    );
 }
