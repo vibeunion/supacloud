@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.141.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.140.0...management-api-v0.141.0) (2026-11-25)
+
+
+### Features
+
+* **realtime:** default to the Rust gateway and filter CDC with apply_rls ([#2817](https://github.com/vibeunion/supacloud/issues/2817)) ([832c452](https://github.com/vibeunion/supacloud/commit/832c4526a420fc14761f410ff122ff03215006d6))
+
+
+### Bug Fixes
+
+* **realtime:** install the pinned tenant schema for the Rust gateway ([#2822](https://github.com/vibeunion/supacloud/issues/2822)) ([cb1c986](https://github.com/vibeunion/supacloud/commit/cb1c98629aa06a97efefe8b50fd0122cd9b0a1af))
+* **realtime:** share the pinned 2.150.0 tenant schema artifact ([#2825](https://github.com/vibeunion/supacloud/issues/2825)) ([87fbe49](https://github.com/vibeunion/supacloud/commit/87fbe498a6f3d9718916d92ad922463cc2451f05))
+
 ## [0.140.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.139.1...management-api-v0.140.0) (2026-11-24)
 
 
