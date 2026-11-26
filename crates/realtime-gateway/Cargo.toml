@@ -20,3 +20,4 @@ parking_lot = "0.12"
 thiserror = "2"
 uuid = { version = "1", features = ["v4", "fast-rng"] }
 supacloud-runtime-core = { path = "../runtime-core" }
+jsonwebtoken = { version = "12", default-features = false, features = ["rust_crypto"] }

@@ -39,6 +39,7 @@ pub struct ConnectionState {
     pub id: String,
     pub tenant_id: String,
     pub role: String,
+    pub claims: Value,
     pub tx: mpsc::UnboundedSender<PhoenixV2Message>,
     pub subscriptions: HashMap<String, TopicSubscriptionConfig>,
 }
@@ -92,11 +93,29 @@ impl ChannelHub {
         let state = ConnectionState {
             id: id.clone(),
             tenant_id,
-            role,
+            role: role.clone(),
+            claims: json!({ "role": role }),
             tx,
             subscriptions: HashMap::new(),
         };
         self.connections.write().insert(id, state);
+    }
+
+    /// Replace the connection auth after an `access_token` event. Later joins,
+    /// and any existing RLS subscription rows updated by the caller, use these
+    /// claims.
+    pub fn update_connection_auth(&self, connection_id: &str, role: String, claims: Value) {
+        if let Some(conn) = self.connections.write().get_mut(connection_id) {
+            conn.role = role;
+            conn.claims = claims;
+        }
+    }
+
+    pub fn connection_claims(&self, connection_id: &str) -> Option<Value> {
+        self.connections
+            .read()
+            .get(connection_id)
+            .map(|conn| conn.claims.clone())
     }
 
     /// Subscribe connection to a topic
@@ -399,6 +418,32 @@ mod tests {
         let received = rx2.try_recv().unwrap();
         assert_eq!(received.event, "broadcast");
         assert_eq!(received.payload["hello"], "world");
+    }
+
+    #[tokio::test]
+    async fn access_token_replaces_connection_claims() {
+        let hub = ChannelHub::new();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        hub.add_connection("c1".into(), "tenant1".into(), "anon".into(), tx);
+        assert_eq!(
+            hub.connection_claims("c1")
+                .unwrap()
+                .get("role")
+                .and_then(Value::as_str),
+            Some("anon")
+        );
+
+        hub.update_connection_auth(
+            "c1",
+            "authenticated".into(),
+            json!({"role": "authenticated", "sub": "user-1"}),
+        );
+        let claims = hub.connection_claims("c1").unwrap();
+        assert_eq!(
+            claims.get("role").and_then(Value::as_str),
+            Some("authenticated")
+        );
+        assert_eq!(claims.get("sub").and_then(Value::as_str), Some("user-1"));
     }
 
     #[tokio::test]

@@ -102,6 +102,9 @@ DO UPDATE SET claims = excluded.claims, created_at = now()";
 const DELETE_SQL: &str = "\
 DELETE FROM realtime.subscription WHERE subscription_id::text = ANY($1::text[])";
 
+const UPDATE_CLAIMS_SQL: &str = "\
+UPDATE realtime.subscription SET claims = $1 WHERE subscription_id::text = ANY($2::text[])";
+
 pub fn change_spec_from_config(
     item: &Map<String, Value>,
     index: usize,
@@ -390,6 +393,30 @@ pub async fn store_subscriptions(
     .await;
     driver.abort();
     stored
+}
+
+pub async fn update_claims(
+    tenant: &TenantConfig,
+    db_ids: &[String],
+    claims: &Value,
+) -> Result<(), String> {
+    if db_ids.is_empty() {
+        return Ok(());
+    }
+    let (client, connection) = connection_config(tenant)
+        .connect(tokio_postgres::NoTls)
+        .await
+        .map_err(|error| format!("failed to update realtime.subscription claims: {error}"))?;
+    let driver = tokio::spawn(async move {
+        let _ = connection.await;
+    });
+    let updated = client
+        .execute(UPDATE_CLAIMS_SQL, &[&Json(claims), &db_ids])
+        .await
+        .map(|_| ())
+        .map_err(|error| format!("failed to update realtime.subscription claims: {error}"));
+    driver.abort();
+    updated
 }
 
 pub async fn delete_subscriptions(tenant: &TenantConfig, db_ids: &[String]) -> Result<(), String> {
