@@ -282,33 +282,30 @@ describe("Realtime systemd deployment", () => {
 });
 
 describe("Management API CI Realtime readiness probe", () => {
-  test("signs an admin JWT and uses the v2.111+ healthcheck route", () => {
+  test("waits for the Rust Realtime gateway healthcheck", () => {
     const workflow = readFileSync(join(repoRoot, ".github/workflows/management-api.yml"), "utf8");
     const waitStep = workflow.slice(
-      workflow.indexOf("Waiting for Realtime container to be ready"),
+      workflow.indexOf("Waiting for the Rust Realtime gateway"),
       workflow.indexOf('echo "Waiting for MinIO container to be ready..."'),
     );
 
-    // v2.111+ requires a signed HS256 JWT, not the raw JWT_SECRET string.
-    expect(waitStep).toContain("REALTIME_ADMIN_TOKEN");
-    expect(waitStep).toContain("createHmac(\"sha256\",s)");
-    expect(waitStep).toContain("Authorization: Bearer ${REALTIME_ADMIN_TOKEN}");
-
-    // /health returns 404 on v2.111+; the basic health fallback uses /healthcheck.
     expect(waitStep).toContain("http://127.0.0.1:4000/healthcheck");
-
-    // Guard against regressing to the raw-secret probe that returns 403.
+    expect(waitStep).toContain("supacloud-realtime-gateway/rust");
+    expect(waitStep).not.toContain("job.services.realtime");
+    expect(waitStep).not.toContain("/api/tenants/realtime-dev/health");
     expect(waitStep).not.toContain("Authorization: Bearer ${JWT_SECRET}");
     expect(waitStep).not.toContain("http://127.0.0.1:4000/health\"");
   });
 
-  test("starts the API with an explicit matching Realtime container secret fixture", () => {
+  test("starts the API against the Rust gateway and keeps the rollback secret fixture", () => {
     const workflow = readFileSync(join(repoRoot, ".github/workflows/management-api.yml"), "utf8");
     const launchStep = workflow.slice(
       workflow.indexOf("Launch API & Execute Full Defenses"),
-      workflow.indexOf("Stop containers"),
+      workflow.indexOf("Stop patched Postrust"),
     );
 
+    expect(launchStep).toContain("SUPACLOUD_REALTIME_ENGINE: rust");
+    expect(launchStep).toContain("REALTIME_ADMIN_URL: http://127.0.0.1:4000");
     expect(launchStep).toContain("SUPACLOUD_REALTIME_CONTAINER_ENV_FILE");
     expect(launchStep).toContain("API_JWT_SECRET=%s");
     expect(launchStep).toContain("TEST_FIXED_JWT_SECRET");

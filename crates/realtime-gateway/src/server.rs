@@ -294,8 +294,9 @@ async fn ws_handler(
         claims["role"] = json!(role);
     }
     let tenant_id = tenant.id;
+    let client_vsn = query.vsn;
 
-    ws.on_upgrade(move |socket| handle_socket(socket, state, tenant_id, role, claims))
+    ws.on_upgrade(move |socket| handle_socket(socket, state, tenant_id, role, claims, client_vsn))
 }
 
 async fn handle_socket(
@@ -304,6 +305,7 @@ async fn handle_socket(
     tenant_id: String,
     role: String,
     claims: Value,
+    client_vsn: String,
 ) {
     let conn_id = next_connection_id();
     let (mut ws_sender, mut ws_receiver) = socket.split();
@@ -312,13 +314,13 @@ async fn handle_socket(
     state
         .hub
         .add_connection(conn_id.clone(), tenant_id.clone(), role.clone(), tx);
-    info!(conn_id = %conn_id, tenant = %tenant_id, "WebSocket client connected");
+    info!(conn_id = %conn_id, tenant = %tenant_id, vsn = %client_vsn, "WebSocket client connected");
 
     // Task to send messages from channel to WebSocket client
     let conn_id_clone = conn_id.clone();
     let send_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
-            match msg.encode() {
+            match msg.encode_for_client(&client_vsn) {
                 Ok(text) => {
                     if let Err(e) = ws_sender.send(Message::Text(text.into())).await {
                         debug!(conn_id = %conn_id_clone, error = %e, "Failed to send WS message");
@@ -339,7 +341,7 @@ async fn handle_socket(
         match msg {
             Message::Text(text) => {
                 let text_str = text.as_str();
-                match PhoenixV2Message::decode(text_str) {
+                match PhoenixV2Message::decode_client_frame(text_str) {
                     Ok(parsed) => {
                         handle_client_message(
                             &state,

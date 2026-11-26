@@ -135,6 +135,69 @@ impl PhoenixV2Message {
     pub fn decode(raw: &str) -> Result<Self, ProtocolError> {
         serde_json::from_str(raw).map_err(|_| ProtocolError::InvalidFrameFormat)
     }
+
+    /// Decode the frame a supabase-js client actually sends.
+    ///
+    /// `vsn=2.0.0` is a 5-element array. `vsn=1.0.0` is a JSON object
+    /// `{join_ref, ref, topic, event, payload}`. Official compliance runs both.
+    pub fn decode_client_frame(raw: &str) -> Result<Self, ProtocolError> {
+        let value: Value =
+            serde_json::from_str(raw).map_err(|_| ProtocolError::InvalidFrameFormat)?;
+        if value.is_array() {
+            return serde_json::from_value(value).map_err(|_| ProtocolError::InvalidFrameFormat);
+        }
+        if !value.is_object() {
+            return Err(ProtocolError::InvalidFrameFormat);
+        }
+        let topic = value
+            .get("topic")
+            .and_then(Value::as_str)
+            .ok_or(ProtocolError::InvalidFrameFormat)?
+            .to_string();
+        let event = value
+            .get("event")
+            .and_then(Value::as_str)
+            .ok_or(ProtocolError::InvalidFrameFormat)?
+            .to_string();
+        let payload = value
+            .get("payload")
+            .cloned()
+            .unwrap_or_else(|| Value::Object(Default::default()));
+        Ok(Self {
+            join_ref: optional_frame_ref(value.get("join_ref")),
+            reference: optional_frame_ref(value.get("ref")),
+            topic,
+            event,
+            payload,
+        })
+    }
+
+    /// Encode for the serializer selected by the client's `vsn` query parameter.
+    pub fn encode_for_client(&self, vsn: &str) -> Result<String, serde_json::Error> {
+        if client_uses_phoenix_v2(vsn) {
+            self.encode()
+        } else {
+            serde_json::to_string(&serde_json::json!({
+                "join_ref": self.join_ref,
+                "ref": self.reference,
+                "topic": self.topic,
+                "event": self.event,
+                "payload": self.payload,
+            }))
+        }
+    }
+}
+
+fn client_uses_phoenix_v2(vsn: &str) -> bool {
+    vsn.split('.').next() == Some("2")
+}
+
+fn optional_frame_ref(value: Option<&Value>) -> Option<String> {
+    match value {
+        None | Some(Value::Null) => None,
+        Some(Value::String(text)) => Some(text.clone()),
+        Some(other) => Some(other.to_string()),
+    }
 }
 
 impl Serialize for PhoenixV2Message {
@@ -237,6 +300,34 @@ mod tests {
         assert_eq!(decoded.reference, None);
         assert_eq!(decoded.topic, "phoenix");
         assert_eq!(decoded.event, "heartbeat");
+    }
+
+    #[test]
+    fn test_phoenix_v1_object_round_trip() {
+        let raw = r#"{"join_ref":"1","ref":"8","topic":"realtime:room","event":"broadcast","payload":{"event":"test-event","payload":{"message":"test"}}}"#;
+        let decoded = PhoenixV2Message::decode_client_frame(raw).unwrap();
+        assert_eq!(decoded.join_ref.as_deref(), Some("1"));
+        assert_eq!(decoded.reference.as_deref(), Some("8"));
+        assert_eq!(decoded.topic, "realtime:room");
+        assert_eq!(decoded.event, "broadcast");
+
+        let encoded = decoded.encode_for_client("1.0.0").unwrap();
+        let echoed: Value = serde_json::from_str(&encoded).unwrap();
+        assert!(echoed.is_object());
+        assert_eq!(echoed["event"], "broadcast");
+        assert_eq!(echoed["ref"], "8");
+        assert!(PhoenixV2Message::decode_client_frame(&encoded).is_ok());
+    }
+
+    #[test]
+    fn test_v2_client_still_uses_the_array_serializer() {
+        let msg = PhoenixV2Message::reply(None, Some("hb".to_string()), "phoenix", "ok", json!({}));
+        let encoded = msg.encode_for_client("2.0.0").unwrap();
+        assert!(encoded.starts_with('['));
+        assert_eq!(
+            PhoenixV2Message::decode_client_frame(&encoded).unwrap(),
+            msg
+        );
     }
 
     #[test]
