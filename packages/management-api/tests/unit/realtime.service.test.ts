@@ -219,6 +219,9 @@ describe("RealtimeService tenant payloads", () => {
       'import { buildRealtimeTenantPayload } from "../src/services/realtime-tenant-payload"',
     );
     expect(reconcileSource).toContain("return buildRealtimeTenantPayload({");
+    expect(reconcileSource).toContain("revealProjectSecrets(rawProject)");
+    expect(reconcileSource).toContain("db_password_encrypted");
+    expect(reconcileSource).toContain("jwt_secret_encrypted");
     expect(reconcileSource).not.toContain("function tenantPayload(");
   });
 });

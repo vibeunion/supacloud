@@ -4,13 +4,16 @@ import { buildRealtimeTenantPayload } from "../src/services/realtime-tenant-payl
 import { logger } from "../src/utils/logger";
 import { createHmac } from "node:crypto";
 import { resolveProjectJwtVerificationMaterial } from "../src/utils/project-jwt";
+import { revealProjectSecrets } from "../src/repositories/project-secret-at-rest";
 
 type ProjectRow = {
   ref: string;
   db_name: string | null;
   db_user: string | null;
   db_password: string | null;
+  db_password_encrypted?: string | null;
   jwt_secret: string | null;
+  jwt_secret_encrypted?: string | null;
   config?: unknown;
 };
 
@@ -164,7 +167,8 @@ async function upsertTenant(project: ProjectRow): Promise<"created" | "updated">
 
 async function main() {
   const rows = await sql<ProjectRow[]>`
-    SELECT ref, db_name, db_user, db_password, jwt_secret, config
+    SELECT ref, db_name, db_user, db_password, db_password_encrypted,
+           jwt_secret, jwt_secret_encrypted, config
     FROM projects
     WHERE status IS NULL OR status <> 'deleted'
     ORDER BY ref
@@ -179,7 +183,9 @@ async function main() {
   let updated = 0;
   const failed: Array<{ ref: string; error: string }> = [];
 
-  for (const project of rows) {
+  for (const rawProject of rows) {
+    // Runtime credentials are sealed at rest; the plaintext columns can be null.
+    const project = revealProjectSecrets(rawProject);
     try {
       const action = await upsertTenant(project);
       if (action === "created") {
