@@ -34,7 +34,7 @@
   },
   "dependencies": {
     "@supacloud/cli": "^0.128.4",
-    "@supacloud/admin": "^0.34.0"
+    "@supacloud/admin": "^0.34.1"
   },
   "overrides": {
     "deepmerge-ts": "8.0.2",
