@@ -11,7 +11,7 @@ export class InvalidPostgrestRuntimeTargetError extends Error {
 export function parsePostgrestRuntimeTarget(port: unknown, unit: unknown, projectRef: string): { port: number; unit: string } {
   if (typeof projectRef !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(projectRef)
     || typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535
-    || typeof unit !== "string" || unit !== `supacloud-pgrst@${projectRef}`) {
+    || typeof unit !== "string" || unit !== `supacloud-postrust@${projectRef}`) {
     throw new InvalidPostgrestRuntimeTargetError();
   }
   return { port, unit };

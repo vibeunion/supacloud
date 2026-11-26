@@ -120,7 +120,7 @@ describe("VictoriaLogsService", () => {
       service: "postgrest",
       projectRef: "proj_1",
       severity: "info",
-      unit: "supacloud-pgrst@proj_1.service",
+      unit: "supacloud-postrust@proj_1.service",
     }]);
 
     expect(requestedUrl).toBe("http://127.0.0.1:9428/insert/jsonline");
@@ -130,7 +130,7 @@ describe("VictoriaLogsService", () => {
       service: "postgrest",
       project_ref: "proj_1",
       severity: "info",
-      _SYSTEMD_UNIT: "supacloud-pgrst@proj_1.service",
+      _SYSTEMD_UNIT: "supacloud-postrust@proj_1.service",
     })}\n`);
   });
 });

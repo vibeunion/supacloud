@@ -63,7 +63,7 @@ PostgREST can be controlled without touching GoTrue or other project services:
 
 The runtime reconcile worker periodically compares desired state with systemd actual state:
 
-- project missing from metadata but a `supacloud-pgrst@*` unit exists: stop runtime cleanup
+- project missing from metadata but a `supacloud-postrust@*` unit exists: stop runtime cleanup
 - project status is not active/creating: stop project runtime
 - desired `stopped` but PostgREST is running: stop only PostgREST
 - desired `running` and project is active but PostgREST is unhealthy or stopped: prepare config and repair/start PostgREST
@@ -88,10 +88,10 @@ separate from this runtime-maintenance change.
 
 ## Systemd Units
 
-PostgREST remains one physical systemd unit per project:
+Postrust remains one physical systemd unit per project:
 
 ```bash
-systemctl status supacloud-pgrst@<project_ref>
+systemctl status supacloud-postrust@<project_ref>
 ```
 
 GoTrue is intentionally separate:

@@ -28,7 +28,7 @@ read_request_value() {
 
 operation=$(read_request_value operation) || { echo "ERROR: Invalid systemd unit operation" >&2; exit 1; }
 unit_name=$(read_request_value unit_name) || { echo "ERROR: Invalid systemd unit name" >&2; exit 1; }
-if [[ ! "$unit_name" =~ ^supacloud-(pgrst|gotrue)@\.service$ \
+if [[ ! "$unit_name" =~ ^supacloud-(pgrst|postrust|gotrue)@\.service$ \
     && ! "$unit_name" =~ ^supacloud-frontend-[a-z0-9-]{1,64}\.service$ \
     && ! "$unit_name" =~ ^supacloud-application-[a-z0-9-]{1,20}-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}-[a-z][a-z0-9-]{0,62}\.service$ ]]; then
     echo "ERROR: Systemd unit is outside the SupaCloud allow-list" >&2
@@ -38,7 +38,7 @@ fi
 validate_environment_file() {
     local value="$1"
     case "$unit_name" in
-        supacloud-pgrst@.service)
+        supacloud-postrust@.service)
             [[ "$value" =~ ^/etc/supabase/[A-Za-z0-9_-]{1,64}/%i\.env$ ]]
             ;;
         supacloud-gotrue@.service)
@@ -116,7 +116,7 @@ validate_unit_content() {
             group="$value"
         fi
     done < "$source_file"
-    if [[ "$unit_name" == "supacloud-pgrst@.service" || "$seen_env_file" == 1 ]]; then
+    if [[ "$unit_name" == "supacloud-postrust@.service" || "$seen_env_file" == 1 ]]; then
         environment_file_ok=1
     fi
     [[ "$seen_unit" == 1 && "$seen_service" == 1 && "$seen_install" == 1 && "$seen_nnp" == 1 && "$environment_file_ok" == 1 \

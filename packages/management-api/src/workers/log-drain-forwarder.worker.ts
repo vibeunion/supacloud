@@ -121,7 +121,7 @@ async function pollOnce(): Promise<void> {
   for (const { ref } of projects) {
     const sources: { unit: string; label: string }[] = [
       { unit: `supacloud-gotrue@${ref}`, label: "auth" },
-      { unit: `supacloud-pgrst@${ref}`, label: "api" },
+      { unit: `supacloud-postrust@${ref}`, label: "api" },
     ];
 
     for (const { unit, label } of sources) {

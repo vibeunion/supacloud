@@ -325,8 +325,8 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       }
 
       const projectUnitMap: Record<string, string> = {
-        postgrest: `supacloud-pgrst@${ref}`,
-        rest: `supacloud-pgrst@${ref}`,
+        postgrest: `supacloud-postrust@${ref}`,
+        rest: `supacloud-postrust@${ref}`,
         dataplane: dataPlaneRuntimeService.unit(ref),
         gotrue: `supacloud-gotrue@${ref}`,
         auth: `supacloud-gotrue@${ref}`,

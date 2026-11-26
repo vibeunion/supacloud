@@ -51,7 +51,7 @@ function postgrestSnapshot(desiredRevision: string) {
     loadedAt: LOADED_AT,
     desired: "running" as const,
     port: 3101,
-    unit: `supacloud-pgrst@${PROJECT_REF}`,
+    unit: `supacloud-postrust@${PROJECT_REF}`,
   };
 }
 

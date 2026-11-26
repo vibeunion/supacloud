@@ -45,7 +45,7 @@ export class ProjectLogService {
         await fetchJournal(`supacloud-gotrue@${ref}`, "auth");
       }
       if (mappedType === "api" || mappedType === "all") {
-        await fetchJournal(`supacloud-pgrst@${ref}`, "api");
+        await fetchJournal(`supacloud-postrust@${ref}`, "api");
       }
 
       if (mappedType === "database" || mappedType === "all") {

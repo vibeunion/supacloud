@@ -526,7 +526,7 @@ export class ProjectService {
       gatewaySystemd,
       realtimeDocker,
     ] = await Promise.all([
-      checkService(`supacloud-pgrst@${ref}`),
+      checkService(`supacloud-postrust@${ref}`),
       checkService(`supacloud-gotrue@${ref}`),
       checkService(config.realtimeEngine === "container" ? "supacloud-realtime" : "supacloud-realtime-gateway"),
       checkService("supacloud-caddy"),

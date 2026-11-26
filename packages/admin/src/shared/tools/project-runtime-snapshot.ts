@@ -182,7 +182,7 @@ function isPostgrestRuntimeSnapshot(payload: unknown, projectRef: string): paylo
         || !isEnumMember(payload.actual, POSTGREST_ACTUAL_STATES)
         || !isEnumMember(payload.health, POSTGREST_HEALTH_STATES)
         || !Number.isSafeInteger(payload.port) || Number(payload.port) < 1 || Number(payload.port) > 65_535
-        || payload.unit !== `supacloud-pgrst@${projectRef}`
+        || payload.unit !== `supacloud-postrust@${projectRef}`
         || !isIsoTimestampOrNull(payload.loaded_at)) return false;
     return hasValidPostgrestState(payload as unknown as PostgrestRuntimeSnapshot);
 }

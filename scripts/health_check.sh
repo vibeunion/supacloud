@@ -43,7 +43,7 @@ check_postgrest_tenant_runtimes() {
 
         unhealthy=$((unhealthy + 1))
         local detail
-        detail=$(journalctl -u "supacloud-pgrst@${tenant}" -n 20 --no-pager 2>/dev/null \
+        detail=$(journalctl -u "supacloud-postrust@${tenant}" -n 20 --no-pager 2>/dev/null \
             | grep -E 'PGRST002|Failed to load the schema cache|schema "pgmq_public" does not exist' \
             | tail -n 1 || true)
         if [[ -n "$detail" ]]; then

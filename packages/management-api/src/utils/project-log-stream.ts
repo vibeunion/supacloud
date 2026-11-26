@@ -16,7 +16,7 @@ export function getProjectLogUnits(ref: string, service?: string): string[] {
   if (typeof ref !== "string" || !LOG_PROJECT_REF_PATTERN.test(ref)) throw new Error("Invalid project ref");
   const units = new Map([
     ["auth", `supacloud-gotrue@${ref}`],
-    ["postgrest", `supacloud-pgrst@${ref}`],
+    ["postgrest", `supacloud-postrust@${ref}`],
     ["database", `supacloud-postgres@${ref}`],
     ["storage", `supacloud-storage@${ref}`],
   ]);

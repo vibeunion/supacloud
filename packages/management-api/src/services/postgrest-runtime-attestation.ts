@@ -246,7 +246,7 @@ async function controlPointerObservation(
 ): Promise<ControlPointerObservation> {
   try {
     const pointerTarget = await readPostgrestPointerTarget(
-      join(request.tenantDirectory, `${request.projectRef}_postgrest.current`),
+      join(request.tenantDirectory, `${request.projectRef}_postrust.current`),
       request.projectRef,
       ownership,
     );

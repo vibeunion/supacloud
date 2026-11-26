@@ -32,14 +32,14 @@ describe("project log streams", () => {
       expect(() => getProjectLogUnits("proj_1", service)).toThrow("project-isolated");
       expect(normalizePersistedLogService(service)).toBe(service);
     }
-    expect(getProjectLogUnits("proj_1", "api")).toEqual(["supacloud-pgrst@proj_1"]);
+    expect(getProjectLogUnits("proj_1", "api")).toEqual(["supacloud-postrust@proj_1"]);
   });
 
   test("only validated selected-project records reach SSE, with redaction and epoch timestamps", async () => {
     let closed = 0;
     const payload = [
       "not json\n", "[]\n", journal({ _SYSTEMD_UNIT: "supacloud-gotrue@other.service" }),
-      journal({ _SYSTEMD_UNIT: "supacloud-pgrst@proj_1.service" }),
+      journal({ _SYSTEMD_UNIT: "supacloud-postrust@proj_1.service" }),
       journal({ __REALTIME_TIMESTAMP: false }), journal({ MESSAGE: { password: "secret" } }),
       journal({ _SYSTEMD_UNIT: "supacloud-gotrue@proj_1" }),
       journal(), '{"MESSAGE":"incomplete',

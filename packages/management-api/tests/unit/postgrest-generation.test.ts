@@ -50,13 +50,13 @@ describe("readCurrentPostgrestGeneration", () => {
     });
 
     const expectedRevision = postgrestConfigRevision(PROJECT_REF, legacyContent);
-    const pointerPath = join(directory, `${PROJECT_REF}_postgrest.current`);
+    const pointerPath = join(directory, `${PROJECT_REF}_postrust.current`);
     const generationPath = join(directory, generation.pointerTarget);
 
     expect(generation.revision).toBe(expectedRevision);
     expect(generation.content).toBe(legacyContent);
     expect(generation.pointerTarget).toMatch(
-      new RegExp(`^${PROJECT_REF}_postgrest\\.d/[a-f0-9]{64}\\.conf$`),
+      new RegExp(`^${PROJECT_REF}_postrust\\.d/[a-f0-9]{64}\\.conf$`),
     );
     expect(await readFile(pointerPath, "utf8")).toBe(`${generation.pointerTarget}\n`);
     expect(await readFile(generationPath, "utf8")).toBe(legacyContent);

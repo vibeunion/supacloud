@@ -344,7 +344,7 @@ function componentBootstrapCommands(request: UpgradeRequest): string[] {
         `supacloud_version_at_least "$STAGED_VERSION" ${quoteEnvValue(MINIMUM_COMPONENT_UPGRADE_VERSION)} || { echo 'Target Management release lacks component transaction capability' >&2; exit 1; }`,
         `SYSTEMD_HELPER_OUTPUT=$(timeout 5s "$STAGED_MANAGEMENT" --systemd-unit-helper-sha256 2>&1)`,
         `[[ "$SYSTEMD_HELPER_OUTPUT" =~ ^SupaCloud[[:space:]]systemd-unit[[:space:]]helper[[:space:]]SHA-256:[[:space:]][0-9a-f]{64}$ ]] || { echo 'Target Management release lacks target-bound systemd-unit helper delivery' >&2; exit 1; }`,
-        `POSTGREST_LAUNCHER_OUTPUT=$(timeout 5s "$STAGED_MANAGEMENT" --postgrest-launcher-sha256 2>&1)`,
+        `POSTGREST_LAUNCHER_OUTPUT=$(timeout 5s "$STAGED_MANAGEMENT" --postrust-launcher-sha256 2>&1)`,
         `[[ "$POSTGREST_LAUNCHER_OUTPUT" =~ ^SupaCloud[[:space:]]PostgREST[[:space:]]launcher[[:space:]]SHA-256:[[:space:]][0-9a-f]{64}$ ]] || { echo 'Target Management release lacks target-bound PostgREST launcher delivery' >&2; exit 1; }`,
         `UPGRADE_RUNNER="$STAGED_MANAGEMENT"`,
     ];
@@ -1517,7 +1517,7 @@ Actions: ping, setup, install, upgrade, upgrade_status, versions, diagnose, exec
                         "  [[ \"$f\" == *_gotrue.env ]] && continue",
                         "  ref=$(basename \"$f\" .env)",
                         "  port=$(grep PGRST_SERVER_PORT \"$f\" | cut -d= -f2 || echo N/A)",
-                        "  if systemctl is-active \"supacloud-pgrst@${ref}\" >/dev/null 2>&1; then",
+                        "  if systemctl is-active \"supacloud-postrust@${ref}\" >/dev/null 2>&1; then",
                         "    echo \"  ✅ ${ref}  port=${port}  status=running\"",
                         "  else echo \"  ⏹️ ${ref}  port=${port}  status=stopped\"; fi",
                         "done",
@@ -1550,13 +1550,13 @@ Actions: ping, setup, install, upgrade, upgrade_status, versions, diagnose, exec
                     const checks = [
                         "echo '══════ Multi-tenant Diagnostic ══════'",
                         "ps -eo pid=,user=,comm= | grep -E 'postgrest|gotrue' | grep -v grep || echo 'No processes'",
-                        "systemctl list-units 'supacloud-pgrst@*' 'supacloud-gotrue@*' --no-pager 2>/dev/null || echo 'N/A'",
+                        "systemctl list-units 'supacloud-postrust@*' 'supacloud-gotrue@*' --no-pager 2>/dev/null || echo 'N/A'",
                         "ls -l /etc/supabase/tenants/*.env 2>/dev/null || echo 'No config'",
                     ];
                     if (args.project_ref) {
                         const projectRef = assertSafeProjectRef(args.project_ref, "project_ref");
                         checks.push(
-                            `systemctl status supacloud-pgrst@${projectRef} --no-pager 2>/dev/null || echo 'Not found'`,
+                            `systemctl status supacloud-postrust@${projectRef} --no-pager 2>/dev/null || echo 'Not found'`,
                             `for file in /etc/supabase/tenants/${projectRef}.env /etc/supabase/tenants/${projectRef}_gotrue.env; do [ -f "$file" ] && ${REMOTE_ENV_REDACTION_AWK} "$file"; done`,
                         );
                     }

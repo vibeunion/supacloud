@@ -20,7 +20,7 @@ export function normalizePersistedLogService(service?: string): string | undefin
 export function getProjectLogUnits(ref: string, service?: string): string[] {
     const all = [
         `supacloud-gotrue@${ref}`,
-        `supacloud-pgrst@${ref}`,
+        `supacloud-postrust@${ref}`,
         `supacloud-postgres@${ref}`,
         `supacloud-storage@${ref}`,
     ];
@@ -28,8 +28,8 @@ export function getProjectLogUnits(ref: string, service?: string): string[] {
     const map: Record<string, string> = {
         auth: `supacloud-gotrue@${ref}`,
         gotrue: `supacloud-gotrue@${ref}`,
-        api: `supacloud-pgrst@${ref}`,
-        postgrest: `supacloud-pgrst@${ref}`,
+        api: `supacloud-postrust@${ref}`,
+        postgrest: `supacloud-postrust@${ref}`,
         database: `supacloud-postgres@${ref}`,
         db: `supacloud-postgres@${ref}`,
         storage: `supacloud-storage@${ref}`,

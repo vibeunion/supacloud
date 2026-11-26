@@ -460,7 +460,7 @@ export function parsePostgrestActivity(output: string, exitCode: number): boolea
 
 class PostgrestRuntimeController {
     unit(ref: string): string {
-        return `supacloud-pgrst@${ref}`;
+        return `supacloud-postrust@${ref}`;
     }
 
     async isActive(ref: string): Promise<boolean> {
@@ -909,7 +909,7 @@ class TenantRuntimeService {
             activateCandidate: (content, previous) =>
                 this.activatePostgrestPoolGeneration(context, content, previous),
             currentPointerTarget: () => readPostgrestPointerTarget(
-                path.join(this.TENANT_CONFIG_DIR, `${context.ref}_postgrest.current`),
+                path.join(this.TENANT_CONFIG_DIR, `${context.ref}_postrust.current`),
                 context.ref,
                 context.ownership,
             ),
@@ -1844,7 +1844,7 @@ GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
     }
 
     private async installSystemdTemplate(systemctlMode: SystemctlExecutionMode = "best-effort") {
-        const pgrstUnitPath = "/etc/systemd/system/supacloud-pgrst@.service";
+        const pgrstUnitPath = "/etc/systemd/system/supacloud-postrust@.service";
         const gotrueUnitPath = "/etc/systemd/system/supacloud-gotrue@.service";
 
         // Avoid redundant disk IO unless upgrading the old 30 MB PostgREST unit.
@@ -1856,7 +1856,7 @@ GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
             || await unitHasLegacyPostgrestMemoryLimit(pgrstUnitPath)
             || !currentPgrstUnit.includes("User=supacloud-%i")
             || !currentPgrstUnit.includes("Group=supacloud-%i")
-            || !currentPgrstUnit.includes("/usr/local/libexec/supacloud/postgrest-launcher %i")
+            || !currentPgrstUnit.includes("/usr/local/libexec/supacloud/postrust-launcher %i")
             || currentPgrstUnit.includes(`EnvironmentFile=${this.TENANT_CONFIG_DIR}/%i.env`)
             || !hasCanonicalStartLimitDirectives(currentPgrstUnit);
         if (shouldWritePgrstUnit) {
@@ -1867,7 +1867,7 @@ GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
                 memoryMax: this.POSTGREST_MEMORY_MAX,
                 cpuWeight: this.POSTGREST_CPU_WEIGHT,
             });
-            await installManagedSystemdUnit("supacloud-pgrst@.service", pgrstUnit);
+            await installManagedSystemdUnit("supacloud-postrust@.service", pgrstUnit);
         }
 
         const gotrueExists = await Bun.file(gotrueUnitPath).exists();
@@ -2543,8 +2543,8 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
     private async removeRuntimeConfig(ref: string): Promise<void> {
         const pgrstEnvFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}.env`));
         const pgrstConfFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}.conf`));
-        const pgrstPointerFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}_postgrest.current`));
-        const pgrstGenerationDirectory = path.join(this.TENANT_CONFIG_DIR, `${ref}_postgrest.d`);
+        const pgrstPointerFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}_postrust.current`));
+        const pgrstGenerationDirectory = path.join(this.TENANT_CONFIG_DIR, `${ref}_postrust.d`);
         const gotrueEnvFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`));
         const pgredisEnvFile = Bun.file(path.join(this.PGREDIS_CONFIG_DIR, `${ref}_pgredis.env`));
         const gotrueConfigDir = path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.d`);
@@ -3251,7 +3251,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
             ]),
         );
 
-        const units = await $`systemctl list-units 'supacloud-pgrst@*' 'supacloud-gotrue@*' --plain --no-pager`
+        const units = await $`systemctl list-units 'supacloud-postrust@*' 'supacloud-gotrue@*' --plain --no-pager`
             .nothrow()
             .quiet();
         const unitOutput = units.text();

@@ -27,7 +27,7 @@ describe("LocalLogCollector", () => {
 
     expect(fresh).toContain("--since=15 minutes ago");
     expect(fresh).toContain("supacloud-gotrue@*.service");
-    expect(fresh).toContain("supacloud-pgrst@*.service");
+    expect(fresh).toContain("supacloud-postrust@*.service");
     expect(resumed).toContain("--after-cursor=s=cursor-1");
     expect(resumed).not.toContain("--since=15 minutes ago");
   });
@@ -36,7 +36,7 @@ describe("LocalLogCollector", () => {
     const parsed = parseJournalEvent({
       __CURSOR: "s=cursor-1",
       __REALTIME_TIMESTAMP: "1785200523000000",
-      _SYSTEMD_UNIT: "supacloud-pgrst@proj_1.service",
+      _SYSTEMD_UNIT: "supacloud-postrust@proj_1.service",
       MESSAGE: "request failed",
       PRIORITY: "3",
     });
@@ -49,7 +49,7 @@ describe("LocalLogCollector", () => {
         projectRef: "proj_1",
         service: "postgrest",
         severity: "error",
-        unit: "supacloud-pgrst@proj_1.service",
+        unit: "supacloud-postrust@proj_1.service",
       }),
     });
     expect(projectLogFields("supacloud-edge-runtime.service")).toEqual({ service: "functions-runtime" });

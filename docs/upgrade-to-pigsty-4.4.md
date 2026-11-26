@@ -62,7 +62,7 @@ bash scripts/upgrade_pigsty_4_4_compat.sh --rollback-plan
 
 Rollback output is advisory. The script never automatically drops the Analytics database or key metadata columns. Preserve those columns when temporarily running an older SupaCloud binary; older versions ignore them.
 
-Legacy Pigsty Supabase compose cleanup is not part of this upgrade. If the host still runs the historical compose stack, migrate it explicitly only after verifying the per-project `supacloud-pgrst@*` and `supacloud-gotrue@*` services.
+Legacy Pigsty Supabase compose cleanup is not part of this upgrade. If the host still runs the historical compose stack, migrate it explicitly only after verifying the per-project `supacloud-postrust@*` and `supacloud-gotrue@*` services.
 
 ## Storage note
 

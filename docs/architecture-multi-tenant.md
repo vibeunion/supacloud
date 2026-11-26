@@ -38,13 +38,13 @@
 > **Note**: SupaCloud natively relies on **Caddy** running as a systemd service.
 > All tenant routing, rate limiting, CORS, and TLS are managed via the Caddy Admin API — no manual config file edits needed.
 
-### 1. PostgREST & Authentication Runtime ⭐ Implemented
-PostgREST remains a per-tenant process. Authentication supports two explicit product modes:
+### 1. Postrust REST & Authentication Runtime ⭐ Implemented
+Postrust provides the PostgREST-compatible REST API as a per-tenant process. Authentication supports two explicit product modes:
 
 - **Local mode (default):** the project owns its own `gotrue` process and `auth` schema.
 - **SupAuth shared mode:** `SUPACLOUD_AUTH_RUNTIME_OWNER_REF=<owner-ref>` designates one project as the authentication authority. Other projects do not start local GoTrue; their public `/auth/v1` traffic is routed to the owner's GoTrue runtime.
 
-In local mode, we spin up unique `postgrest` and `gotrue` processes dynamically using `systemd` templates (`supacloud-pgrst@.service` and `supacloud-gotrue@.service`):
+In local mode, we spin up unique `postrust` and `gotrue` processes dynamically using `systemd` templates (`supacloud-postrust@.service` and `supacloud-gotrue@.service`):
 - They bind to unique deterministically generated ports (e.g., PostgREST starts from 3100, GoTrue starts from 4100).
 - They connect securely to the tenant's isolated Postgres database (`supa_<ref>`) using unique credentials.
 - They possess isolated `JWT_SECRET`s to ensure cryptographic boundary security (users from Tenant A cannot authenticate into Tenant B).

@@ -41,7 +41,7 @@ export function parseServiceControlState(value: unknown, projectRef: string): Se
   const authRuntime = parseAuthRuntimeDescriptor(data.auth_runtime, projectRef);
   if (!Array.isArray(data.services) || data.services.length !== serviceIds.length) return invalid();
   const expectedUnits: Record<ServiceId, string> = {
-    postgresql: "patroni", postgrest: `supacloud-pgrst@${projectRef}`,
+    postgresql: "patroni", postgrest: `supacloud-postrust@${projectRef}`,
     gotrue: `supacloud-gotrue@${authRuntime.authority_project_ref}`,
     realtime: "supacloud-realtime", storage: "supacloud-storage", caddy: "supacloud-caddy",
   };

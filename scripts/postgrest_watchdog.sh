@@ -193,7 +193,7 @@ check_tenant() {
 
     local journal_match
     # A completed cache load clears earlier errors, but not later ones.
-    journal_match=$(journalctl -u "supacloud-pgrst@${tenant}" --since "$JOURNAL_WINDOW" --no-pager -o cat 2>/dev/null \
+    journal_match=$(journalctl -u "supacloud-postrust@${tenant}" --since "$JOURNAL_WINDOW" --no-pager -o cat 2>/dev/null \
         | awk '
             /^([0-9]+\/[[:alpha:]]+\/[0-9]+:[0-9:]+ [+-][0-9]+: )?Schema cache loaded in [0-9]+([.][0-9]+)? milliseconds$/ {
                 last_error = ""
@@ -217,16 +217,16 @@ resolve_tenant_configs() {
     # even when malformed. Never silently fall back to a stale legacy config.
     local pointer ref target legacy pointer_bytes generation
     shopt -s nullglob
-    local pointers=("$TENANT_DIR"/*_postgrest.current)
+    local pointers=("$TENANT_DIR"/*_postrust.current)
     local legacies=("$TENANT_DIR"/*.conf)
     shopt -u nullglob
 
     for pointer in ${pointers[@]+"${pointers[@]}"}; do
         ref="${pointer##*/}"
-        ref="${ref%_postgrest.current}"
+        ref="${ref%_postrust.current}"
         [[ "$ref" =~ ^[a-z0-9-]{1,64}$ ]] || continue
         target=""
-        generation="$TENANT_DIR/${ref}_postgrest.d"
+        generation="$TENANT_DIR/${ref}_postrust.d"
         # Bound reads and reject special files before opening them (a FIFO can
         # otherwise hang every tenant's watchdog). Match the launcher's single
         # newline-terminated target and reject symlinks in the selected paths.
@@ -234,7 +234,7 @@ resolve_tenant_configs() {
             && pointer_bytes=$(wc -c < "$pointer") \
             && [[ "$pointer_bytes" -le 160 ]] \
             && IFS= read -r target < "$pointer" \
-            && [[ "$target" =~ ^${ref}_postgrest\.d/[a-f0-9]{64}\.conf$ ]] \
+            && [[ "$target" =~ ^${ref}_postrust\.d/[a-f0-9]{64}\.conf$ ]] \
             && [[ "$pointer_bytes" -eq $((${#target} + 1)) ]] \
             && [[ -d "$generation" && ! -L "$generation" ]] \
             && [[ -f "$TENANT_DIR/$target" && ! -L "$TENANT_DIR/$target" && -r "$TENANT_DIR/$target" ]]; then
@@ -248,7 +248,7 @@ resolve_tenant_configs() {
         ref="${legacy##*/}"
         ref="${ref%.conf}"
         [[ "$ref" =~ ^[a-z0-9-]{1,64}$ ]] || continue
-        pointer="$TENANT_DIR/${ref}_postgrest.current"
+        pointer="$TENANT_DIR/${ref}_postrust.current"
         [[ -e "$pointer" || -L "$pointer" ]] && continue
         printf '%s\t%s\t%s\n' "$ref" "$legacy" "$(read_trusted_config_port "$legacy" "$ref")"
     done

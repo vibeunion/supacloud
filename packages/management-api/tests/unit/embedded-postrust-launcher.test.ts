@@ -24,7 +24,7 @@ import {
   restorePostgrestLauncher,
   stageEmbeddedPostgrestLauncher,
   verifyInstalledPostgrestLauncher,
-} from "../../src/embedded-postgrest-launcher";
+} from "../../src/embedded-postrust-launcher";
 import { upgradeRecoveryPaths } from "../../src/upgrade";
 
 const owner = {
@@ -33,8 +33,8 @@ const owner = {
 };
 
 function launcherFixture(previous?: string) {
-  const directory = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-postgrest-launcher-")));
-  const target = join(directory, "postgrest-launcher");
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "supacloud-postrust-launcher-")));
+  const target = join(directory, "postrust-launcher");
   if (previous !== undefined) {
     writeFileSync(target, previous, { mode: 0o755 });
     chmodSync(target, 0o755);

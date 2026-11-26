@@ -1013,7 +1013,7 @@ async function cleanupOrphanServices() {
 
   // List running supacloud-gotrue and supacloud-pgrst services
   const result =
-    await $`systemctl list-units 'supacloud-gotrue@*' 'supacloud-pgrst@*' --all --plain --no-pager`
+    await $`systemctl list-units 'supacloud-gotrue@*' 'supacloud-postrust@*' --all --plain --no-pager`
       .nothrow()
       .quiet();
   const output = result.text();
@@ -1278,6 +1278,12 @@ async function bootstrap() {
     await migrateLegacyProjectWebhooks(controlPlaneSql);
     await migrateWebhookSecretsToControlStore(controlPlaneSql);
     await migrateLegacyProviderLinkingConfig(controlPlaneSql);
+
+    const { migratePostrustNaming } = await import("./services/postrust-naming-migration");
+    const namingMigration = await migratePostrustNaming();
+    if (namingMigration.changed) {
+      logger.warn("[Bootstrap] Migrated PostgREST runtime names to Postrust", namingMigration);
+    }
 
     const { jitDatabaseAccessService } = await import("./services/jit-database-access.service");
     const jitGatewayState = await jitDatabaseAccessService.startGateway();

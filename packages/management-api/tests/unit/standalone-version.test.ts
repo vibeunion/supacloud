@@ -15,7 +15,7 @@ import {
   POSTGREST_PROCESS_IDENTITY_PROBE_FLAG,
   POSTGREST_PROCESS_IDENTITY_TERMINATE_FLAG,
 } from "../../src/services/postgrest-process-identity";
-import { EMBEDDED_POSTGREST_LAUNCHER_SHA256 } from "../../src/embedded-postgrest-launcher";
+import { EMBEDDED_POSTGREST_LAUNCHER_SHA256 } from "../../src/embedded-postrust-launcher";
 import { EMBEDDED_SYSTEMD_UNIT_BROKER_SHA256 } from "../../src/embedded-systemd-unit-broker";
 
 const packageRoot = join(import.meta.dir, "../..");
@@ -55,8 +55,8 @@ describe("standalone version command", () => {
     expect(isStorageDataPlaneCommand(["--storage-data-plane", "--version"])).toBe(false);
     expect(isSystemdUnitBrokerDigestCommand(["--systemd-unit-helper-sha256"])).toBe(true);
     expect(isSystemdUnitBrokerDigestCommand(["upgrade", "--systemd-unit-helper-sha256"])).toBe(false);
-    expect(isPostgrestLauncherDigestCommand(["--postgrest-launcher-sha256"])).toBe(true);
-    expect(isPostgrestLauncherDigestCommand(["upgrade", "--postgrest-launcher-sha256"])).toBe(false);
+    expect(isPostgrestLauncherDigestCommand(["--postrust-launcher-sha256"])).toBe(true);
+    expect(isPostgrestLauncherDigestCommand(["upgrade", "--postrust-launcher-sha256"])).toBe(false);
     expect(isPostgrestProcessIdentityProbeCommand([
       POSTGREST_PROCESS_IDENTITY_PROBE_FLAG,
       "4172",
@@ -103,7 +103,7 @@ describe("standalone version command", () => {
     );
     expect(helperDigest.stderr).toBe("");
 
-    const launcherDigest = await captureProcess([binaryPath, "--postgrest-launcher-sha256"], 5_000);
+    const launcherDigest = await captureProcess([binaryPath, "--postrust-launcher-sha256"], 5_000);
     expect(launcherDigest.timedOut).toBe(false);
     expect(launcherDigest.exitCode).toBe(0);
     expect(launcherDigest.stdout).toBe(

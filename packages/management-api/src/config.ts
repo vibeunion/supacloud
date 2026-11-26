@@ -380,7 +380,7 @@ export const config: Config = {
   jitDatabaseGatewayControlUrl: getEnv("JIT_DATABASE_GATEWAY_CONTROL_URL", "http://127.0.0.1:9012"),
   jitDatabaseGatewayControlToken: getEnv("JIT_DATABASE_GATEWAY_CONTROL_TOKEN", ""),
   minDiskGb: Number(getEnv("MIN_DISK_GB", "10")),
-  postgrestBin: getEnv("POSTGREST_BIN", "/usr/local/bin/postgrest"),
+  postgrestBin: getEnv("POSTGREST_BIN", "/usr/local/bin/postrust"),
   postgrestRts: getEnv("POSTGREST_RTS", "-N1 -M256m -I0.5 -A4m"),
   postgrestMemoryMax: getEnv("POSTGREST_MEMORY_MAX", "384M"),
   postgrestCpuWeight: Number(getEnv("POSTGREST_CPU_WEIGHT", "40")),

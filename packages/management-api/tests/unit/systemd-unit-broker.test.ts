@@ -28,7 +28,7 @@ Type=simple
 User=supacloud-%i
 Group=supacloud-%i
 NoNewPrivileges=true
-${extra}ExecStart=/usr/local/libexec/supacloud/postgrest-launcher %i
+${extra}ExecStart=/usr/local/libexec/supacloud/postrust-launcher %i
 [Install]
 WantedBy=multi-user.target
 `;
@@ -47,7 +47,7 @@ function canonicalPostgrestUnit(): string {
 describe("systemd unit broker policy", () => {
   test("accepts the launcher-based PostgREST unit without an environment file", () => {
     expect(() => assertManagedSystemdUnitContent(
-      "supacloud-pgrst@.service",
+      "supacloud-postrust@.service",
       canonicalPostgrestUnit(),
     )).not.toThrow();
   });
@@ -61,22 +61,22 @@ describe("systemd unit broker policy", () => {
       .replace("RestartSec=5\n", "RestartSec=5\nStartLimitBurst=3\nStartLimitIntervalSec=60\n");
     expect(hasCanonicalStartLimitDirectives(misplaced)).toBe(false);
     expect(() => assertManagedSystemdUnitContent(
-      "supacloud-pgrst@.service",
+      "supacloud-postrust@.service",
       misplaced,
     )).toThrow(/unsupported directive/);
   });
 
   test("allows only an approved optional PostgREST environment file", () => {
     expect(() => assertManagedSystemdUnitContent(
-      "supacloud-pgrst@.service",
+      "supacloud-postrust@.service",
       postgrestUnit("EnvironmentFile=/etc/supabase/tenants/%i.env\n"),
     )).not.toThrow();
     expect(() => assertManagedSystemdUnitContent(
-      "supacloud-pgrst@.service",
+      "supacloud-postrust@.service",
       postgrestUnit("EnvironmentFile=-/etc/supabase/management-api.env\n"),
     )).toThrow(/invalid EnvironmentFile/);
     expect(() => assertManagedSystemdUnitContent(
-      "supacloud-pgrst@.service",
+      "supacloud-postrust@.service",
       postgrestUnit(
         "EnvironmentFile=/etc/supabase/tenants/%i.env\nEnvironmentFile=/etc/supabase/tenants/%i.env\n",
       ),
@@ -137,7 +137,7 @@ describe("systemd unit broker policy", () => {
     expect(() => assertManagedSystemdUnitContent(
       "supacloud-gotrue@.service",
       postgrestUnit().replace(
-        "ExecStart=/usr/local/libexec/supacloud/postgrest-launcher %i",
+        "ExecStart=/usr/local/libexec/supacloud/postrust-launcher %i",
         "ExecStart=/usr/local/bin/gotrue",
       ),
     )).toThrow(/missing its non-root runtime identity/);
