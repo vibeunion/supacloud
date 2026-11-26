@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.59.6](https://github.com/vibeunion/supacloud/compare/web-console-v0.59.5...web-console-v0.59.6) (2026-11-26)
+
+
+### Elegance & Refactoring
+
+* **postrust:** canonicalize runtime component naming ([#2832](https://github.com/vibeunion/supacloud/issues/2832)) ([6e5cb56](https://github.com/vibeunion/supacloud/commit/6e5cb5653b7f5d446012500ad13ede4e06ad36f5))
+
 ## [0.59.5](https://github.com/vibeunion/supacloud/compare/web-console-v0.59.4...web-console-v0.59.5) (2026-11-20)
 
 
