@@ -624,8 +624,20 @@ impl Socket {
     /// Subscribes and requires the join to be accepted. A refused join means the
     /// subscription row was not stored, so nothing may be delivered.
     fn subscribe(&mut self, topic: &str, subscription: &str) {
+        self.subscribe_with_access_token(topic, subscription, None)
+    }
+
+    fn subscribe_with_access_token(
+        &mut self,
+        topic: &str,
+        subscription: &str,
+        access_token: Option<&str>,
+    ) {
+        let auth = access_token
+            .map(|token| format!(r#""access_token":"{token}","#))
+            .unwrap_or_default();
         self.send_text(&format!(
-            r#"[null,"1","{topic}","phx_join",{{"config":{{"postgres_changes":[{subscription}]}}}}]"#
+            r#"[null,"1","{topic}","phx_join",{{{auth}"config":{{"postgres_changes":[{subscription}]}}}}]"#
         ));
         let reply = self
             .read_frame(|frame| frame[3] == "phx_reply")
@@ -633,6 +645,19 @@ impl Socket {
         assert_eq!(
             reply[4]["status"], "ok",
             "a CDC join should be accepted: {reply}"
+        );
+        let expected: serde_json::Value = serde_json::from_str(subscription).unwrap();
+        let returned = &reply[4]["response"]["postgres_changes"][0];
+        for key in ["id", "event", "schema", "table"] {
+            assert_eq!(
+                returned[key], expected[key],
+                "the join reply must echo the client binding `{key}`: {reply}"
+            );
+        }
+        assert_eq!(
+            returned.get("filter").unwrap_or(&serde_json::Value::Null),
+            expected.get("filter").unwrap_or(&serde_json::Value::Null),
+            "the join reply must echo the client filter: {reply}"
         );
     }
 }
@@ -989,4 +1014,49 @@ fn row_level_security_hides_a_row_from_another_role() {
         bob.read_frame(is_postgres_change).is_none(),
         "authenticated bob saw alice's public row"
     );
+}
+
+#[test]
+fn join_access_token_selects_the_authenticated_rls_role() {
+    let Some(postgres) = Postgres::start() else {
+        return;
+    };
+    postgres.create_tables("postgres");
+    postgres.psql(
+        "postgres",
+        "CREATE TABLE secrets (
+            id serial primary key,
+            body text,
+            owner_id text
+        );
+        ALTER TABLE secrets ENABLE ROW LEVEL SECURITY;
+        GRANT SELECT ON secrets TO anon, authenticated, service_role;
+        CREATE POLICY authenticated_sees_own ON secrets
+          FOR SELECT TO authenticated
+          USING (owner_id = current_setting('request.jwt.claims', true)::json->>'sub');
+        CREATE POLICY anon_sees_nothing ON secrets
+          FOR SELECT TO anon
+          USING (false)",
+    );
+    postgres.publish("postgres", &["secrets"]);
+    let server = Server::start();
+    server.register_tenant("cdc-join-auth", &postgres);
+    postgres.wait_for_slot("postgres");
+
+    // This is the shape supabase-js sends: the URL key is the anon key, while
+    // the user JWT travels in the join payload.
+    let mut alice = server.socket(&token("anon"), "cdc-join-auth");
+    alice.subscribe_with_access_token(
+        "realtime:public:secrets",
+        r#"{"id":"alice-join","event":"INSERT","schema":"public","table":"secrets"}"#,
+        Some(&token_for("authenticated", "alice")),
+    );
+
+    postgres.psql(
+        "postgres",
+        "INSERT INTO secrets (body, owner_id) VALUES ('alice-private', 'alice')",
+    );
+    let delivered = alice.expect_event(is_postgres_change);
+    assert_eq!(delivered[4]["data"]["record"]["body"], "alice-private");
+    assert_eq!(delivered[4]["ids"], serde_json::json!(["alice-join"]));
 }

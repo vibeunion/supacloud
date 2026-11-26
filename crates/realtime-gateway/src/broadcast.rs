@@ -296,6 +296,17 @@ impl ChannelHub {
             .track(tenant_id, connection_id, topic, key, payload)
     }
 
+    /// The presence key selected by the channel join, if any.
+    pub fn presence_key(&self, connection_id: &str, topic: &str) -> Option<String> {
+        self.connections
+            .read()
+            .get(connection_id)?
+            .subscriptions
+            .get(topic)?
+            .presence_key
+            .clone()
+    }
+
     /// Untrack presence for a connection on a topic
     pub fn untrack_presence(
         &self,

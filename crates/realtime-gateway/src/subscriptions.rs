@@ -35,9 +35,18 @@ const FILTER_OPS: &[&str] = &[
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChangeSpec {
     pub client_id: String,
+    /// The binding exactly as the client sent it. supabase-js compares the
+    /// join reply field-by-field with its local binding, before it accepts the
+    /// subscription; normalized defaults would be reported as a mismatch.
+    pub client_event: String,
+    pub client_schema: Option<String>,
+    pub client_table: Option<String>,
     pub action_filter: String,
     pub schema: String,
     pub table: String,
+    /// The raw client filter, echoed in the join reply so supabase-js can
+    /// match its local binding before accepting the subscription.
+    pub filter: Option<String>,
     pub filters: Vec<ParsedFilter>,
     pub selected_columns: Option<Vec<String>>,
 }
@@ -119,13 +128,17 @@ pub fn change_spec_from_config(
         .filter(|text| !text.is_empty())
         .unwrap_or_else(|| index.to_string());
 
-    let event = item.get("event").and_then(Value::as_str).unwrap_or("*");
-    let action_filter = match event.to_ascii_uppercase().as_str() {
-        "INSERT" | "UPDATE" | "DELETE" => event.to_ascii_uppercase(),
+    let client_event = item
+        .get("event")
+        .and_then(Value::as_str)
+        .unwrap_or("*")
+        .to_owned();
+    let action_filter = match client_event.to_ascii_uppercase().as_str() {
+        "INSERT" | "UPDATE" | "DELETE" => client_event.to_ascii_uppercase(),
         _ => "*".to_owned(),
     };
 
-    let schema = match item.get("schema") {
+    let client_schema = match item.get("schema") {
         Some(Value::String(schema)) if !schema.is_empty() => Some(schema.clone()),
         Some(_) => {
             return Err(
@@ -134,7 +147,7 @@ pub fn change_spec_from_config(
         }
         None => None,
     };
-    let table = match item.get("table") {
+    let client_table = match item.get("table") {
         Some(Value::String(table)) if !table.is_empty() => Some(table.clone()),
         Some(_) => {
             return Err(
@@ -143,7 +156,7 @@ pub fn change_spec_from_config(
         }
         None => None,
     };
-    let (schema, table) = match (schema, table) {
+    let (schema, table) = match (client_schema.clone(), client_table.clone()) {
         (Some(schema), Some(table)) => (schema, table),
         (Some(schema), None) => (schema, "*".to_owned()),
         (None, Some(table)) => ("public".to_owned(), table),
@@ -152,6 +165,10 @@ pub fn change_spec_from_config(
         }
     };
 
+    let raw_filter = item
+        .get("filter")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     let filters = match item.get("filter") {
         None => Vec::new(),
         Some(Value::String(filter)) => parse_filters(filter)?,
@@ -182,9 +199,13 @@ pub fn change_spec_from_config(
 
     Ok(ChangeSpec {
         client_id,
+        client_event,
+        client_schema,
+        client_table,
         action_filter,
         schema,
         table,
+        filter: raw_filter,
         filters,
         selected_columns,
     })
@@ -494,7 +515,19 @@ mod tests {
         assert_eq!(spec.schema, "public");
         assert_eq!(spec.table, "todos");
         assert_eq!(spec.action_filter, "INSERT");
+        assert_eq!(spec.client_event, "INSERT");
+        assert_eq!(spec.client_schema, None);
+        assert_eq!(spec.client_table.as_deref(), Some("todos"));
         assert_eq!(spec.client_id, "3");
         assert_eq!(spec.filters[0].value, "keep");
+
+        let schema_only = json!({"event": "insert", "schema": "public"});
+        let spec = change_spec_from_config(schema_only.as_object().unwrap(), 0).unwrap();
+        assert_eq!(spec.schema, "public");
+        assert_eq!(spec.table, "*");
+        assert_eq!(spec.action_filter, "INSERT");
+        assert_eq!(spec.client_event, "insert");
+        assert_eq!(spec.client_schema.as_deref(), Some("public"));
+        assert_eq!(spec.client_table, None);
     }
 }
