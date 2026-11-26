@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { logger } from "../../src/utils/logger";
-import { assertRealtimeSecretAlignment, RealtimeService, validateRealtimeSecretConfiguration } from "../../src/services/realtime.service";
+import { assertRealtimeSecretAlignment, realtimeDatabaseHost, RealtimeService, validateRealtimeSecretConfiguration } from "../../src/services/realtime.service";
 import { buildRealtimeTenantPayload } from "../../src/services/realtime-tenant-payload";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,6 +10,18 @@ const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+});
+
+describe("Realtime database host", () => {
+  test("uses the published Postgres address for the Rust gateway", () => {
+    expect(realtimeDatabaseHost({ ci: true, engine: "rust", pgHost: "127.0.0.1" })).toBe("127.0.0.1");
+    expect(realtimeDatabaseHost({ ci: false, engine: "rust", pgHost: "10.0.0.8" })).toBe("10.0.0.8");
+  });
+
+  test("keeps the Actions service hostname for the Elixir rollback", () => {
+    expect(realtimeDatabaseHost({ ci: true, engine: "container", pgHost: "127.0.0.1" })).toBe("postgres");
+    expect(realtimeDatabaseHost({ ci: false, engine: "container", pgHost: "10.0.0.8" })).toBe("10.0.0.8");
+  });
 });
 
 describe("RealtimeService tenant payloads", () => {

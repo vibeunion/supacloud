@@ -1417,19 +1417,25 @@ describe("runtime companion version assets", () => {
     );
     const ciWorkflow = Bun.YAML.parse(workflow) as {
       jobs: Record<string, {
+        needs?: string | string[];
         services?: Record<string, { image: string }>;
         steps: { name?: string; run?: string }[];
       }>;
     };
     const integrationJob = ciWorkflow.jobs["integration-test"];
-    expect(integrationJob?.services?.["realtime"]?.image).toBe(
-      "ghcr.io/supabase/realtime:v2.150.0",
-    );
+    const integrationNeeds = Array.isArray(integrationJob?.needs)
+      ? integrationJob.needs
+      : [integrationJob?.needs];
+    expect(integrationNeeds).toContain("realtime-gateway-binary");
+    expect(integrationJob?.services?.["realtime"]).toBeUndefined();
+    expect(workflow).not.toContain("ghcr.io/supabase/realtime");
     expect(workflow).not.toContain("public.ecr.aws/supabase/realtime");
+    expect(integrationJob?.steps.find((step) => step.name === "Start Rust Realtime gateway")?.run)
+      .toContain("supacloud-realtime-gateway");
     expect(integrationJob?.steps.find((step) => step.name === "Wait for CI services")?.run)
-      .toContain('realtime_container_id="${{ job.services.realtime.id }}"');
+      .toContain("supacloud-realtime-gateway/rust");
     expect(integrationJob?.steps.find((step) => step.name === "Restart flaky services")?.run)
-      .toContain('docker start "${{ job.services.realtime.id }}"');
+      .not.toContain("job.services.realtime");
     for (const unit of podmanUnits) {
       expect(unit).toContain("Image=");
     }

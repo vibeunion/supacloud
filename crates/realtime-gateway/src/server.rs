@@ -294,8 +294,9 @@ async fn ws_handler(
         claims["role"] = json!(role);
     }
     let tenant_id = tenant.id;
+    let client_vsn = query.vsn;
 
-    ws.on_upgrade(move |socket| handle_socket(socket, state, tenant_id, role, claims))
+    ws.on_upgrade(move |socket| handle_socket(socket, state, tenant_id, role, claims, client_vsn))
 }
 
 async fn handle_socket(
@@ -304,6 +305,7 @@ async fn handle_socket(
     tenant_id: String,
     role: String,
     claims: Value,
+    client_vsn: String,
 ) {
     let conn_id = next_connection_id();
     let (mut ws_sender, mut ws_receiver) = socket.split();
@@ -312,13 +314,13 @@ async fn handle_socket(
     state
         .hub
         .add_connection(conn_id.clone(), tenant_id.clone(), role.clone(), tx);
-    info!(conn_id = %conn_id, tenant = %tenant_id, "WebSocket client connected");
+    info!(conn_id = %conn_id, tenant = %tenant_id, vsn = %client_vsn, "WebSocket client connected");
 
     // Task to send messages from channel to WebSocket client
     let conn_id_clone = conn_id.clone();
     let send_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
-            match msg.encode() {
+            match msg.encode_for_client(&client_vsn) {
                 Ok(text) => {
                     if let Err(e) = ws_sender.send(Message::Text(text.into())).await {
                         debug!(conn_id = %conn_id_clone, error = %e, "Failed to send WS message");
@@ -339,7 +341,7 @@ async fn handle_socket(
         match msg {
             Message::Text(text) => {
                 let text_str = text.as_str();
-                match PhoenixV2Message::decode(text_str) {
+                match PhoenixV2Message::decode_client_frame(text_str) {
                     Ok(parsed) => {
                         handle_client_message(
                             &state,
@@ -356,8 +358,30 @@ async fn handle_socket(
                     }
                 }
             }
-            Message::Binary(_) => {
-                // Ignore raw binary frame or forward if needed
+            Message::Binary(bytes) => {
+                // realtime-js v2 encodes broadcast pushes as a binary frame.
+                // JSON text broadcasts stay on the text path above.
+                match PhoenixV2Message::decode_user_broadcast_push(bytes.as_ref()) {
+                    Ok(parsed) => {
+                        handle_client_message(
+                            &state,
+                            &tenant_id,
+                            &role,
+                            &claims,
+                            &conn_id_recv,
+                            parsed,
+                        )
+                        .await;
+                    }
+                    Err(e) => {
+                        warn!(
+                            conn_id = %conn_id_recv,
+                            error = %e,
+                            kind = bytes.first().copied(),
+                            "Unparseable or unknown-kind binary Realtime frame"
+                        );
+                    }
+                }
             }
             Message::Ping(_) => {}
             Message::Pong(_) => {}
@@ -628,5 +652,117 @@ async fn handle_client_message(
     if let Some(ref r) = reference {
         let reply = PhoenixV2Message::reply(join_ref, Some(r.clone()), topic, "ok", json!({}));
         hub.send_to_connection(conn_id, reply);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::broadcast::TopicSubscriptionConfig;
+    use crate::postgres::PostgresListenerManager;
+    use crate::tenant::TenantRegistry;
+
+    fn user_broadcast_push(
+        join_ref: &str,
+        reference: &str,
+        topic: &str,
+        event: &str,
+        payload: &[u8],
+    ) -> Vec<u8> {
+        let mut frame = vec![
+            3,
+            join_ref.len() as u8,
+            reference.len() as u8,
+            topic.len() as u8,
+            event.len() as u8,
+            0,
+            1,
+        ];
+        frame.extend_from_slice(join_ref.as_bytes());
+        frame.extend_from_slice(reference.as_bytes());
+        frame.extend_from_slice(topic.as_bytes());
+        frame.extend_from_slice(event.as_bytes());
+        frame.extend_from_slice(payload);
+        frame
+    }
+
+    async fn deliver(frame: &[u8]) -> Vec<PhoenixV2Message> {
+        let parsed = PhoenixV2Message::decode_user_broadcast_push(frame).unwrap();
+        let topic = parsed.topic.clone();
+        let hub = ChannelHub::new();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        hub.add_connection("conn".into(), "tenant".into(), "anon".into(), tx);
+        hub.subscribe(
+            "conn",
+            "tenant",
+            &topic,
+            TopicSubscriptionConfig {
+                join_ref: parsed.join_ref.clone(),
+                broadcast_self: true,
+                broadcast_ack: true,
+                presence_key: None,
+                postgres_changes: Vec::new(),
+            },
+        );
+        let state = AppState {
+            registry: TenantRegistry::new(None),
+            hub: hub.clone(),
+            pg_manager: PostgresListenerManager::new(hub),
+            control_token: "control".into(),
+        };
+        handle_client_message(
+            &state,
+            "tenant",
+            "anon",
+            &json!({"role": "anon"}),
+            "conn",
+            parsed,
+        )
+        .await;
+        let mut messages = Vec::new();
+        while let Ok(message) = rx.try_recv() {
+            messages.push(message);
+        }
+        messages
+    }
+
+    #[tokio::test]
+    async fn binary_broadcast_with_a_ref_produces_a_json_phx_reply_ack() {
+        let frame = user_broadcast_push(
+            "1",
+            "4",
+            "realtime:room",
+            "test-event",
+            br#"{"message":"test"}"#,
+        );
+        let messages = deliver(&frame).await;
+        let ack = messages
+            .iter()
+            .find(|message| message.event == "phx_reply")
+            .expect("a broadcast with a ref must be acknowledged");
+        assert_eq!(ack.join_ref.as_deref(), Some("1"));
+        assert_eq!(ack.reference.as_deref(), Some("4"));
+        assert_eq!(ack.payload["status"], "ok");
+        let encoded = ack.encode_for_client("2.0.0").unwrap();
+        assert!(
+            encoded.starts_with('['),
+            "the v2 acknowledgement stays a Phoenix JSON text array"
+        );
+        let decoded = PhoenixV2Message::decode_client_frame(&encoded).unwrap();
+        assert_eq!(decoded.event, "phx_reply");
+        assert_eq!(decoded.reference.as_deref(), Some("4"));
+    }
+
+    #[tokio::test]
+    async fn binary_broadcast_without_a_ref_is_not_acknowledged() {
+        let frame = user_broadcast_push(
+            "1",
+            "",
+            "realtime:room",
+            "test-event",
+            br#"{"message":"test"}"#,
+        );
+        let messages = deliver(&frame).await;
+        assert!(messages.iter().all(|message| message.event != "phx_reply"));
     }
 }
