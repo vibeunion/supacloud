@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.141.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.141.0...management-api-v0.141.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* **ci:** run Integration & Compliance Tests on the Rust Realtime gateway ([#2831](https://github.com/vibeunion/supacloud/issues/2831)) ([9ac97e3](https://github.com/vibeunion/supacloud/commit/9ac97e3320a92c6270df2358089865aaf03bc8c0))
+* **postgrest:** attest the env-only Postrust launcher ([#2827](https://github.com/vibeunion/supacloud/issues/2827)) ([67bd06c](https://github.com/vibeunion/supacloud/commit/67bd06c30be54c4235c9a83cebac0c8831e1847f))
+* **realtime:** reconcile sealed project credentials ([#2828](https://github.com/vibeunion/supacloud/issues/2828)) ([3b4f503](https://github.com/vibeunion/supacloud/commit/3b4f503b422699f8f03caa0d55ecc4a160926ac7))
+
+
+### Elegance & Refactoring
+
+* **postrust:** canonicalize runtime component naming ([#2832](https://github.com/vibeunion/supacloud/issues/2832)) ([6e5cb56](https://github.com/vibeunion/supacloud/commit/6e5cb5653b7f5d446012500ad13ede4e06ad36f5))
+
 ## [0.141.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.140.0...management-api-v0.141.0) (2026-11-25)
 
 

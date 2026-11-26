@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.1](https://github.com/vibeunion/supacloud/compare/admin-v0.34.0...admin-v0.34.1) (2026-11-26)
+
+
+### Elegance & Refactoring
+
+* **postrust:** canonicalize runtime component naming ([#2832](https://github.com/vibeunion/supacloud/issues/2832)) ([6e5cb56](https://github.com/vibeunion/supacloud/commit/6e5cb5653b7f5d446012500ad13ede4e06ad36f5))
+
 ## [0.34.0](https://github.com/vibeunion/supacloud/compare/admin-v0.33.0...admin-v0.34.0) (2026-11-20)
 
 
