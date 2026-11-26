@@ -358,8 +358,25 @@ async fn handle_socket(
                     }
                 }
             }
-            Message::Binary(_) => {
-                // Ignore raw binary frame or forward if needed
+            Message::Binary(bytes) => {
+                // realtime-js v2 encodes broadcast pushes as a binary frame.
+                // JSON text broadcasts stay on the text path above.
+                match PhoenixV2Message::decode_user_broadcast_push(bytes.as_ref()) {
+                    Ok(parsed) => {
+                        handle_client_message(
+                            &state,
+                            &tenant_id,
+                            &role,
+                            &claims,
+                            &conn_id_recv,
+                            parsed,
+                        )
+                        .await;
+                    }
+                    Err(e) => {
+                        debug!(conn_id = %conn_id_recv, error = %e, "Ignored non-broadcast binary frame");
+                    }
+                }
             }
             Message::Ping(_) => {}
             Message::Pong(_) => {}

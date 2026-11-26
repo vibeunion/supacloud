@@ -192,6 +192,76 @@ fn client_uses_phoenix_v2(vsn: &str) -> bool {
     vsn.split('.').next() == Some("2")
 }
 
+/// `realtime-js` v2 sends broadcast pushes as a binary frame (kind 3), not a
+/// JSON array. The layout matches `Serializer._encodeUserBroadcastPush`.
+const USER_BROADCAST_PUSH_KIND: u8 = 3;
+const USER_BROADCAST_JSON_ENCODING: u8 = 1;
+
+impl PhoenixV2Message {
+    pub fn decode_user_broadcast_push(bytes: &[u8]) -> Result<Self, ProtocolError> {
+        if bytes.first() != Some(&USER_BROADCAST_PUSH_KIND) || bytes.len() < 7 {
+            return Err(ProtocolError::InvalidFrameFormat);
+        }
+        let join_len = bytes[1] as usize;
+        let ref_len = bytes[2] as usize;
+        let topic_len = bytes[3] as usize;
+        let event_len = bytes[4] as usize;
+        let metadata_len = bytes[5] as usize;
+        let encoding = bytes[6];
+        if encoding != USER_BROADCAST_JSON_ENCODING {
+            return Err(ProtocolError::InvalidFrameFormat);
+        }
+        let mut offset = 7;
+        let join_ref = read_counted_string(bytes, &mut offset, join_len)?;
+        let reference = read_counted_string(bytes, &mut offset, ref_len)?;
+        let topic = read_counted_string(bytes, &mut offset, topic_len)?;
+        let user_event = read_counted_string(bytes, &mut offset, event_len)?;
+        let metadata_end = offset
+            .checked_add(metadata_len)
+            .ok_or(ProtocolError::InvalidFrameFormat)?;
+        if metadata_end > bytes.len() {
+            return Err(ProtocolError::InvalidFrameFormat);
+        }
+        offset = metadata_end;
+        let user_payload: Value = serde_json::from_slice(&bytes[offset..])
+            .map_err(|_| ProtocolError::InvalidFrameFormat)?;
+        let topic = topic.ok_or(ProtocolError::InvalidFrameFormat)?;
+        let user_event = user_event.ok_or(ProtocolError::InvalidFrameFormat)?;
+        Ok(Self {
+            join_ref,
+            reference,
+            topic,
+            event: "broadcast".to_string(),
+            payload: serde_json::json!({
+                "type": "broadcast",
+                "event": user_event,
+                "payload": user_payload,
+            }),
+        })
+    }
+}
+
+fn read_counted_string(
+    bytes: &[u8],
+    offset: &mut usize,
+    length: usize,
+) -> Result<Option<String>, ProtocolError> {
+    let end = offset
+        .checked_add(length)
+        .ok_or(ProtocolError::InvalidFrameFormat)?;
+    if end > bytes.len() {
+        return Err(ProtocolError::InvalidFrameFormat);
+    }
+    let text =
+        std::str::from_utf8(&bytes[*offset..end]).map_err(|_| ProtocolError::InvalidFrameFormat)?;
+    *offset = end;
+    Ok(if text.is_empty() {
+        None
+    } else {
+        Some(text.to_string())
+    })
+}
+
 fn optional_frame_ref(value: Option<&Value>) -> Option<String> {
     match value {
         None | Some(Value::Null) => None,
@@ -317,6 +387,39 @@ mod tests {
         assert_eq!(echoed["event"], "broadcast");
         assert_eq!(echoed["ref"], "8");
         assert!(PhoenixV2Message::decode_client_frame(&encoded).is_ok());
+    }
+
+    #[test]
+    fn test_v2_binary_broadcast_push_decodes_to_a_broadcast_message() {
+        // Kind 3 frame produced the same way as realtime-js
+        // Serializer._encodeUserBroadcastPush for a JSON user payload.
+        let join_ref = "3";
+        let reference = "9";
+        let topic = "realtime:room";
+        let user_event = "test-event";
+        let user_payload = br#"{"message":"test"}"#;
+        let mut frame = vec![
+            3,
+            join_ref.len() as u8,
+            reference.len() as u8,
+            topic.len() as u8,
+            user_event.len() as u8,
+            0,
+            1,
+        ];
+        frame.extend_from_slice(join_ref.as_bytes());
+        frame.extend_from_slice(reference.as_bytes());
+        frame.extend_from_slice(topic.as_bytes());
+        frame.extend_from_slice(user_event.as_bytes());
+        frame.extend_from_slice(user_payload);
+
+        let decoded = PhoenixV2Message::decode_user_broadcast_push(&frame).unwrap();
+        assert_eq!(decoded.join_ref.as_deref(), Some(join_ref));
+        assert_eq!(decoded.reference.as_deref(), Some(reference));
+        assert_eq!(decoded.topic, topic);
+        assert_eq!(decoded.event, "broadcast");
+        assert_eq!(decoded.payload["event"], user_event);
+        assert_eq!(decoded.payload["payload"]["message"], "test");
     }
 
     #[test]
