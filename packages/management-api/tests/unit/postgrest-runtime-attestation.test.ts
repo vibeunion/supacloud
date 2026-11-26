@@ -99,11 +99,13 @@ async function activeFixture(content = "db-pool = 10\n") {
   });
   const executable = await realpath(process.execPath);
   let loadedConfigPath = activated.layout.generationPath;
+  let environmentNames: string[] = [];
+  let postrustShape = false;
   const processIdentity = (): PostgrestProcessIdentity => ({
     startId: "987654321",
     executable,
-    commandLine: [executable, loadedConfigPath],
-    environmentNames: [],
+    commandLine: postrustShape ? [executable] : [executable, loadedConfigPath],
+    environmentNames,
   });
   const operations: PostgrestAttestationOperations = {
     runtimeIdentity: async () => ({ uid: currentUid(), gid: currentGid() }),
@@ -117,6 +119,12 @@ async function activeFixture(content = "db-pool = 10\n") {
     operations,
     setLoadedConfigPath(path: string) {
       loadedConfigPath = path;
+    },
+    setEnvironmentNames(names: string[]) {
+      environmentNames = names;
+    },
+    setPostrustShape(value: boolean) {
+      postrustShape = value;
     },
   };
 }
@@ -234,6 +242,41 @@ describe("PostgREST runtime attestation", () => {
       actual: "running",
       health: "healthy",
       loadedAt: ACTIVE_IDENTITY.loadedAt,
+    });
+  });
+
+  test("attests the env-only Postrust launcher against the pointer generation", async () => {
+    const fixture = await activeFixture();
+    const loadedAt = new Date(Date.now() + 60_000).toISOString();
+    fixture.operations.systemdMainProcess = async () => ({ ...ACTIVE_IDENTITY, loadedAt });
+    fixture.setPostrustShape(true);
+    fixture.setEnvironmentNames(["PGRST_COMPAT_MODE", "PGRST_DB_URI", "PGRST_SERVER_PORT"]);
+
+    expect(await attestPostgrestRuntime(
+      request(fixture.directory, fixture.activated.revision),
+      fixture.operations,
+    )).toEqual({
+      desiredRevision: fixture.activated.revision,
+      loadedRevision: fixture.activated.revision,
+      attestationState: "loaded",
+      matchesDesired: true,
+      actual: "running",
+      health: "healthy",
+      loadedAt,
+    });
+  });
+
+  test("still treats PGRST_* as an override for a config-file process", async () => {
+    const fixture = await activeFixture();
+    fixture.setEnvironmentNames(["PGRST_COMPAT_MODE"]);
+
+    expect(await attestPostgrestRuntime(
+      request(fixture.directory, fixture.activated.revision),
+      fixture.operations,
+    )).toMatchObject({
+      desiredRevision: fixture.activated.revision,
+      attestationState: "drifted",
+      matchesDesired: null,
     });
   });
 

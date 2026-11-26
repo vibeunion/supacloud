@@ -191,7 +191,7 @@ export async function validatePostgrestGenerationTarget(
   projectRef: string,
   pointerTarget: string,
   ownership: PostgrestControlOwnership,
-): Promise<{ path: string; revision: string }> {
+): Promise<{ path: string; revision: string; modifiedAtMs: number }> {
   if (!validRawPointerTarget(projectRef, pointerTarget)) {
     throw new Error("Invalid PostgREST generation pointer target");
   }
@@ -216,7 +216,7 @@ export async function validatePostgrestGenerationTarget(
   if (revision !== `hmac-sha256:${digest}`) {
     throw new Error("PostgREST generation content does not match its filename");
   }
-  return { path: resolvedPath, revision };
+  return { path: resolvedPath, revision, modifiedAtMs: generationMetadata.mtimeMs };
 }
 
 export async function readPostgrestPointerTarget(
