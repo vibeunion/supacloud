@@ -50,7 +50,7 @@ runtime_binary_current=true
 systemctl() {
     case "$1" in
         list-units)
-            [[ "$runtime_active" == true ]] && printf 'supacloud-pgrst@tenant1.service loaded active running PostgREST\n'
+            [[ "$runtime_active" == true ]] && printf 'supacloud-postrust@tenant1.service loaded active running PostgREST\n'
             ;;
         stop)
             printf 'stop %s\n' "$2" >> "$systemctl_log"
@@ -105,9 +105,9 @@ export POSTGREST_SHA256="$good_checksum"
 write_binary v14.16
 supacloud_upgrade_postgrest_binary "$postgrest_binary"
 [[ "$(supacloud_postgrest_binary_version "$postgrest_binary")" == v16.4 ]]
-grep -Fq 'stop supacloud-pgrst@tenant1.service' "$systemctl_log"
+grep -Fq 'stop supacloud-postrust@tenant1.service' "$systemctl_log"
 grep -Fq 'daemon-reload' "$systemctl_log"
-grep -Fq 'start supacloud-pgrst@tenant1.service' "$systemctl_log"
+grep -Fq 'start supacloud-postrust@tenant1.service' "$systemctl_log"
 [[ -f "${SUPACLOUD_POSTGREST_LAST_BACKUP_DIR}/binary/content" ]]
 
 # An already-attested target runtime is a no-op.
@@ -122,8 +122,8 @@ runtime_binary_current=false
 : > "$systemctl_log"
 supacloud_upgrade_postgrest_binary "$postgrest_binary"
 [[ ! -s "$download_log" ]]
-grep -Fq 'stop supacloud-pgrst@tenant1.service' "$systemctl_log"
-grep -Fq 'start supacloud-pgrst@tenant1.service' "$systemctl_log"
+grep -Fq 'stop supacloud-postrust@tenant1.service' "$systemctl_log"
+grep -Fq 'start supacloud-postrust@tenant1.service' "$systemctl_log"
 runtime_binary_current=true
 
 # Release tags without the required v prefix are rejected before mutation.

@@ -38,7 +38,7 @@ render_canonical_postgrest_unit() {
 }
 
 token=01234567-89ab-cdef-0123-456789abcdef
-printf 'operation=install\nunit_name=supacloud-pgrst@.service\n' > "$TMP_DIR/requests/$token.request"
+printf 'operation=install\nunit_name=supacloud-postrust@.service\n' > "$TMP_DIR/requests/$token.request"
 render_canonical_postgrest_unit > "$TMP_DIR/requests/$token.unit"
 
 sed \
@@ -46,25 +46,25 @@ sed \
   -e "s#/etc/systemd/system/#$TMP_DIR/units/#g" \
   "$ROOT_DIR/scripts/lib/systemd_unit_broker.sh" > "$TMP_DIR/broker.sh"
 PATH="$TMP_DIR/bin:$PATH" bash "$TMP_DIR/broker.sh" "$token"
-grep -Fq 'ExecStart=/usr/local/libexec/supacloud/postgrest-launcher %i' "$TMP_DIR/units/supacloud-pgrst@.service"
+grep -Fq 'ExecStart=/usr/local/libexec/supacloud/postrust-launcher %i' "$TMP_DIR/units/supacloud-postrust@.service"
 [[ ! -e "$TMP_DIR/requests/$token.request" ]]
 [[ ! -e "$TMP_DIR/requests/$token.unit" ]]
 
-printf 'operation=install\nunit_name=supacloud-pgrst@.service\n' > "$TMP_DIR/requests/$token.request"
-printf '[Unit]\nDescription=misplaced\n[Service]\nType=oneshot\nUser=supacloud-%%i\nGroup=supacloud-%%i\nNoNewPrivileges=true\nStartLimitBurst=3\nStartLimitIntervalSec=60\nEnvironmentFile=/etc/supabase/tenants/%%i.env\nExecStart=/usr/local/libexec/supacloud/postgrest-launcher %%i\n[Install]\nWantedBy=multi-user.target\n' > "$TMP_DIR/requests/$token.unit"
+printf 'operation=install\nunit_name=supacloud-postrust@.service\n' > "$TMP_DIR/requests/$token.request"
+printf '[Unit]\nDescription=misplaced\n[Service]\nType=oneshot\nUser=supacloud-%%i\nGroup=supacloud-%%i\nNoNewPrivileges=true\nStartLimitBurst=3\nStartLimitIntervalSec=60\nEnvironmentFile=/etc/supabase/tenants/%%i.env\nExecStart=/usr/local/libexec/supacloud/postrust-launcher %%i\n[Install]\nWantedBy=multi-user.target\n' > "$TMP_DIR/requests/$token.unit"
 if PATH="$TMP_DIR/bin:$PATH" bash "$TMP_DIR/broker.sh" "$token" >/dev/null 2>&1; then
   echo "broker accepted Service-scoped start limits" >&2
   exit 1
 fi
 
-printf 'operation=install\nunit_name=supacloud-pgrst@.service\n' > "$TMP_DIR/requests/$token.request"
-printf '[Unit]\nDescription=test\n[Service]\nType=oneshot\nUser=supacloud-%%i\nGroup=supacloud-%%i\nNoNewPrivileges=true\nEnvironmentFile=/etc/supabase/tenants/%%i.env\nExecStart=/usr/local/libexec/supacloud/postgrest-launcher %%i\n[Install]\nWantedBy=multi-user.target\n' > "$TMP_DIR/requests/$token.unit"
+printf 'operation=install\nunit_name=supacloud-postrust@.service\n' > "$TMP_DIR/requests/$token.request"
+printf '[Unit]\nDescription=test\n[Service]\nType=oneshot\nUser=supacloud-%%i\nGroup=supacloud-%%i\nNoNewPrivileges=true\nEnvironmentFile=/etc/supabase/tenants/%%i.env\nExecStart=/usr/local/libexec/supacloud/postrust-launcher %%i\n[Install]\nWantedBy=multi-user.target\n' > "$TMP_DIR/requests/$token.unit"
 PATH="$TMP_DIR/bin:$PATH" bash "$TMP_DIR/broker.sh" "$token"
-grep -Fq 'EnvironmentFile=/etc/supabase/tenants/%i.env' "$TMP_DIR/units/supacloud-pgrst@.service"
+grep -Fq 'EnvironmentFile=/etc/supabase/tenants/%i.env' "$TMP_DIR/units/supacloud-postrust@.service"
 
-printf 'operation=remove\nunit_name=supacloud-pgrst@.service\n' > "$TMP_DIR/requests/$token.request"
+printf 'operation=remove\nunit_name=supacloud-postrust@.service\n' > "$TMP_DIR/requests/$token.request"
 PATH="$TMP_DIR/bin:$PATH" bash "$TMP_DIR/broker.sh" "$token"
-[[ ! -e "$TMP_DIR/units/supacloud-pgrst@.service" ]]
+[[ ! -e "$TMP_DIR/units/supacloud-postrust@.service" ]]
 
 printf 'operation=install\nunit_name=evil.service\n' > "$TMP_DIR/requests/$token.request"
 printf '[Service]\nExecStart=/bin/sh\n' > "$TMP_DIR/requests/$token.unit"
@@ -73,42 +73,42 @@ if PATH="$TMP_DIR/bin:$PATH" bash "$TMP_DIR/broker.sh" "$token" >/dev/null 2>&1;
   exit 1
 fi
 
-printf 'operation=install\nunit_name=supacloud-pgrst@.service\n' > "$TMP_DIR/requests/$token.request"
+printf 'operation=install\nunit_name=supacloud-postrust@.service\n' > "$TMP_DIR/requests/$token.request"
 printf '[Unit]\nDescription=test\n[Service]\nType=oneshot\nUser=root\nGroup=root\nNoNewPrivileges=true\nEnvironmentFile=/etc/supabase/tenants/%%i.env\nExecStart=/bin/true\n[Install]\nWantedBy=multi-user.target\n' > "$TMP_DIR/requests/$token.unit"
 if PATH="$TMP_DIR/bin:$PATH" bash "$TMP_DIR/broker.sh" "$token" >/dev/null 2>&1; then
   echo "broker accepted a root systemd identity" >&2
   exit 1
 fi
 
-printf 'operation=install\nunit_name=supacloud-pgrst@.service\n' > "$TMP_DIR/requests/$token.request"
+printf 'operation=install\nunit_name=supacloud-postrust@.service\n' > "$TMP_DIR/requests/$token.request"
 printf '[Unit]\nDescription=test\n[Service]\nType=oneshot\nUser=supacloud-%%i\nGroup=supacloud-%%i\nNoNewPrivileges=true\nEnvironmentFile=/etc/supabase/tenants/%%i.env\nExecStartPre=/bin/sh\nExecStart=/bin/true\n[Install]\nWantedBy=multi-user.target\n' > "$TMP_DIR/requests/$token.unit"
 if PATH="$TMP_DIR/bin:$PATH" bash "$TMP_DIR/broker.sh" "$token" >/dev/null 2>&1; then
   echo "broker accepted an unsupported systemd directive" >&2
   exit 1
 fi
 
-printf 'operation=install\nunit_name=supacloud-pgrst@.service\n' > "$TMP_DIR/requests/$token.request"
+printf 'operation=install\nunit_name=supacloud-postrust@.service\n' > "$TMP_DIR/requests/$token.request"
 printf '[Unit]\nDescription=test\n[Service]\nType=oneshot\nUser=supacloud-%%i\nGroup=supacloud-%%i\nNoNewPrivileges=true\nExecStart=+/bin/true\n[Install]\nWantedBy=multi-user.target\n' > "$TMP_DIR/requests/$token.unit"
 if PATH="$TMP_DIR/bin:$PATH" bash "$TMP_DIR/broker.sh" "$token" >/dev/null 2>&1; then
   echo "broker accepted a privileged execution prefix" >&2
   exit 1
 fi
 
-printf 'operation=install\nunit_name=supacloud-pgrst@.service\n' > "$TMP_DIR/requests/$token.request"
+printf 'operation=install\nunit_name=supacloud-postrust@.service\n' > "$TMP_DIR/requests/$token.request"
 printf '[Unit]\nDescription=bad\001value\n[Service]\nType=oneshot\nUser=supacloud-%%i\nGroup=supacloud-%%i\nNoNewPrivileges=true\nEnvironmentFile=/etc/supabase/tenants/%%i.env\nExecStart=/bin/true\n[Install]\nWantedBy=multi-user.target\n' > "$TMP_DIR/requests/$token.unit"
 if PATH="$TMP_DIR/bin:$PATH" bash "$TMP_DIR/broker.sh" "$token" >/dev/null 2>&1; then
   echo "broker accepted a control character" >&2
   exit 1
 fi
 
-printf 'operation=install\nunit_name=supacloud-pgrst@.service\n' > "$TMP_DIR/requests/$token.request"
+printf 'operation=install\nunit_name=supacloud-postrust@.service\n' > "$TMP_DIR/requests/$token.request"
 printf '[Unit]\nDescription=test\n[Service]\nType=oneshot\nUser=supacloud-%%i\nGroup=supacloud-%%i\nNoNewPrivileges=true\nEnvironmentFile=-/etc/supabase/management-api.env\nExecStart=/bin/true\n[Install]\nWantedBy=multi-user.target\n' > "$TMP_DIR/requests/$token.unit"
 if PATH="$TMP_DIR/bin:$PATH" bash "$TMP_DIR/broker.sh" "$token" >/dev/null 2>&1; then
   echo "broker accepted the control-plane environment file" >&2
   exit 1
 fi
 
-printf 'operation=install\nunit_name=supacloud-pgrst@.service\n' > "$TMP_DIR/requests/$token.request"
+printf 'operation=install\nunit_name=supacloud-postrust@.service\n' > "$TMP_DIR/requests/$token.request"
 printf '[Unit]\nDescription=test\n[Service]\nType=oneshot\nUser=supacloud-%%i\nGroup=supacloud-%%i\nNoNewPrivileges=true\nEnvironmentFile=/etc/supabase/tenants/%%i.env\nEnvironmentFile=/etc/supabase/tenants/%%i.env\nExecStart=/bin/true\n[Install]\nWantedBy=multi-user.target\n' > "$TMP_DIR/requests/$token.unit"
 if PATH="$TMP_DIR/bin:$PATH" bash "$TMP_DIR/broker.sh" "$token" >/dev/null 2>&1; then
   echo "broker accepted duplicate PostgREST environment files" >&2

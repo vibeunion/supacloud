@@ -20,10 +20,10 @@ const invalidObservations: unknown[] = [
   { actual: "starting", health: "healthy", last_error: null },
   { actual: "error", health: "unhealthy", last_error: 1 },
 ];
-const validUnit = "supacloud-pgrst@fixture";
+const validUnit = "supacloud-postrust@fixture";
 const invalidTargets: Array<{ port: unknown; unit: unknown }> = [
   ...[undefined, null, 0, -1, 1.5, 65536, NaN, Infinity, "54321"].map(port => ({ port, unit: validUnit })),
-  ...[undefined, null, 1, "", "supacloud-pgrst@other", `${validUnit}.service`, `${validUnit}\n`]
+  ...[undefined, null, 1, "", "supacloud-postrust@other", `${validUnit}.service`, `${validUnit}\n`]
     .map(unit => ({ port: 54321, unit })),
 ];
 
@@ -35,7 +35,7 @@ test("runtime targets require numeric ports and the current project's canonical 
     expect(() => parsePostgrestRuntimeTarget(port, unit, "fixture")).toThrow(InvalidPostgrestRuntimeTargetError);
   }
   for (const ref of ["", "../fixture", "fixture\n", "x".repeat(129)]) {
-    expect(() => parsePostgrestRuntimeTarget(54321, `supacloud-pgrst@${ref}`, ref))
+    expect(() => parsePostgrestRuntimeTarget(54321, `supacloud-postrust@${ref}`, ref))
       .toThrow(InvalidPostgrestRuntimeTargetError);
   }
   let coercions = 0;
@@ -137,7 +137,7 @@ test.skipIf(process.env.SUPACLOUD_MANAGEMENT_TEST_NATIVE !== "1")(
     let observation: unknown = { actual: "running", health: "healthy", last_error: null };
     let onObserve: (() => Promise<void>) | undefined;
     const observe = mock(async () => { await onObserve?.(); return observation; });
-    let unitResult: (ref: string) => unknown = ref => `supacloud-pgrst@${ref}`;
+    let unitResult: (ref: string) => unknown = ref => `supacloud-postrust@${ref}`;
     const replacements: Record<string, unknown> = {
       getTenantPort: port,
       postgrestController: { observe, unit: (ref: string) => unitResult(ref) },
@@ -190,7 +190,7 @@ test.skipIf(process.env.SUPACLOUD_MANAGEMENT_TEST_NATIVE !== "1")(
         }
       } finally {
         resolvedPort = 54321;
-        unitResult = ref => `supacloud-pgrst@${ref}`;
+        unitResult = ref => `supacloud-postrust@${ref}`;
       }
       for (const invalid of invalidObservations) {
         observation = invalid;

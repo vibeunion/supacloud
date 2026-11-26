@@ -13,7 +13,7 @@ shift
 
 config_root="${SUPACLOUD_POSTGREST_CONFIG_DIR:-/etc/supabase/tenants}"
 config_trust_root="${SUPACLOUD_POSTGREST_CONFIG_TRUST_ROOT:-/etc/supabase}"
-postgrest_binary="${SUPACLOUD_POSTGREST_BIN:-/usr/local/bin/postgrest}"
+postgrest_binary="${SUPACLOUD_POSTGREST_BIN:-/usr/local/bin/postrust}"
 binary_trust_root="${SUPACLOUD_POSTGREST_BINARY_TRUST_ROOT:-/usr/local}"
 control_uid="${SUPACLOUD_POSTGREST_CONTROL_UID:-0}"
 runtime_uid=$(id -u)
@@ -114,7 +114,7 @@ assert_binary || {
     exit 1
 }
 
-pointer_path="${config_root}/${project_ref}_postgrest.current"
+pointer_path="${config_root}/${project_ref}_postrust.current"
 legacy_path="${config_root}/${project_ref}.conf"
 config_path=""
 
@@ -129,7 +129,7 @@ if [[ -e "$pointer_path" || -L "$pointer_path" ]]; then
         echo "ERROR: Empty PostgREST generation pointer" >&2
         exit 1
     }
-    [[ "$pointer_target" =~ ^${project_ref}_postgrest\.d/[a-f0-9]{64}\.conf$ \
+    [[ "$pointer_target" =~ ^${project_ref}_postrust\.d/[a-f0-9]{64}\.conf$ \
         && "$pointer_bytes" -eq $((${#pointer_target} + 1)) ]] || {
         echo "ERROR: Invalid PostgREST generation pointer" >&2
         exit 1
@@ -139,7 +139,7 @@ if [[ -e "$pointer_path" || -L "$pointer_path" ]]; then
         exit 1
     }
 
-    generation_directory="${config_root}/${project_ref}_postgrest.d"
+    generation_directory="${config_root}/${project_ref}_postrust.d"
     config_path="${config_root}/${pointer_target}"
     assert_directory "$generation_directory" "$control_uid" "$runtime_gid" 750 \
         && [[ "$(canonical_path "$generation_directory")" = "$generation_directory" ]] \

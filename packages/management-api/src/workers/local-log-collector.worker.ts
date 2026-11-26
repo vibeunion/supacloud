@@ -13,7 +13,7 @@ const JOURNAL_UNITS = [
   "supacloud-realtime-gateway.service",
   "patroni.service",
   "supacloud-gotrue@*.service",
-  "supacloud-pgrst@*.service",
+  "supacloud-postrust@*.service",
   "supacloud-storage@*.service",
   "supacloud-postgres@*.service",
 ] as const;
@@ -71,11 +71,12 @@ export function projectLogFields(unit: string): {
   releaseId?: string;
   activationId?: string;
 } {
-  const match = /^supacloud-(gotrue|pgrst|storage|postgres)@([A-Za-z0-9_-]+)\.service$/.exec(unit);
+  const match = /^supacloud-(gotrue|pgrst|postrust|storage|postgres)@([A-Za-z0-9_-]+)\.service$/.exec(unit);
   if (match) {
     const serviceByUnit: Record<string, string> = {
       gotrue: "auth",
       pgrst: "postgrest",
+      postrust: "postgrest",
       storage: "storage",
       postgres: "database",
     };

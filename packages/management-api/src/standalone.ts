@@ -13,7 +13,7 @@ export function isSystemdUnitBrokerDigestCommand(args: string[]): boolean {
 }
 
 export function isPostgrestLauncherDigestCommand(args: string[]): boolean {
-  return args.length === 1 && args[0] === "--postgrest-launcher-sha256";
+  return args.length === 1 && args[0] === "--postrust-launcher-sha256";
 }
 
 export function isPostgrestProcessIdentityProbeCommand(args: string[]): boolean {
@@ -36,7 +36,7 @@ if (import.meta.main) {
     const { EMBEDDED_SYSTEMD_UNIT_BROKER_SHA256 } = await import("./embedded-systemd-unit-broker");
     writeStandaloneIdentity(`SupaCloud systemd-unit helper SHA-256: ${EMBEDDED_SYSTEMD_UNIT_BROKER_SHA256}`);
   } else if (isPostgrestLauncherDigestCommand(args)) {
-    const { EMBEDDED_POSTGREST_LAUNCHER_SHA256 } = await import("./embedded-postgrest-launcher");
+    const { EMBEDDED_POSTGREST_LAUNCHER_SHA256 } = await import("./embedded-postrust-launcher");
     writeStandaloneIdentity(`SupaCloud PostgREST launcher SHA-256: ${EMBEDDED_POSTGREST_LAUNCHER_SHA256}`);
   } else if (isPostgrestProcessIdentityProbeCommand(args)) {
     const { runPostgrestProcessIdentityProbe } = await import("./services/postgrest-process-identity");

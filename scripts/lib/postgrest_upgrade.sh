@@ -283,16 +283,16 @@ supacloud_install_pinned_postrust_layer() (
 
 supacloud_postgrest_active_units() {
     local unit units
-    units=$(systemctl list-units --type=service --state=running --no-legend --no-pager 'supacloud-pgrst@*.service') || return 1
+    units=$(systemctl list-units --type=service --state=running --no-legend --no-pager 'supacloud-postrust@*.service') || return 1
     while read -r unit _; do
-        [[ "$unit" =~ ^supacloud-pgrst@[a-z0-9-]{1,20}\.service$ ]] || continue
+        [[ "$unit" =~ ^supacloud-postrust@[a-z0-9-]{1,20}\.service$ ]] || continue
         printf '%s\n' "$unit"
     done <<< "$units"
 }
 
 supacloud_postgrest_unit_ref() {
     local unit="$1"
-    local ref="${unit#supacloud-pgrst@}"
+    local ref="${unit#supacloud-postrust@}"
     ref="${ref%.service}"
     [[ "$ref" =~ ^[a-z0-9-]{1,20}$ ]] || return 1
     printf '%s' "$ref"
@@ -546,7 +546,7 @@ supacloud_upgrade_postgrest_binary_transaction() (
 )
 
 supacloud_upgrade_postgrest_binary() {
-    local binary_path="${1:-/usr/local/bin/postgrest}"
+    local binary_path="${1:-/usr/local/bin/postrust}"
     local result_file
     result_file=$(mktemp "${TMPDIR:-/tmp}/supacloud-postgrest-result.XXXXXX") || return 1
     chmod 600 "$result_file"

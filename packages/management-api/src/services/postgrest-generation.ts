@@ -8,7 +8,7 @@ import {
 } from "./runtime-revision";
 
 const PROJECT_REF_PATTERN = /^[a-z0-9-]{1,64}$/;
-const GENERATION_TARGET_PATTERN = /^([a-z0-9-]{1,64})_postgrest\.d\/([a-f0-9]{64})\.conf$/;
+const GENERATION_TARGET_PATTERN = /^([a-z0-9-]{1,64})_postrust\.d\/([a-f0-9]{64})\.conf$/;
 const MANAGED_POSTGREST_CONFIG_PREFIX = "# Managed by SupaCloud Management API.";
 
 export interface PostgrestGenerationLayout {
@@ -69,12 +69,12 @@ export function postgrestGenerationLayout(
 ): PostgrestGenerationLayout {
   assertProjectRef(projectRef);
   const digest = revisionHex(revision);
-  const generationDirectory = join(tenantDirectory, `${projectRef}_postgrest.d`);
-  const pointerTarget = `${projectRef}_postgrest.d/${digest}.conf`;
+  const generationDirectory = join(tenantDirectory, `${projectRef}_postrust.d`);
+  const pointerTarget = `${projectRef}_postrust.d/${digest}.conf`;
   return {
     generationDirectory,
     generationPath: join(generationDirectory, `${digest}.conf`),
-    pointerPath: join(tenantDirectory, `${projectRef}_postgrest.current`),
+    pointerPath: join(tenantDirectory, `${projectRef}_postrust.current`),
     pointerTarget,
   };
 }
@@ -195,7 +195,7 @@ export async function validatePostgrestGenerationTarget(
   if (!validRawPointerTarget(projectRef, pointerTarget)) {
     throw new Error("Invalid PostgREST generation pointer target");
   }
-  const generationDirectory = resolve(tenantDirectory, `${projectRef}_postgrest.d`);
+  const generationDirectory = resolve(tenantDirectory, `${projectRef}_postrust.d`);
   const generationPath = resolve(tenantDirectory, pointerTarget);
   const [directoryMetadata, generationMetadata, resolvedDirectory, resolvedPath] = await Promise.all([
     lstat(generationDirectory),
@@ -243,7 +243,7 @@ export async function replacePostgrestPointer(
   setControlOwnership: (path: string) => Promise<void>,
 ): Promise<void> {
   if (!validRawPointerTarget(
-    basename(layout.pointerPath).replace(/_postgrest\.current$/, ""),
+    basename(layout.pointerPath).replace(/_postrust\.current$/, ""),
     pointerTarget,
   )) {
     throw new Error("Invalid PostgREST generation pointer target");
@@ -302,7 +302,7 @@ export async function removePostgrestPointerIfCurrent(
 export async function readCurrentPostgrestGeneration(
   request: ReadCurrentPostgrestGenerationRequest,
 ): Promise<{ content: string; pointerTarget: string; revision: string }> {
-  const pointerPath = join(request.tenantDirectory, `${request.projectRef}_postgrest.current`);
+  const pointerPath = join(request.tenantDirectory, `${request.projectRef}_postrust.current`);
   const pointerTarget = await readPostgrestPointerTarget(
     pointerPath,
     request.projectRef,
@@ -351,7 +351,7 @@ export async function readCurrentPostgrestGeneration(
     setControlOwnership: request.setControlOwnership,
   });
   const activatedPointerTarget = await readPostgrestPointerTarget(
-    join(request.tenantDirectory, `${request.projectRef}_postgrest.current`),
+    join(request.tenantDirectory, `${request.projectRef}_postrust.current`),
     request.projectRef,
     {
       controlOwnerUid: request.controlOwnerUid,
@@ -386,7 +386,7 @@ async function restorePointerAfterActivationFailure(
   if (previousPointerTarget) {
     await validatePostgrestGenerationTarget(
       dirname(layout.pointerPath),
-      basename(layout.pointerPath).replace(/_postgrest\.current$/, ""),
+      basename(layout.pointerPath).replace(/_postrust\.current$/, ""),
       previousPointerTarget,
       ownership,
     );

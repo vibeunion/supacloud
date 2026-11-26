@@ -81,7 +81,7 @@ import {
     verifyInstalledPostgrestLauncher,
     type PostgrestLauncherActivationState,
     type PostgrestLauncherPreflight,
-} from "./embedded-postgrest-launcher";
+} from "./embedded-postrust-launcher";
 import {
     applyGrafanaSubpathConfig,
     captureGrafanaConfigSnapshots,
@@ -1330,7 +1330,7 @@ async function validateManagementEmbeddedUpgradeArtifacts(filePath: string, bina
         parseDigest: parseSystemdUnitBrokerDigestOutput,
     });
     await validateManagementEmbeddedArtifact(filePath, binaryName, {
-        argument: "--postgrest-launcher-sha256",
+        argument: "--postrust-launcher-sha256",
         expectedSha256: EMBEDDED_POSTGREST_LAUNCHER_SHA256,
         label: "PostgREST launcher",
         parseDigest: parsePostgrestLauncherDigestOutput,

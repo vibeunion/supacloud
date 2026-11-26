@@ -82,7 +82,7 @@ export async function handleStatus() {
     p.log.info(`${unit}: ${status.exitCode === 0 ? "active" : "inactive"}`);
   }
 
-  const tenantUnits = await $`systemctl list-units 'supacloud-pgrst@*' 'supacloud-gotrue@*' --state=running --no-legend`.quiet().text().catch(() => "");
+  const tenantUnits = await $`systemctl list-units 'supacloud-postrust@*' 'supacloud-gotrue@*' --state=running --no-legend`.quiet().text().catch(() => "");
   if (tenantUnits) {
     const count = tenantUnits.split("\n").filter((line) => line.trim()).length;
     p.log.info(`running tenant runtime units: ${count}`);

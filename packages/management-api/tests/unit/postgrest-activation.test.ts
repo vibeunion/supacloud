@@ -10,7 +10,7 @@ describe("PostgREST generation activation transaction", () => {
     const rollback = mock(async () => {});
     const status = await completePostgrestActivation({
       projectRef: "tenant-a",
-      previousPointerTarget: "tenant-a_postgrest.d/old.conf",
+      previousPointerTarget: "tenant-a_postrust.d/old.conf",
       activate: async () => "healthy",
       rollback,
     });
@@ -24,7 +24,7 @@ describe("PostgREST generation activation transaction", () => {
     const rollbackSteps: string[] = [];
     const failure = await completePostgrestActivation({
       projectRef: "tenant-a",
-      previousPointerTarget: "tenant-a_postgrest.d/old.conf",
+      previousPointerTarget: "tenant-a_postrust.d/old.conf",
       activate: async () => { throw activationError; },
       rollback: async () => {
         rollbackSteps.push("validate-old", "restore-pointer", "restart", "health", "attest-old");
@@ -47,7 +47,7 @@ describe("PostgREST generation activation transaction", () => {
     const rollbackError = new Error("previous generation unhealthy");
     const failure = await completePostgrestActivation({
       projectRef: "tenant-a",
-      previousPointerTarget: "tenant-a_postgrest.d/old.conf",
+      previousPointerTarget: "tenant-a_postrust.d/old.conf",
       activate: async () => { throw activationError; },
       rollback: async () => { throw rollbackError; },
     }).catch((error: unknown) => error);

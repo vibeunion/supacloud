@@ -797,7 +797,7 @@ describe("ssh admin tool", () => {
         expect(rootScript).toContain('UPGRADE_RUNNER="$STAGED_MANAGEMENT"');
         expect(rootScript).toContain('timeout 5s "$STAGED_MANAGEMENT" --version');
         expect(rootScript).toContain('timeout 5s "$STAGED_MANAGEMENT" --systemd-unit-helper-sha256');
-        expect(rootScript).toContain('timeout 5s "$STAGED_MANAGEMENT" --postgrest-launcher-sha256');
+        expect(rootScript).toContain('timeout 5s "$STAGED_MANAGEMENT" --postrust-launcher-sha256');
         expect(rootScript).toContain("chown timeout; do command -v");
         expect(rootScript).not.toContain('UPGRADE_RUNNER=\'/usr/local/bin/supacloud\'');
     });
@@ -819,7 +819,7 @@ describe("ssh admin tool", () => {
                 "case \"${1:-}\" in",
                 "  --version) printf 'SupaCloud Version: 0.60.1\\n' ;;",
                 `  --systemd-unit-helper-sha256) printf 'SupaCloud systemd-unit helper SHA-256: ${"a".repeat(64)}\\n' ;;`,
-                `  --postgrest-launcher-sha256) ${launcherCommand} ;;`,
+                `  --postrust-launcher-sha256) ${launcherCommand} ;;`,
                 "  *) exit 2 ;;",
                 "esac",
                 "",
@@ -1161,7 +1161,7 @@ describe("ssh admin tool", () => {
         expect(command).toContain("supacloud_download_release_asset");
         expect(command).toContain('chmod 0755 "$STAGED_MANAGEMENT"');
         expect(command).toContain('"$STAGED_MANAGEMENT" --systemd-unit-helper-sha256');
-        expect(command).toContain('"$STAGED_MANAGEMENT" --postgrest-launcher-sha256');
+        expect(command).toContain('"$STAGED_MANAGEMENT" --postrust-launcher-sha256');
         expect(command).toContain("SUPACLOUD_EDGE_RUNTIME_UPGRADE_TAG=");
         expect(command).toContain("unset SUPACLOUD_ALLOW_UNVERIFIED_RELEASE");
         expect(command).toContain("SUPACLOUD_ATTESTATION_TRUSTED_ROOT");

@@ -18,7 +18,7 @@ const repoRoot = resolve(import.meta.dir, "../../../..");
 const launcher = join(repoRoot, "scripts/lib/postgrest_launcher.sh");
 const projectRef = "abcdefghijklmnopqrst";
 const generationDigest = "a".repeat(64);
-const generationTarget = `${projectRef}_postgrest.d/${generationDigest}.conf`;
+const generationTarget = `${projectRef}_postrust.d/${generationDigest}.conf`;
 
 type LauncherFixture = {
   root: string;
@@ -32,9 +32,9 @@ type LauncherFixture = {
 function createLauncherFixture(): LauncherFixture {
   const root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), "supacloud-pgrst-launcher-")));
   const configRoot = join(root, "tenants");
-  const generationDirectory = join(configRoot, `${projectRef}_postgrest.d`);
+  const generationDirectory = join(configRoot, `${projectRef}_postrust.d`);
   const generationPath = join(configRoot, generationTarget);
-  const pointerPath = join(configRoot, `${projectRef}_postgrest.current`);
+  const pointerPath = join(configRoot, `${projectRef}_postrust.current`);
   const binaryPath = join(root, "postgrest");
   mkdirSync(generationDirectory, { recursive: true });
   chmodSync(configRoot, 0o711);
@@ -213,7 +213,7 @@ describe("PostgREST launcher installation", () => {
       join(repoRoot, "packages/management-api/src/services/postgrest-systemd-template.ts"),
       "utf8",
     );
-    const canonicalPath = "/usr/local/libexec/supacloud/postgrest-launcher";
+    const canonicalPath = "/usr/local/libexec/supacloud/postrust-launcher";
 
     expect(installer).toContain(`local launcher_target="${canonicalPath}"`);
     expect(installer).toContain(`supacloud_capture_file_snapshot ${canonicalPath}`);
@@ -222,6 +222,6 @@ describe("PostgREST launcher installation", () => {
     expect(runtime).toContain(`ExecStart=${canonicalPath} %i`);
     expect(template).toContain(`ExecStart=${canonicalPath} %i`);
     expect(service).toContain("renderPostgrestSystemdTemplate({");
-    expect(`${service}\n${template}`).not.toContain("/usr/local/libexec/supacloud-postgrest-launcher");
+    expect(`${service}\n${template}`).not.toContain("/usr/local/libexec/supacloud-postrust-launcher");
   });
 });

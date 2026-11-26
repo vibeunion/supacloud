@@ -8,7 +8,7 @@ The upstream release stays [Postrust v3.4.0](https://github.com/postrust/postrus
 
 ### Host installer and tenant runtime default
 
-The host installer and tenant runtime default to the published temporary layer `v3.4.0+supacloud.1`. That layer is built from the pinned v3.4.0 source plus [`docs/patches/postrust-v3.4.0-temporary-fixes.patch`](./patches/postrust-v3.4.0-temporary-fixes.patch), which carries both the null-RPC fix and the GraphQL type-name fix. The installer downloads the existing release asset and verifies the layer SHA-256 and the binary SHA-256 before it installs the member at `/usr/local/bin/postgrest`.
+The host installer and tenant runtime default to the published temporary layer `v3.4.0+supacloud.1`. That layer is built from the pinned v3.4.0 source plus [`docs/patches/postrust-v3.4.0-temporary-fixes.patch`](./patches/postrust-v3.4.0-temporary-fixes.patch), which carries both the null-RPC fix and the GraphQL type-name fix. The installer downloads the existing release asset and verifies the layer SHA-256 and the binary SHA-256 before it installs the member at `/usr/local/bin/postrust`.
 
 | Item | Value |
 | --- | --- |
@@ -24,7 +24,7 @@ The host installer and tenant runtime default to the published temporary layer `
 
 `POSTGREST_SHA256`, `POSTRUST_BINARY_SHA256`, and `POSTRUST_RELEASE_URL` do not replace this pin. The layer is linux/amd64 only. An arm64 host does not install it by default.
 
-The version stamp `/usr/local/bin/postgrest.postrust-version` lists `v3.4.0+supacloud.1` and the binary SHA-256 above. Tenant start accepts that version only when an ELF at the path has that digest. The official unpatched digest is a different file, so it does not satisfy this check.
+The version stamp `/usr/local/bin/postrust.postrust-version` lists `v3.4.0+supacloud.1` and the binary SHA-256 above. Tenant start accepts that version only when an ELF at the path has that digest. The official unpatched digest is a different file, so it does not satisfy this check.
 
 ### Explicit `POSTGREST_VERSION=v3.4.0`, Compose, Podman, and CI
 
@@ -62,7 +62,7 @@ The built binary's SHA256 depends on the compiler output. It is recorded next to
 ## How to see which artifact is installed
 
 - Host default: `/usr/local/bin/postgrest.postrust-version` lists `v3.4.0+supacloud.1` and `647e3f3d649f96adca20db8d8b774167d8b4129d186dfa76839e6ed8866c457e`. That install has no null-RPC source-build stamp. The installer has already checked the layer digest `e9e721400159b4e2cce78a860b2989cb67b3eb3628a232a57a0bd8a0072be79e`.
-- Explicit `v3.4.0` source build, Compose, Podman, and CI: `/usr/local/bin/postgrest.postrust-patch` (or `/usr/local/lib/supacloud/postrust-patch` in the image) lists the patch id `postrust-v3.4.0-null-rpc-args`, patch SHA256, source SHA256, rustc `1.98.1`, and features `admin-ui,otel`. The image label is `org.supacloud.postrust.patch=postrust-v3.4.0-null-rpc-args`. `/usr/local/lib/supacloud/SHA256SUMS.postrust` is the built binary. A file whose SHA256 is `f174c84a1b3ac8a24c13a4ef7896adfc029ece8c1b206ee715e3864f5f169b7a` is refused.
+- Explicit `v3.4.0` source build, Compose, Podman, and CI: `/usr/local/bin/postrust.postrust-patch` (or `/usr/local/lib/supacloud/postrust-patch` in the image) lists the patch id `postrust-v3.4.0-null-rpc-args`, patch SHA256, source SHA256, rustc `1.98.1`, and features `admin-ui,otel`. The image label is `org.supacloud.postrust.patch=postrust-v3.4.0-null-rpc-args`. `/usr/local/lib/supacloud/SHA256SUMS.postrust` is the built binary. A file whose SHA256 is `f174c84a1b3ac8a24c13a4ef7896adfc029ece8c1b206ee715e3864f5f169b7a` is refused.
 
 Both patched builds use the same features as the official image: `admin-ui,otel`, not `compat-key-order`.
 

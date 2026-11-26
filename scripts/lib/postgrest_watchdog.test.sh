@@ -130,9 +130,9 @@ run_watchdog_in "$TMP_DIR/tenants" 200 ""
 GEN_SHA=$(printf 'a%.0s' {1..64})
 make_generation() {
   local dir="$1" ref="$2" port="$3"
-  mkdir -p "$dir/${ref}_postgrest.d"
-  printf 'server-port = %s\n' "$port" > "$dir/${ref}_postgrest.d/${GEN_SHA}.conf"
-  printf '%s_postgrest.d/%s.conf\n' "$ref" "$GEN_SHA" > "$dir/${ref}_postgrest.current"
+  mkdir -p "$dir/${ref}_postrust.d"
+  printf 'server-port = %s\n' "$port" > "$dir/${ref}_postrust.d/${GEN_SHA}.conf"
+  printf '%s_postrust.d/%s.conf\n' "$ref" "$GEN_SHA" > "$dir/${ref}_postrust.current"
 }
 
 # Generation-only tenants and pointers with stale legacy files use active ports.
@@ -159,25 +159,25 @@ for scenario in missing multiline no-newline traversal cross-tenant symlink-poin
   dir="$TMP_DIR/$scenario"
   make_generation "$dir" broken 3135
   make_generation "$dir" healthy 3136
-  pointer="$dir/broken_postgrest.current"
-  config="$dir/broken_postgrest.d/$GEN_SHA.conf"
+  pointer="$dir/broken_postrust.current"
+  config="$dir/broken_postrust.d/$GEN_SHA.conf"
   printf 'server-port = 9999\n' > "$dir/broken.conf"
   case "$scenario" in
     missing) rm "$config" ;;
     multiline) printf 'extra\n' >> "$pointer" ;;
-    no-newline) printf 'broken_postgrest.d/%s.conf' "$GEN_SHA" > "$pointer" ;;
+    no-newline) printf 'broken_postrust.d/%s.conf' "$GEN_SHA" > "$pointer" ;;
     traversal) printf '../outside.conf\n' > "$pointer" ;;
-    cross-tenant) printf 'healthy_postgrest.d/%s.conf\n' "$GEN_SHA" > "$pointer" ;;
+    cross-tenant) printf 'healthy_postrust.d/%s.conf\n' "$GEN_SHA" > "$pointer" ;;
     symlink-pointer) mv "$pointer" "$dir/pointer-target"; ln -s pointer-target "$pointer" ;;
     dangling-pointer) rm "$pointer"; ln -s missing "$pointer" ;;
     symlink-config) mv "$config" "$dir/config-target"; ln -s ../config-target "$config" ;;
-    symlink-directory) mv "$dir/broken_postgrest.d" "$dir/generation-target"; ln -s generation-target "$dir/broken_postgrest.d" ;;
+    symlink-directory) mv "$dir/broken_postrust.d" "$dir/generation-target"; ln -s generation-target "$dir/broken_postrust.d" ;;
     fifo) rm "$pointer"; mkfifo "$pointer" ;;
     directory) rm "$pointer"; mkdir "$pointer" ;;
     empty) : > "$pointer" ;;
     oversized) printf '%0200d\n' 0 > "$pointer" ;;
-    crlf) printf 'broken_postgrest.d/%s.conf\r\n' "$GEN_SHA" > "$pointer" ;;
-    nul) printf 'broken_postgrest.d/%s.conf\0\n' "$GEN_SHA" > "$pointer" ;;
+    crlf) printf 'broken_postrust.d/%s.conf\r\n' "$GEN_SHA" > "$pointer" ;;
+    nul) printf 'broken_postrust.d/%s.conf\0\n' "$GEN_SHA" > "$pointer" ;;
   esac
   rm -f "$TMP_DIR/state/broken.state" "$TMP_DIR/state/healthy.state"
   : > "$TMP_DIR/probe.log"

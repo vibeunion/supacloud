@@ -517,7 +517,7 @@ describe("local upgrade remote runner", () => {
         expect(script).toContain("--target-version '0.50.31'");
         expect(script).toContain("--edge-runtime-version '0.16.8'");
         expect(script).toContain('timeout 5s "$RUNNER" --systemd-unit-helper-sha256');
-        expect(script).toContain('timeout 5s "$RUNNER" --postgrest-launcher-sha256');
+        expect(script).toContain('timeout 5s "$RUNNER" --postrust-launcher-sha256');
         expect(script).toContain('"$RUNNER" --control-plane-upgrade-preflight');
         expect(script.indexOf("--control-plane-upgrade-preflight"))
             .toBeLessThan(script.indexOf("upgrade --yes --target-version"));
@@ -544,7 +544,7 @@ describe("local upgrade remote runner", () => {
                 "case \"${1:-}\" in",
                 "  --version) printf 'SupaCloud Version: 0.50.31\\n' ;;",
                 `  --systemd-unit-helper-sha256) printf 'SupaCloud systemd-unit helper SHA-256: ${"a".repeat(64)}\\n' ;;`,
-                `  --postgrest-launcher-sha256) ${launcherCommand} ;;`,
+                `  --postrust-launcher-sha256) ${launcherCommand} ;;`,
                 "  *) exit 2 ;;",
                 "esac",
             ].join("\n");

@@ -59,7 +59,7 @@ function request(
     projectRef: PROJECT_REF,
     desiredRevision,
     port: 3101,
-    unit: `supacloud-pgrst@${PROJECT_REF}`,
+    unit: `supacloud-postrust@${PROJECT_REF}`,
     tenantDirectory: directory,
     postgrestBinary,
     controlOwnerUid: currentUid(),

@@ -57,7 +57,7 @@ function generation(content: string): PostgrestPoolGeneration {
   const revision = postgrestConfigRevision(PROJECT_REF, canonicalContent);
   return {
     content: canonicalContent,
-    pointerTarget: `${PROJECT_REF}_postgrest.d/${revisionHex(revision)}.conf`,
+    pointerTarget: `${PROJECT_REF}_postrust.d/${revisionHex(revision)}.conf`,
     revision,
   };
 }
@@ -213,7 +213,7 @@ describe("managed PostgREST pool reconciliation", () => {
     expect(harness.current().content)
       .toBe(canonicalPostgrestConfig(LEGACY_CONFIG.replace("db-pool = 10", "db-pool = 3")));
     expect(harness.current().pointerTarget).toMatch(
-      new RegExp(`^${PROJECT_REF}_postgrest\\.d/[a-f0-9]{64}\\.conf$`),
+      new RegExp(`^${PROJECT_REF}_postrust\\.d/[a-f0-9]{64}\\.conf$`),
     );
     expect(await reconcileManagedPostgrestPool(request(harness.operations)))
       .toEqual({ state: "unchanged" });

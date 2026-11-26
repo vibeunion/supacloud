@@ -2170,7 +2170,7 @@ cleanup_legacy_supabase_compose_stack() {
         done
         if [[ ${#leftovers[@]} -gt 0 ]]; then
             log_warn "Leaving possible legacy data-plane containers in place: ${leftovers[*]}"
-            log_warn "After confirming per-project supacloud-pgrst@*/supacloud-gotrue@* services are healthy, rerun with SUPACLOUD_REMOVE_LEGACY_DATA_PLANE=true to remove them."
+            log_warn "After confirming per-project supacloud-postrust@*/supacloud-gotrue@* services are healthy, rerun with SUPACLOUD_REMOVE_LEGACY_DATA_PLANE=true to remove them."
         fi
     fi
 }
@@ -2965,7 +2965,7 @@ install_systemd_unit_broker() {
 
 install_postgrest_launcher() {
     local launcher_src="${SCRIPT_DIR}/scripts/lib/postgrest_launcher.sh"
-    local launcher_target="/usr/local/libexec/supacloud/postgrest-launcher"
+    local launcher_target="/usr/local/libexec/supacloud/postrust-launcher"
 
     if [[ ! -f "$launcher_src" ]]; then
         log_error "PostgREST launcher asset is missing"
@@ -2973,6 +2973,19 @@ install_postgrest_launcher() {
     fi
 
     install -D -m 0755 "$launcher_src" "$launcher_target"
+}
+
+install_postrust_compat_symlink() {
+    local binary="$1"
+    local compat="/usr/local/bin/postgrest"
+    [[ "$binary" == "$compat" ]] && return 0
+    if [[ -L "$compat" ]]; then
+        ln -sfn "$binary" "$compat"
+    elif [[ ! -e "$compat" ]]; then
+        ln -s "$binary" "$compat"
+    else
+        log_info "Keeping the existing PostgREST compatibility binary at ${compat}"
+    fi
 }
 
 install_realtime_file() {
@@ -3322,7 +3335,7 @@ capture_management_api_install() {
         supacloud_capture_file_snapshot /etc/systemd/system/supacloud-tenant-user@.service "${transaction_dir}/tenant-user-unit" &&
         supacloud_capture_file_snapshot /usr/local/libexec/supacloud/systemd-unit "${transaction_dir}/systemd-unit-helper" &&
         supacloud_capture_file_snapshot /etc/systemd/system/supacloud-systemd-unit@.service "${transaction_dir}/systemd-unit-unit" &&
-        supacloud_capture_file_snapshot /usr/local/libexec/supacloud/postgrest-launcher "${transaction_dir}/postgrest-launcher" &&
+        supacloud_capture_file_snapshot /usr/local/libexec/supacloud/postrust-launcher "${transaction_dir}/postrust-launcher" &&
         capture_management_edge_runtime_source_state "${transaction_dir}/edge-source-prior" &&
         capture_management_edge_runtime_service_state "${transaction_dir}/edge-service-prior"
 }
@@ -3370,7 +3383,7 @@ recover_management_api_install() {
     supacloud_restore_file_snapshot /etc/systemd/system/supacloud-tenant-user@.service "${transaction_dir}/tenant-user-unit" || return 1
     supacloud_restore_file_snapshot /usr/local/libexec/supacloud/systemd-unit "${transaction_dir}/systemd-unit-helper" || return 1
     supacloud_restore_file_snapshot /etc/systemd/system/supacloud-systemd-unit@.service "${transaction_dir}/systemd-unit-unit" || return 1
-    supacloud_restore_file_snapshot /usr/local/libexec/supacloud/postgrest-launcher "${transaction_dir}/postgrest-launcher" || return 1
+    supacloud_restore_file_snapshot /usr/local/libexec/supacloud/postrust-launcher "${transaction_dir}/postrust-launcher" || return 1
     if [[ "$keep_current_env" != "true" ]]; then
         supacloud_restore_file_snapshot "$MANAGEMENT_ENV_FILE" "${transaction_dir}/env" || return 1
     fi
@@ -4023,13 +4036,14 @@ deploy_jit_gateway_service() {
     deploy_jit_gateway_service
 
     # 7a. Upgrade the shared PostgREST binary as one global runtime transaction.
-    local POSTGREST_BIN="${POSTGREST_BIN:-/usr/local/bin/postgrest}"
+    local POSTGREST_BIN="${POSTGREST_BIN:-/usr/local/bin/postrust}"
     local POSTGREST_VERSION="${POSTGREST_VERSION:-$SUPACLOUD_POSTGREST_DEFAULT_VERSION}"
     log_info "Verifying Postrust ${POSTGREST_VERSION} (PostgREST-compatible REST) with staged upgrade and rollback protection..."
     supacloud_upgrade_postgrest_binary "$POSTGREST_BIN" || {
         log_error "Postrust ${POSTGREST_VERSION} upgrade failed"
         return 1
     }
+    install_postrust_compat_symlink "$POSTGREST_BIN"
     log_info "Postrust ${POSTGREST_VERSION} is installed; backup: ${SUPACLOUD_POSTGREST_LAST_BACKUP_DIR:-not-required}"
 
     # 7b. Upgrade GoTrue only from this explicit install/upgrade transaction.

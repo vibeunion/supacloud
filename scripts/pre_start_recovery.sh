@@ -96,7 +96,7 @@ restart_failed_tenants() {
     fi
     
     local failed_pgrst
-    failed_pgrst=$(systemctl list-units 'supacloud-pgrst@*.service' --state=failed --no-legend 2>/dev/null || true)
+    failed_pgrst=$(systemctl list-units 'supacloud-postrust@*.service' --state=failed --no-legend 2>/dev/null || true)
     
     if [[ -n "$failed_pgrst" ]]; then
         log_warn "Found failed PostgREST services, attempting restart..."

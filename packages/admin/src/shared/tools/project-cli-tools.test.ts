@@ -152,7 +152,7 @@ function runtimeSnapshot(projectRef = "project-ref"): ProjectRuntimeSnapshot {
             actual: "running",
             health: "healthy",
             port: 3101,
-            unit: `supacloud-pgrst@${projectRef}`,
+            unit: `supacloud-postrust@${projectRef}`,
             loaded_at: "2026-08-11T00:00:00.000Z",
         },
     };
@@ -1047,7 +1047,7 @@ describe("admin project runtime snapshot", () => {
             { ...valid, secrets: { ...valid.secrets, load_state: "not_loaded" } },
             { ...valid, secrets: { ...valid.secrets, matches_desired: false } },
             { ...valid, postgrest: { ...valid.postgrest, port: 0 } },
-            { ...valid, postgrest: { ...valid.postgrest, unit: "supacloud-pgrst@other-ref" } },
+            { ...valid, postgrest: { ...valid.postgrest, unit: "supacloud-postrust@other-ref" } },
             { ...valid, postgrest: { ...valid.postgrest, attestation_state: "stale" } },
             { ...valid, postgrest: { ...valid.postgrest, loaded_at: "not-an-iso-timestamp" } },
         ];

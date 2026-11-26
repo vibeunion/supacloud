@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 
 const REQUEST_DIR = "/run/supacloud-unit-requests";
-const MANAGED_UNIT_PATTERN = /^(?:supacloud-(?:pgrst|gotrue)@\.service|supacloud-frontend-[a-z0-9-]{1,64}\.service|supacloud-application-[a-z0-9-]{1,20}-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}-[a-z][a-z0-9-]{0,62}\.service)$/;
+const MANAGED_UNIT_PATTERN = /^(?:supacloud-(?:pgrst|postrust|gotrue)@\.service|supacloud-frontend-[a-z0-9-]{1,64}\.service|supacloud-application-[a-z0-9-]{1,20}-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}-[a-z][a-z0-9-]{0,62}\.service)$/;
 const MANAGED_IDENTITY_PATTERN = /^supacloud-(?:%i|[a-z0-9-]{1,20})$/;
 const MAX_UNIT_BYTES = 16 * 1024;
 const UNIT_DIRECTIVES = new Set([
@@ -89,7 +89,7 @@ function isAllowedEnvironmentFile(unitName: string, value: string): boolean {
     const match = value.match(/^\/var\/supacloud\/application-runtime\/([a-z0-9-]{1,20})\/([a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})\/([a-z][a-z0-9-]{0,62})\.env$/);
     return !!match && unitName === `supacloud-application-${match[1]}-${match[2]}-${match[3]}.service`;
   }
-  if (unitName === "supacloud-pgrst@.service") {
+  if (unitName === "supacloud-postrust@.service") {
     return /^\/etc\/supabase\/[A-Za-z0-9_-]{1,64}\/%i\.env$/.test(value);
   }
   if (unitName === "supacloud-gotrue@.service") {
@@ -132,7 +132,7 @@ function validateDirective(unitName: string, state: UnitPolicyState, line: strin
 }
 
 function validateUnitIdentity(unitName: string, state: UnitPolicyState): void {
-  const requiresEnvironmentFile = unitName !== "supacloud-pgrst@.service";
+  const requiresEnvironmentFile = unitName !== "supacloud-postrust@.service";
   if (!["Unit", "Service", "Install"].every((required) => state.sections.has(required))
     || !state.user || state.user !== state.group || !state.noNewPrivileges
     || (requiresEnvironmentFile && !state.environmentFile)) {

@@ -49,7 +49,7 @@ function postgrestStatus(overrides: Partial<PostgrestRuntimeStatus> = {}): Postg
     desired: "running",
     actual: "running",
     port: 3101,
-    unit: "supacloud-pgrst@proj_1",
+    unit: "supacloud-postrust@proj_1",
     health: "healthy",
     last_error: null,
     updated_at: "2026-05-16T00:00:00.000Z",
@@ -81,7 +81,7 @@ function runtimeSnapshot(): PublicRuntimeSnapshot {
       actual: "running",
       health: "healthy",
       port: 3101,
-      unit: "supacloud-pgrst@proj_1",
+      unit: "supacloud-postrust@proj_1",
       loaded_at: "2026-08-11T00:00:00.000Z",
     },
   };
@@ -174,7 +174,7 @@ describe("project service PostgREST runtime controls", () => {
       expect(body.component).toBe("postgrest");
       expect(body.desired).toBe("stopped");
       expect(body.actual).toBe("stopped");
-      expect(body.unit).toBe("supacloud-pgrst@proj_1");
+      expect(body.unit).toBe("supacloud-postrust@proj_1");
     } finally {
       projectService.getProject = originalGetProject;
       tenantRuntimeService.statusPostgrest = originalStatusPostgrest;
@@ -204,7 +204,7 @@ describe("project service PostgREST runtime controls", () => {
         actual_state: "error",
         health: "unhealthy",
         port: 3101,
-        unit: "supacloud-pgrst@proj_1",
+        unit: "supacloud-postrust@proj_1",
         last_error: "connect ECONNREFUSED 127.0.0.1:3101",
         updated_at: "2026-05-16T00:00:00.000Z",
         last_reconciled_at: "2026-05-16T00:00:00.000Z",

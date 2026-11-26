@@ -13,7 +13,7 @@ include_units = [
   "supacloud-realtime.service",
   "patroni.service",
   "supacloud-gotrue@*.service",
-  "supacloud-pgrst@*.service",
+  "supacloud-postrust@*.service",
   "supacloud-storage@*.service",
   "supacloud-postgres@*.service"
 ]
@@ -42,12 +42,12 @@ service = "system"
 project_ref = ""
 activation_id = ""
 
-tenant_match, err = parse_regex(unit, r'^supacloud-(?P<kind>gotrue|pgrst|storage|postgres)@(?P<ref>[A-Za-z0-9_-]+)\.service$')
+tenant_match, err = parse_regex(unit, r'^supacloud-(?P<kind>gotrue|pgrst|postrust|storage|postgres)@(?P<ref>[A-Za-z0-9_-]+)\.service$')
 if err == null {
   project_ref = tenant_match.ref
   if tenant_match.kind == "gotrue" {
     service = "auth"
-  } else if tenant_match.kind == "pgrst" {
+  } else if tenant_match.kind == "pgrst" || tenant_match.kind == "postrust" {
     service = "postgrest"
   } else if tenant_match.kind == "storage" {
     service = "storage"

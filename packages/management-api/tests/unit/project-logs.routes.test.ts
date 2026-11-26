@@ -70,7 +70,7 @@ describe("project persisted log routes", () => {
   test("never subscribes a project stream to shared realtime or caddy journals", () => {
     expect(getProjectLogUnits("proj_1")).toEqual([
       "supacloud-gotrue@proj_1",
-      "supacloud-pgrst@proj_1",
+      "supacloud-postrust@proj_1",
       "supacloud-postgres@proj_1",
       "supacloud-storage@proj_1",
     ]);

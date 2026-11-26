@@ -11,7 +11,7 @@ PROJECT_REF="${2:-}"
 
 # Configuration
 TENANT_CONFIG_DIR="${TENANT_CONFIG_DIR:-/etc/supabase/tenants}"
-POSTGREST_BIN="${POSTGREST_BIN:-/usr/local/bin/postgrest}"
+POSTGREST_BIN="${POSTGREST_BIN:-/usr/local/bin/postrust}"
 GOTRUE_BIN="${GOTRUE_BIN:-/usr/local/bin/gotrue}"
 PG_HOST="${PG_HOST:-${POSTGRES_HOST:-localhost}}"
 PG_PORT="${PG_PORT:-${POSTGRES_PORT:-6432}}"
@@ -129,12 +129,12 @@ is_management_api_managed_file() {
 
 management_postgrest_generation() {
     local ref="$1"
-    local pointer="${TENANT_CONFIG_DIR}/${ref}_postgrest.current"
+    local pointer="${TENANT_CONFIG_DIR}/${ref}_postrust.current"
     local pointer_target pointer_bytes generation
     [ -f "$pointer" ] && [ ! -L "$pointer" ] || return 1
     pointer_bytes=$(wc -c < "$pointer") || return 1
     IFS= read -r pointer_target < "$pointer" || return 1
-    [[ "$pointer_target" =~ ^${ref}_postgrest\.d/[a-f0-9]{64}\.conf$ \
+    [[ "$pointer_target" =~ ^${ref}_postrust\.d/[a-f0-9]{64}\.conf$ \
         && "$pointer_bytes" -eq $((${#pointer_target} + 1)) ]] || return 1
     generation="${TENANT_CONFIG_DIR}/${pointer_target}"
     [ -f "$generation" ] && [ ! -L "$generation" ] \
@@ -182,8 +182,8 @@ preserve_management_api_config_if_present() {
     local shared_marker
     shared_marker=$(shared_auth_marker_path "$ref")
 
-    if { [ -e "${TENANT_CONFIG_DIR}/${ref}_postgrest.current" ] \
-        || [ -L "${TENANT_CONFIG_DIR}/${ref}_postgrest.current" ]; } \
+    if { [ -e "${TENANT_CONFIG_DIR}/${ref}_postrust.current" ] \
+        || [ -L "${TENANT_CONFIG_DIR}/${ref}_postrust.current" ]; } \
         && ! management_postgrest_generation "$ref"; then
         echo "ERROR: Managed PostgREST generation for ${ref} is invalid; re-apply it through SupaCloud Management API" >&2
         return 1
@@ -1031,11 +1031,11 @@ systemd_unit_has_canonical_start_limits() {
 }
 
 install_systemd_template() {
-    local pgrst_unit="/etc/systemd/system/supacloud-pgrst@.service"
+    local pgrst_unit="/etc/systemd/system/supacloud-postrust@.service"
     if [ ! -f "$pgrst_unit" ] \
         || grep -Eq -- '-M30m|MemoryMax=45M|^User=nobody$|^EnvironmentFile=/etc/supabase/tenants/%i\.env$|GHCRTS=' "$pgrst_unit" \
         || grep -Fq '+RTS' "$pgrst_unit" \
-        || ! grep -Fq 'ExecStart=/usr/local/libexec/supacloud/postgrest-launcher %i' "$pgrst_unit" \
+        || ! grep -Fq 'ExecStart=/usr/local/libexec/supacloud/postrust-launcher %i' "$pgrst_unit" \
         || ! systemd_unit_has_canonical_start_limits "$pgrst_unit"; then
         cat > "$pgrst_unit" <<EOF
 [Unit]
@@ -1056,7 +1056,7 @@ Environment="SUPACLOUD_POSTGREST_CONFIG_DIR=${TENANT_CONFIG_DIR}"
 Environment="SUPACLOUD_POSTGREST_CONFIG_TRUST_ROOT=$(dirname "$TENANT_CONFIG_DIR")"
 Environment="SUPACLOUD_POSTGREST_BINARY_TRUST_ROOT=$(dirname "$(dirname "$POSTGREST_BIN")")"
 Environment="SUPACLOUD_POSTGREST_CONTROL_UID=0"
-ExecStart=/usr/local/libexec/supacloud/postgrest-launcher %i
+ExecStart=/usr/local/libexec/supacloud/postrust-launcher %i
 Restart=on-failure
 RestartSec=5
 
@@ -1136,8 +1136,8 @@ start_runtime() {
     generate_tenant_config "$ref" "$pgrst_port" "$gotrue_port"
 
     # Start systemd services
-    systemctl enable "supacloud-pgrst@${ref}" 2>/dev/null || true
-    systemctl start "supacloud-pgrst@${ref}"
+    systemctl enable "supacloud-postrust@${ref}" 2>/dev/null || true
+    systemctl start "supacloud-postrust@${ref}"
     
     if [ "$shared_auth" = true ]; then
         stop_shared_gotrue_checked "$ref"
@@ -1193,8 +1193,8 @@ stop_runtime() {
     local preserve_config=false
     if should_preserve_runtime_config_on_stop "$ref"; then preserve_config=true; fi
 
-    systemctl stop "supacloud-pgrst@${ref}" 2>/dev/null || true
-    systemctl disable "supacloud-pgrst@${ref}" 2>/dev/null || true
+    systemctl stop "supacloud-postrust@${ref}" 2>/dev/null || true
+    systemctl disable "supacloud-postrust@${ref}" 2>/dev/null || true
     
     systemctl stop "supacloud-gotrue@${ref}" 2>/dev/null || true
     systemctl disable "supacloud-gotrue@${ref}" 2>/dev/null || true
@@ -1206,8 +1206,8 @@ stop_runtime() {
 
     rm -rf "${TENANT_CONFIG_DIR}/${ref}.env" \
         "${TENANT_CONFIG_DIR}/${ref}.conf" \
-        "${TENANT_CONFIG_DIR}/${ref}_postgrest.current" \
-        "${TENANT_CONFIG_DIR}/${ref}_postgrest.d" \
+        "${TENANT_CONFIG_DIR}/${ref}_postrust.current" \
+        "${TENANT_CONFIG_DIR}/${ref}_postrust.d" \
         "${TENANT_CONFIG_DIR}/${ref}_gotrue.env" \
         "${TENANT_CONFIG_DIR}/${ref}_gotrue.d" \
         "$(shared_auth_marker_path "$ref")"
@@ -1221,7 +1221,7 @@ restart_runtime() {
     local shared_auth=false
     if is_shared_auth_runtime "$ref"; then shared_auth=true; fi
 
-    if systemctl is-active "supacloud-pgrst@${ref}" >/dev/null 2>&1 || systemctl is-active "supacloud-gotrue@${ref}" >/dev/null 2>&1; then
+    if systemctl is-active "supacloud-postrust@${ref}" >/dev/null 2>&1 || systemctl is-active "supacloud-gotrue@${ref}" >/dev/null 2>&1; then
         # Bug Fix: Before restart, also need to ensure binary and systemd template exist, prevent crash if .service not allocated
         ensure_postgrest
         if [ "$shared_auth" = false ]; then ensure_gotrue; fi
@@ -1235,7 +1235,7 @@ restart_runtime() {
         
         generate_tenant_config "$ref" "$pgrst_port" "$gotrue_port"
         
-        systemctl restart "supacloud-pgrst@${ref}"
+        systemctl restart "supacloud-postrust@${ref}"
         if [ "$shared_auth" = true ]; then
             stop_shared_gotrue_checked "$ref"
         else
@@ -1257,7 +1257,7 @@ check_status() {
     local pgrst_running=false
     local gotrue_running=false
     
-    systemctl is-active "supacloud-pgrst@${ref}" >/dev/null 2>&1 && pgrst_running=true
+    systemctl is-active "supacloud-postrust@${ref}" >/dev/null 2>&1 && pgrst_running=true
     systemctl is-active "supacloud-gotrue@${ref}" >/dev/null 2>&1 && gotrue_running=true
 
     if [ "$pgrst_running" = true ] || [ "$gotrue_running" = true ]; then

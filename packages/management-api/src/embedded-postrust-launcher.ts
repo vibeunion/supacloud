@@ -16,7 +16,7 @@ import {
   type StagedPrivilegedHelper,
 } from "./embedded-privileged-helper";
 
-export const POSTGREST_LAUNCHER_TARGET = "/usr/local/libexec/supacloud/postgrest-launcher";
+export const POSTGREST_LAUNCHER_TARGET = "/usr/local/libexec/supacloud/postrust-launcher";
 export const EMBEDDED_POSTGREST_LAUNCHER_SOURCE = postgrestLauncherSource;
 export const EMBEDDED_POSTGREST_LAUNCHER_SHA256 = createHash("sha256")
   .update(Buffer.from(postgrestLauncherSource, "utf8"))

@@ -88,7 +88,7 @@ test("Vector log collector configuration and systemd unit are complete and valid
   expect(vectorConfig).toContain('[sources.journald]');
   expect(vectorConfig).toContain('type = "journald"');
   expect(vectorConfig).toContain('supacloud-gotrue@*.service');
-  expect(vectorConfig).toContain('supacloud-pgrst@*.service');
+  expect(vectorConfig).toContain('supacloud-postrust@*.service');
   expect(vectorConfig).toContain('[sources.functions]');
   expect(vectorConfig).toContain('/opt/supacloud/functions/**/logs/*.log');
   expect(vectorConfig).toContain('[transforms.process_journal]');

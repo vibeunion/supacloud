@@ -17,7 +17,7 @@ export function serviceControlFixture(projectRef = "a", mode: "local" | "owner" 
     configuration_management: "local", owner_management_path: null,
   };
   const units = {
-    postgresql: "patroni", postgrest: `supacloud-pgrst@${projectRef}`, gotrue: `supacloud-gotrue@${authority}`,
+    postgresql: "patroni", postgrest: `supacloud-postrust@${projectRef}`, gotrue: `supacloud-gotrue@${authority}`,
     realtime: "supacloud-realtime", storage: "supacloud-storage", caddy: "supacloud-caddy",
   };
   return {

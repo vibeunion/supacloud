@@ -29,7 +29,7 @@ Environment="SUPACLOUD_POSTGREST_CONFIG_DIR=${options.tenantConfigDir}"
 Environment="SUPACLOUD_POSTGREST_CONFIG_TRUST_ROOT=${path.dirname(options.tenantConfigDir)}"
 Environment="SUPACLOUD_POSTGREST_BINARY_TRUST_ROOT=${path.dirname(path.dirname(options.postgrestBinary))}"
 Environment="SUPACLOUD_POSTGREST_CONTROL_UID=0"
-ExecStart=/usr/local/libexec/supacloud/postgrest-launcher %i
+ExecStart=/usr/local/libexec/supacloud/postrust-launcher %i
 Restart=on-failure
 RestartSec=5
 
