@@ -89,7 +89,29 @@ const REALTIME_API_SECRET = config.jwtSecret;
 if (!REALTIME_API_SECRET) {
     logger.error("FATAL: REALTIME_API_SECRET or JWT_SECRET must be set for RealtimeService.");
 }
-const PG_HOST = (process.env["CI"] || process.env["GITHUB_ACTIONS"]) ? "postgres" : config.pgHost;
+
+/**
+ * Host stored on a Realtime tenant.
+ *
+ * `SUPACLOUD_REALTIME_ENGINE=container` is the Elixir rollback. That process
+ * joins the Actions service network, where Postgres is named `postgres`.
+ * The default Rust gateway runs on the same host as Management API and uses
+ * the published database address (`PG_HOST`, `127.0.0.1` in CI).
+ */
+export function realtimeDatabaseHost(input: {
+    ci: boolean;
+    engine: string;
+    pgHost: string;
+}): string {
+    if (input.ci && input.engine === "container") return "postgres";
+    return input.pgHost;
+}
+
+const PG_HOST = realtimeDatabaseHost({
+    ci: Boolean(process.env["CI"] || process.env["GITHUB_ACTIONS"]),
+    engine: config.realtimeEngine,
+    pgHost: config.pgHost,
+});
 const PG_PORT = String(config.pgPort);
 
 interface RealtimeTenantConfig {

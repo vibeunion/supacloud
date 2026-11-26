@@ -29,6 +29,10 @@ on:
       - ".github/workflows/workspace-tooling.yml"
       - "infrastructure/realtime/**"
       - "infrastructure/systemd/supacloud-realtime.service"
+      - "crates/realtime-gateway/**"
+      - "crates/runtime-core/**"
+      - "scripts/build_supacloud_realtime_gateway.sh"
+      - "rust-toolchain.toml"
       - "install.sh"
       - "setup.sh"
       - "switch.sh"
@@ -1016,7 +1020,7 @@ jobs:
 
   integration-test:
     name: Integration & Compliance Tests
-    needs: [postrust-patched-binary]
+    needs: [postrust-patched-binary, realtime-gateway-binary]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
@@ -1055,34 +1059,6 @@ jobs:
           GOTRUE_PASSWORD_MIN_LENGTH: "6"
           API_EXTERNAL_URL: http://127.0.0.1:9090
           GOTRUE_OPERATOR_TOKEN: super-secret-jwt-token-with-at-least-32-characters-long
-      realtime:
-        # Official upstream mirror avoids ECR Public's anonymous data quota.
-        image: ghcr.io/supabase/realtime:v2.150.0
-        ports:
-          - 4000:4000
-        env:
-          PORT: 4000
-          DB_HOST: postgres
-          DB_PORT: 5432
-          DB_NAME: postgres
-          DB_USER: supabase_admin
-          DB_PASSWORD: postgres
-          DB_USER_REALTIME: supabase_admin
-          DB_PASS_REALTIME: postgres
-          DB_SSL: "false"
-          DB_ENC_KEY: supabaserealtime
-          JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
-          API_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
-          SECRET_KEY_BASE: super-secret-jwt-token-with-at-least-32-characters-long-realtime-base
-          METRICS_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
-          REPLICATION_MODE: RLS
-          REPLICATION_POLL_INTERVAL: 100
-          ERL_AFLAGS: -proto_dist inet_tcp
-          DNS_NODES: "''"
-          APP_NAME: realtime
-          SEED_SELF_HOST: "true"
-          RUN_JANITOR: "false"
-          RLIMIT_NOFILE: "10000"
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -1092,6 +1068,12 @@ jobs:
         with:
           name: postrust-v3.4.0-null-rpc
           path: ${{ runner.temp }}/postrust-dist
+
+      - name: Download Rust Realtime gateway
+        uses: actions/download-artifact@v8
+        with:
+          name: supacloud-realtime-gateway
+          path: ${{ runner.temp }}/realtime-gateway
 
       - name: Start patched Postrust
         run: |
@@ -1125,6 +1107,21 @@ jobs:
           PGRST_DB_CHANNEL_ENABLED: "true"
           PGRST_SERVER_HOST: 127.0.0.1
           PGRST_SERVER_PORT: "3000"
+
+      # The default Realtime server. The Elixir container remains a production
+      # rollback hatch and is not a service this job waits on.
+      - name: Start Rust Realtime gateway
+        run: |
+          set -euo pipefail
+          chmod 755 "${RUNNER_TEMP}/realtime-gateway/supacloud-realtime-gateway"
+          setsid --fork "${RUNNER_TEMP}/realtime-gateway/supacloud-realtime-gateway" \
+            > "${RUNNER_TEMP}/realtime-gateway.log" 2>&1 < /dev/null
+        env:
+          REALTIME_BIND_HOST: 127.0.0.1
+          REALTIME_PORT: "4000"
+          API_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+          JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+          REALTIME_CONTROL_TOKEN: ci-realtime-control-token
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -1224,36 +1221,22 @@ jobs:
 
       - name: Wait for CI services
         run: |
-          echo "Waiting for Realtime container to be ready..."
-          JWT_SECRET="super-secret-jwt-token-with-at-least-32-characters-long"
-          # Realtime v2.111+ validates Bearer tokens as HS256 JWTs signed with API_JWT_SECRET;
-          # passing the raw secret returns 403. Sign an admin JWT for the health probe.
-          REALTIME_ADMIN_TOKEN="$(JWT_SECRET="${JWT_SECRET}" node -e 'const crypto=require("node:crypto");const s=process.env.JWT_SECRET;const n=Math.floor(Date.now()/1000);const e=v=>Buffer.from(JSON.stringify(v)).toString("base64url");const h=e({alg:"HS256",typ:"JWT"});const p=e({iss:"supabase",role:"supabase_admin",iat:n,exp:n+3600});const sig=crypto.createHmac("sha256",s).update(`${h}.${p}`).digest("base64url");console.log(`${h}.${p}.${sig}`);')"
+          echo "Waiting for the Rust Realtime gateway..."
           realtime_ready=false
           for i in $(seq 1 60); do
-            # Check the health endpoint for the self-seeded tenant
-            if curl -sf -H "Authorization: Bearer ${REALTIME_ADMIN_TOKEN}" "http://127.0.0.1:4000/api/tenants/realtime-dev/health" > /dev/null 2>&1; then
-              echo "✅ Realtime self-hosted tenant is ready"
-              realtime_ready=true
-              break
-            elif curl -sf "http://127.0.0.1:4000/healthcheck" > /dev/null 2>&1; then
-              echo "✅ Realtime container is ready (basic health)"
+            body="$(curl -sf "http://127.0.0.1:4000/healthcheck" || true)"
+            if printf '%s' "$body" | grep -q 'supacloud-realtime-gateway/rust'; then
+              echo "Rust Realtime gateway is ready"
               realtime_ready=true
               break
             fi
-            echo "  Attempt $i/60: Realtime not ready, waiting 2s..."
+            echo "  Attempt $i/60: Realtime gateway not ready, waiting 2s..."
             sleep 2
           done
           if [ "${realtime_ready}" != "true" ]; then
-            echo "::error title=Realtime service not ready::Realtime did not become reachable on :4000"
-            docker ps -a --filter "id=${{ job.services.realtime.id }}" || true
-            realtime_container_id="${{ job.services.realtime.id }}"
-            if [ -n "${realtime_container_id}" ]; then
-              echo "--- Realtime container status ---"
-              docker inspect --format='{{.State.Status}} exit={{.State.ExitCode}} err={{.State.Error}} oom={{.State.OOMKilled}} restart={{.RestartCount}}' "${realtime_container_id}" || true
-              echo "--- Realtime container logs (last 200 lines) ---"
-              docker logs --tail 200 "${realtime_container_id}" || true
-            fi
+            echo "::error title=Realtime gateway not ready::The Rust Realtime gateway did not become reachable on :4000"
+            echo "--- Realtime gateway log ---"
+            cat "${RUNNER_TEMP}/realtime-gateway.log" >&2 || true
             exit 1
           fi
           echo "Waiting for MinIO container to be ready..."
@@ -1286,6 +1269,9 @@ jobs:
           TEST_SUPABASE_SERVICE_KEY: ${{ env.SUPABASE_DEMO_SERVICE_KEY }}
           CI: "true"
           NODE_ENV: test
+          SUPACLOUD_REALTIME_ENGINE: rust
+          REALTIME_ADMIN_URL: http://127.0.0.1:4000
+          PG_HOST: 127.0.0.1
           S3_ENDPOINT: http://127.0.0.1:9001
           S3_REGION: us-east-1
           STORAGE_TYPE: s3
@@ -1295,9 +1281,8 @@ jobs:
 
       - name: Restart flaky services
         run: |
-          echo "Restarting Auth and Realtime Containers..."
+          echo "Restarting Auth..."
           docker start $(docker ps -a -q --filter "ancestor=supabase/gotrue:v2.198.0") || true
-          docker start "${{ job.services.realtime.id }}" || true
           sleep 4
 
       - name: Launch API & Execute Full Defenses
@@ -1353,6 +1338,9 @@ jobs:
           MASTER_TOKEN: super-secret-jwt-token-with-at-least-32-characters-long
           CI: "true"
           NODE_ENV: test
+          SUPACLOUD_REALTIME_ENGINE: rust
+          REALTIME_ADMIN_URL: http://127.0.0.1:4000
+          PG_HOST: 127.0.0.1
           CADDY_ADMIN_URL: http://0.0.0.0:2019
           S3_ENDPOINT: http://127.0.0.1:9001
           S3_REGION: us-east-1
@@ -1364,6 +1352,10 @@ jobs:
       - name: Stop patched Postrust
         if: always()
         run: pkill -f "${RUNNER_TEMP}/postrust-dist/postrust" || true
+
+      - name: Stop Rust Realtime gateway
+        if: always()
+        run: pkill -f "${RUNNER_TEMP}/realtime-gateway/[s]upacloud-realtime-gateway" || true
 
   shell-scripts-lint:
     name: Shell Scripts Lint
@@ -1490,6 +1482,7 @@ jobs:
       - postgres-18-compatibility
       - postrust-patched-binary
       - postrust-graphql-rls
+      - realtime-gateway-binary
       - integration-test
       - shell-scripts-lint
       - caddy-edge-proxy-smoke
@@ -1515,6 +1508,7 @@ jobs:
           POSTGRES_18: ${{ needs.postgres-18-compatibility.result }}
           POSTRUST_PATCHED_BINARY: ${{ needs.postrust-patched-binary.result }}
           POSTRUST_GRAPHQL_RLS: ${{ needs.postrust-graphql-rls.result }}
+          REALTIME_GATEWAY: ${{ needs.realtime-gateway-binary.result }}
           INTEGRATION_TESTS: ${{ needs.integration-test.result }}
           SHELL_SCRIPTS_LINT: ${{ needs.shell-scripts-lint.result }}
           CADDY_EDGE_PROXY: ${{ needs.caddy-edge-proxy-smoke.result }}
@@ -1536,6 +1530,7 @@ jobs:
             "$POSTGRES_18" \
             "$POSTRUST_PATCHED_BINARY" \
             "$POSTRUST_GRAPHQL_RLS" \
+            "$REALTIME_GATEWAY" \
             "$INTEGRATION_TESTS" \
             "$SHELL_SCRIPTS_LINT" \
             "$CADDY_EDGE_PROXY" \
@@ -1730,6 +1725,71 @@ jobs:
             packages/management-api/dist/*
             packages/edge-runtime/dist/*
             packages/pgredis-runtime/dist/*
+          retention-days: 7
+
+  realtime-gateway-binary:
+    name: Rust Realtime gateway
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install the pinned toolchain
+        run: |
+          set -euo pipefail
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain none --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            # This step does not reload GITHUB_PATH, so source cargo for the checks below.
+            source "$HOME/.cargo/env"
+          fi
+          rustup show active-toolchain
+          cargo --version
+          rustc --version
+
+      - name: Restore the cargo cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            crates/realtime-gateway/target
+          key: realtime-gateway-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'crates/realtime-gateway/Cargo.lock', 'crates/realtime-gateway/Cargo.toml', 'crates/runtime-core/Cargo.lock', 'crates/runtime-core/Cargo.toml') }}
+          restore-keys: |
+            realtime-gateway-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Build the release binary
+        run: bash scripts/build_supacloud_realtime_gateway.sh
+
+      - name: Smoke the gateway healthcheck
+        run: |
+          set -euo pipefail
+          chmod 755 dist/supacloud-realtime-gateway
+          setsid --fork dist/supacloud-realtime-gateway \
+            > "${RUNNER_TEMP}/realtime-gateway-smoke.log" 2>&1 < /dev/null
+          trap 'pkill -f "dist/[s]upacloud-realtime-gateway" || true' EXIT
+          for _ in $(seq 1 30); do
+            body="$(curl -sf http://127.0.0.1:4000/healthcheck || true)"
+            if printf '%s' "$body" | grep -q 'supacloud-realtime-gateway/rust'; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Rust Realtime gateway did not become ready" >&2
+          cat "${RUNNER_TEMP}/realtime-gateway-smoke.log" >&2 || true
+          exit 1
+        env:
+          REALTIME_BIND_HOST: 127.0.0.1
+          REALTIME_PORT: "4000"
+          API_JWT_SECRET: ci-realtime-gateway-smoke
+          REALTIME_CONTROL_TOKEN: ci-realtime-gateway-smoke
+
+      - name: Upload Rust Realtime gateway
+        uses: actions/upload-artifact@v7
+        with:
+          name: supacloud-realtime-gateway
+          path: dist/supacloud-realtime-gateway
           retention-days: 7
 
   postrust-patched-binary:
