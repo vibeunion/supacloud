@@ -67,7 +67,7 @@ export interface PostgrestAttestationRequest {
   controlOwnerUid?: number;
 }
 
-type ValidatedGeneration = { path: string; revision: string };
+type ValidatedGeneration = { path: string; revision: string; modifiedAtMs: number };
 type ControlPointerObservation =
   | { kind: "valid"; target: string; generation: ValidatedGeneration }
   | { kind: "absent" | "invalid" };
@@ -302,8 +302,26 @@ function managedConfigArgument(commandLine: string[]): string | null {
     : null;
 }
 
-function hasPostgrestEnvironmentOverride(identity: PostgrestProcessIdentity): boolean {
-  return identity.environmentNames.some((name) => name.startsWith("PGRST_"));
+function isPostrustLauncherProcess(
+  identity: PostgrestProcessIdentity,
+  expectedExecutable: string,
+): boolean {
+  // The Postrust launcher maps the validated generation into PGRST_* variables
+  // and execs the binary without a config-file argument. That is the supported
+  // startup shape, not an ad-hoc environment override. The Haskell-compatible
+  // launcher keeps its config path as argv[1], so it still fails this shape.
+  return identity.executable === expectedExecutable
+    && identity.commandLine.length === 1
+    && identity.commandLine[0] === expectedExecutable
+    && identity.environmentNames.includes("PGRST_COMPAT_MODE");
+}
+
+function hasPostgrestEnvironmentOverride(
+  identity: PostgrestProcessIdentity,
+  expectedExecutable: string,
+): boolean {
+  if (!identity.environmentNames.some((name) => name.startsWith("PGRST_"))) return false;
+  return !isPostrustLauncherProcess(identity, expectedExecutable);
 }
 
 function nonActiveAttestation(
@@ -372,7 +390,7 @@ function bindingFailure(
     return failureAttestation(request.desiredRevision, "drifted", observation.health, details);
   }
   if (beforeProcess.executable !== observation.expectedExecutable
-    || hasPostgrestEnvironmentOverride(beforeProcess)) {
+    || hasPostgrestEnvironmentOverride(beforeProcess, observation.expectedExecutable)) {
     return failureAttestation(request.desiredRevision, "drifted", observation.health, {
       loadedAt: systemdAfter.loadedAt,
     });
@@ -439,16 +457,28 @@ async function attestActivePostgrestRuntime(
     const expectedExecutable = await realpath(request.postgrestBinary);
     phase = "health";
     health = await operations.health(request.port);
-    phase = "config";
-    const configArgument = managedConfigArgument(beforeProcess.commandLine);
-    const loaded = configArgument ? await loadedGeneration(configArgument, request, ownership) : null;
-    loadedRevision = loaded?.revision ?? null;
     phase = "pointer-after";
     const pointerAfter = await controlPointerObservation(request, ownership);
+    phase = "config";
+    const configArgument = managedConfigArgument(beforeProcess.commandLine);
+    let loaded = configArgument
+      ? await loadedGeneration(configArgument, request, ownership)
+      : null;
+    loadedRevision = loaded?.revision ?? null;
     phase = "systemd-after";
     systemdAfter = await operations.systemdMainProcess(request.unit);
     const changedUnit = changedUnitAttestation(request, systemdAfter, health);
     if (changedUnit) return changedUnit;
+    if (!loaded && !configArgument && isPostrustLauncherProcess(beforeProcess, expectedExecutable)
+      && pointerAfter.kind === "valid" && systemdAfter.loadedAt) {
+      // Postrust does not take the generation path as an argument. Accept the
+      // pointer only when the generation existed before this process started.
+      const startedAt = Date.parse(systemdAfter.loadedAt);
+      if (Number.isFinite(startedAt) && pointerAfter.generation.modifiedAtMs <= startedAt + 1_000) {
+        loaded = pointerAfter.generation;
+        loadedRevision = loaded.revision;
+      }
+    }
     phase = "process-after";
     afterProcess = await operations.processIdentity(systemdAfter.mainPid, runtimeIdentity);
     phase = "compare";
