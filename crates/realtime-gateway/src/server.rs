@@ -374,7 +374,12 @@ async fn handle_socket(
                         .await;
                     }
                     Err(e) => {
-                        debug!(conn_id = %conn_id_recv, error = %e, "Ignored non-broadcast binary frame");
+                        warn!(
+                            conn_id = %conn_id_recv,
+                            error = %e,
+                            kind = bytes.first().copied(),
+                            "Unparseable or unknown-kind binary Realtime frame"
+                        );
                     }
                 }
             }
@@ -647,5 +652,117 @@ async fn handle_client_message(
     if let Some(ref r) = reference {
         let reply = PhoenixV2Message::reply(join_ref, Some(r.clone()), topic, "ok", json!({}));
         hub.send_to_connection(conn_id, reply);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::broadcast::TopicSubscriptionConfig;
+    use crate::postgres::PostgresListenerManager;
+    use crate::tenant::TenantRegistry;
+
+    fn user_broadcast_push(
+        join_ref: &str,
+        reference: &str,
+        topic: &str,
+        event: &str,
+        payload: &[u8],
+    ) -> Vec<u8> {
+        let mut frame = vec![
+            3,
+            join_ref.len() as u8,
+            reference.len() as u8,
+            topic.len() as u8,
+            event.len() as u8,
+            0,
+            1,
+        ];
+        frame.extend_from_slice(join_ref.as_bytes());
+        frame.extend_from_slice(reference.as_bytes());
+        frame.extend_from_slice(topic.as_bytes());
+        frame.extend_from_slice(event.as_bytes());
+        frame.extend_from_slice(payload);
+        frame
+    }
+
+    async fn deliver(frame: &[u8]) -> Vec<PhoenixV2Message> {
+        let parsed = PhoenixV2Message::decode_user_broadcast_push(frame).unwrap();
+        let topic = parsed.topic.clone();
+        let hub = ChannelHub::new();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        hub.add_connection("conn".into(), "tenant".into(), "anon".into(), tx);
+        hub.subscribe(
+            "conn",
+            "tenant",
+            &topic,
+            TopicSubscriptionConfig {
+                join_ref: parsed.join_ref.clone(),
+                broadcast_self: true,
+                broadcast_ack: true,
+                presence_key: None,
+                postgres_changes: Vec::new(),
+            },
+        );
+        let state = AppState {
+            registry: TenantRegistry::new(None),
+            hub: hub.clone(),
+            pg_manager: PostgresListenerManager::new(hub),
+            control_token: "control".into(),
+        };
+        handle_client_message(
+            &state,
+            "tenant",
+            "anon",
+            &json!({"role": "anon"}),
+            "conn",
+            parsed,
+        )
+        .await;
+        let mut messages = Vec::new();
+        while let Ok(message) = rx.try_recv() {
+            messages.push(message);
+        }
+        messages
+    }
+
+    #[tokio::test]
+    async fn binary_broadcast_with_a_ref_produces_a_json_phx_reply_ack() {
+        let frame = user_broadcast_push(
+            "1",
+            "4",
+            "realtime:room",
+            "test-event",
+            br#"{"message":"test"}"#,
+        );
+        let messages = deliver(&frame).await;
+        let ack = messages
+            .iter()
+            .find(|message| message.event == "phx_reply")
+            .expect("a broadcast with a ref must be acknowledged");
+        assert_eq!(ack.join_ref.as_deref(), Some("1"));
+        assert_eq!(ack.reference.as_deref(), Some("4"));
+        assert_eq!(ack.payload["status"], "ok");
+        let encoded = ack.encode_for_client("2.0.0").unwrap();
+        assert!(
+            encoded.starts_with('['),
+            "the v2 acknowledgement stays a Phoenix JSON text array"
+        );
+        let decoded = PhoenixV2Message::decode_client_frame(&encoded).unwrap();
+        assert_eq!(decoded.event, "phx_reply");
+        assert_eq!(decoded.reference.as_deref(), Some("4"));
+    }
+
+    #[tokio::test]
+    async fn binary_broadcast_without_a_ref_is_not_acknowledged() {
+        let frame = user_broadcast_push(
+            "1",
+            "",
+            "realtime:room",
+            "test-event",
+            br#"{"message":"test"}"#,
+        );
+        let messages = deliver(&frame).await;
+        assert!(messages.iter().all(|message| message.event != "phx_reply"));
     }
 }

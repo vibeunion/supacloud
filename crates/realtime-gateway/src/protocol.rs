@@ -222,21 +222,26 @@ impl PhoenixV2Message {
         if metadata_end > bytes.len() {
             return Err(ProtocolError::InvalidFrameFormat);
         }
+        let metadata = &bytes[offset..metadata_end];
         offset = metadata_end;
         let user_payload: Value = serde_json::from_slice(&bytes[offset..])
             .map_err(|_| ProtocolError::InvalidFrameFormat)?;
         let topic = topic.ok_or(ProtocolError::InvalidFrameFormat)?;
         let user_event = user_event.ok_or(ProtocolError::InvalidFrameFormat)?;
+        let mut payload = serde_json::json!({
+            "event": user_event,
+            "payload": user_payload,
+        });
+        if !metadata.is_empty() {
+            payload["meta"] =
+                serde_json::from_slice(metadata).map_err(|_| ProtocolError::InvalidFrameFormat)?;
+        }
         Ok(Self {
             join_ref,
             reference,
             topic,
             event: "broadcast".to_string(),
-            payload: serde_json::json!({
-                "type": "broadcast",
-                "event": user_event,
-                "payload": user_payload,
-            }),
+            payload,
         })
     }
 }
@@ -418,8 +423,31 @@ mod tests {
         assert_eq!(decoded.reference.as_deref(), Some(reference));
         assert_eq!(decoded.topic, topic);
         assert_eq!(decoded.event, "broadcast");
-        assert_eq!(decoded.payload["event"], user_event);
-        assert_eq!(decoded.payload["payload"]["message"], "test");
+        assert_eq!(
+            decoded.payload,
+            json!({"event": user_event, "payload": {"message": "test"}})
+        );
+
+        let metadata = br#"{"replay":true}"#;
+        let mut with_meta = vec![
+            3,
+            0,
+            reference.len() as u8,
+            topic.len() as u8,
+            user_event.len() as u8,
+            metadata.len() as u8,
+            1,
+        ];
+        with_meta.extend_from_slice(reference.as_bytes());
+        with_meta.extend_from_slice(topic.as_bytes());
+        with_meta.extend_from_slice(user_event.as_bytes());
+        with_meta.extend_from_slice(metadata);
+        with_meta.extend_from_slice(user_payload);
+        let decoded = PhoenixV2Message::decode_user_broadcast_push(&with_meta).unwrap();
+        assert_eq!(decoded.join_ref, None);
+        assert_eq!(decoded.payload["meta"]["replay"], true);
+
+        assert!(PhoenixV2Message::decode_user_broadcast_push(&[4, 0, 0, 0, 0, 0, 1]).is_err());
     }
 
     #[test]
