@@ -1265,6 +1265,10 @@ async function bootstrap() {
   } else if (args.length === 0 || args.includes("--server")) {
     const { validateRealtimeSecretConfiguration } = await import("./services/realtime.service");
     validateRealtimeSecretConfiguration();
+    const { ensureSystemdUnitBrokerForStartup } = await import(
+      "./services/systemd-unit-broker-maintenance"
+    );
+    ensureSystemdUnitBrokerForStartup({ logger });
     const { sql: controlPlaneSql } = await import("./db");
     const { assertPlatformMigrationCompleted } = await import("./db/audit-chain-migration");
     const {
@@ -1508,6 +1512,16 @@ async function bootstrap() {
         );
       },
     });
+    const { cleanupFailedSystemdUnitBrokerJobs } = await import(
+      "./services/systemd-unit-broker-maintenance"
+    );
+    try {
+      await cleanupFailedSystemdUnitBrokerJobs({ logger });
+    } catch (err: unknown) {
+      logger.warn("[Bootstrap] Failed to clear stale systemd-unit broker jobs (non-fatal)", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
     const { taskWorker } = await import("./services/task.worker");
     taskWorker.start();
     const { applicationDeploymentWorker } = await import("./routes");
