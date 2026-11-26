@@ -401,6 +401,7 @@ mod tests {
             id: id.to_owned(),
             external_id: Some(id.to_owned()),
             jwt_secret: "secret".to_owned(),
+            jwt_jwks: None,
             db_host: "127.0.0.1".to_owned(),
             db_port: 5432,
             db_name: "postgres".to_owned(),

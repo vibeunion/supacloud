@@ -1,5 +1,7 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use hmac::{Hmac, Mac};
+use jsonwebtoken::jwk::JwkSet;
+use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -15,6 +17,10 @@ pub struct TenantConfig {
     #[serde(default)]
     pub external_id: Option<String>,
     pub jwt_secret: String,
+    /// Public verification keys for shared-auth projects. The Management API
+    /// sends this alongside the legacy HS256 secret.
+    #[serde(default)]
+    pub jwt_jwks: Option<JwkSet>,
     #[serde(default = "default_db_host")]
     pub db_host: String,
     #[serde(default = "default_db_port")]
@@ -77,6 +83,8 @@ struct WrappedTenant {
     #[serde(default)]
     name: Option<String>,
     jwt_secret: String,
+    #[serde(default)]
+    jwt_jwks: Option<JwkSet>,
     #[serde(default)]
     extensions: Vec<WrappedTenantExtension>,
 }
@@ -147,6 +155,7 @@ impl TenantConfig {
             id: id.clone(),
             external_id: Some(id),
             jwt_secret: wrapped.jwt_secret,
+            jwt_jwks: wrapped.jwt_jwks,
             db_host: text("db_host").unwrap_or_else(default_db_host),
             db_port,
             db_name: text("db_name").unwrap_or_default(),
@@ -328,6 +337,68 @@ impl TenantRegistry {
 
         Some(claims)
     }
+
+    /// Verify a project socket token against both the legacy HS256 secret and
+    /// the project's public JWKS. Shared-auth projects sign user tokens with
+    /// ES256/RS256/EdDSA, while their anon key remains HS256.
+    pub fn verify_jwt_for_tenant(&self, token: &str, tenant: &TenantConfig) -> Option<JwtClaims> {
+        if let Some(claims) = self.verify_jwt(token, Some(&tenant.jwt_secret)) {
+            return Some(claims);
+        }
+        self.verify_jwt_with_jwks(token, tenant.jwt_jwks.as_ref())
+    }
+
+    pub fn verify_jwt_payload_for_tenant(
+        &self,
+        token: &str,
+        tenant: &TenantConfig,
+    ) -> Option<Value> {
+        self.verify_jwt_for_tenant(token, tenant)?;
+        let payload = token.split('.').nth(1)?;
+        let payload_bytes = URL_SAFE_NO_PAD.decode(payload).ok()?;
+        serde_json::from_slice::<Value>(&payload_bytes).ok()
+    }
+
+    fn verify_jwt_with_jwks(&self, token: &str, jwks: Option<&JwkSet>) -> Option<JwtClaims> {
+        let jwks = jwks?;
+        let header = decode_header(token).ok()?;
+        if !matches!(
+            header.alg,
+            Algorithm::ES256 | Algorithm::RS256 | Algorithm::EdDSA
+        ) {
+            return None;
+        }
+
+        let candidates: Vec<&jsonwebtoken::jwk::Jwk> = match header.kid.as_deref() {
+            Some(kid) => jwks.find(kid).into_iter().collect(),
+            None => jwks.keys.iter().collect(),
+        };
+        for jwk in candidates {
+            if !jwk.is_supported() {
+                continue;
+            }
+            let Ok(key) = DecodingKey::from_jwk(jwk) else {
+                continue;
+            };
+            let mut validation = Validation::new(header.alg);
+            validation.required_spec_claims.clear();
+            validation.validate_aud = false;
+            let Ok(decoded) = decode::<Value>(token, &key, &validation) else {
+                continue;
+            };
+            let Ok(claims) = serde_json::from_value::<JwtClaims>(decoded.claims) else {
+                continue;
+            };
+            if claims
+                .exp
+                .is_some_and(|exp| exp < jsonwebtoken::get_current_timestamp())
+            {
+                continue;
+            }
+            return Some(claims);
+        }
+        None
+    }
 }
 
 #[cfg(test)]
@@ -387,12 +458,98 @@ mod tests {
     }
 
     #[test]
+    fn test_tenant_registration_accepts_jwks() {
+        let payload = serde_json::json!({
+            "tenant": {
+                "external_id": "proj_shared",
+                "jwt_secret": "legacy-secret",
+                "jwt_jwks": {
+                    "keys": [{
+                        "kty": "EC",
+                        "kid": "es256-test-kid",
+                        "alg": "ES256",
+                        "crv": "P-256",
+                        "x": "hwhsUGLzMz1lbe9D90SCNUGlxhmxbt3s9qLk_qjfesU",
+                        "y": "XB4LWdVUEUQe5c0SFP6gRC7gqpCo7mQ0gHUHeYJ4xHk",
+                        "key_ops": ["verify"]
+                    }]
+                },
+                "extensions": [{
+                    "type": "postgres_cdc_rls",
+                    "settings": {
+                        "db_name": "db_proj_shared",
+                        "db_password": "secret"
+                    }
+                }]
+            }
+        });
+
+        let tenant = TenantConfig::from_registration(payload).unwrap();
+        assert_eq!(tenant.id, "proj_shared");
+        assert_eq!(
+            tenant.jwt_jwks.as_ref().unwrap().keys[0]
+                .common
+                .key_id
+                .as_deref(),
+            Some("es256-test-kid")
+        );
+    }
+
+    #[test]
+    fn test_es256_access_token_uses_tenant_jwks() {
+        let jwks: JwkSet = serde_json::from_value(serde_json::json!({
+            "keys": [{
+                "kty": "EC",
+                "kid": "es256-test-kid",
+                "alg": "ES256",
+                "crv": "P-256",
+                "x": "hwhsUGLzMz1lbe9D90SCNUGlxhmxbt3s9qLk_qjfesU",
+                "y": "XB4LWdVUEUQe5c0SFP6gRC7gqpCo7mQ0gHUHeYJ4xHk",
+                "key_ops": ["verify"]
+            }]
+        }))
+        .unwrap();
+        let tenant = TenantConfig {
+            id: "proj_shared".to_string(),
+            external_id: Some("proj_shared".to_string()),
+            jwt_secret: "legacy-secret".to_string(),
+            jwt_jwks: Some(jwks),
+            db_host: "127.0.0.1".to_string(),
+            db_port: 5432,
+            db_name: "db_proj_shared".to_string(),
+            db_user: "postgres".to_string(),
+            db_password: "pw".to_string(),
+            slot_name: None,
+            publication: default_publication(),
+            poll_interval_ms: default_poll_interval_ms(),
+            poll_max_changes: default_poll_max_changes(),
+            poll_max_record_bytes: default_poll_max_record_bytes(),
+        };
+        let registry = TenantRegistry::new(None);
+        registry.register(tenant.clone());
+
+        // Generated with a P-256 key whose public JWK is embedded above.
+        let token = "eyJhbGciOiJFUzI1NiIsImtpZCI6ImVzMjU2LXRlc3Qta2lkIiwidHlwIjoiSldUIn0.eyJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6InVzZXItMSIsImV4cCI6NDEwMjQ0NDgwMH0.NJsYOSvcCwhJZP2z2XlU4SN215gutX6T9EG5k5j3Z5GiZpc_cQ7HqOBCsshgHn1i3ezvTmn-wJ8LyGoa4qcacQ";
+        let verified = registry.verify_jwt_for_tenant(token, &tenant).unwrap();
+        assert_eq!(verified.role.as_deref(), Some("authenticated"));
+        assert_eq!(verified.sub.as_deref(), Some("user-1"));
+
+        assert!(registry
+            .verify_jwt_for_tenant(&generate_test_jwt("legacy-secret", "anon"), &tenant)
+            .is_some());
+        assert!(registry
+            .verify_jwt_for_tenant(&generate_test_jwt("wrong-secret", "anon"), &tenant)
+            .is_none());
+    }
+
+    #[test]
     fn test_tenant_registration_and_jwt() {
         let registry = TenantRegistry::new(Some("global_super_secret".to_string()));
         registry.register(TenantConfig {
             id: "proj_123".to_string(),
             external_id: Some("custom-domain".to_string()),
             jwt_secret: "tenant_secret_key_12345".to_string(),
+            jwt_jwks: None,
             db_host: "127.0.0.1".to_string(),
             db_port: 5432,
             db_name: "db_proj_123".to_string(),

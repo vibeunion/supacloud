@@ -280,7 +280,7 @@ async fn ws_handler(
     }
     let Some(mut claims) = state
         .registry
-        .verify_jwt_payload(&apikey, Some(&tenant.jwt_secret))
+        .verify_jwt_payload_for_tenant(&apikey, &tenant)
     else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
@@ -312,6 +312,7 @@ async fn handle_socket(
     state
         .hub
         .add_connection(conn_id.clone(), tenant_id.clone(), role.clone(), tx);
+    state.hub.update_connection_auth(&conn_id, role, claims);
     info!(conn_id = %conn_id, tenant = %tenant_id, "WebSocket client connected");
 
     // Task to send messages from channel to WebSocket client
@@ -341,15 +342,7 @@ async fn handle_socket(
                 let text_str = text.as_str();
                 match PhoenixV2Message::decode(text_str) {
                     Ok(parsed) => {
-                        handle_client_message(
-                            &state,
-                            &tenant_id,
-                            &role,
-                            &claims,
-                            &conn_id_recv,
-                            parsed,
-                        )
-                        .await;
+                        handle_client_message(&state, &tenant_id, &conn_id_recv, parsed).await;
                     }
                     Err(e) => {
                         warn!(conn_id = %conn_id_recv, error = %e, "Malformed Phoenix frame received");
@@ -386,8 +379,6 @@ async fn handle_socket(
 async fn handle_client_message(
     state: &AppState,
     tenant_id: &str,
-    _role: &str,
-    claims: &Value,
     conn_id: &str,
     msg: PhoenixV2Message,
 ) {
@@ -406,6 +397,9 @@ async fn handle_client_message(
 
     // 2. phx_join
     if event == "phx_join" {
+        let Some(claims) = hub.connection_claims(conn_id) else {
+            return;
+        };
         let config = msg.payload.get("config").cloned().unwrap_or(json!({}));
         let broadcast_self = config
             .get("broadcast")
@@ -464,7 +458,7 @@ async fn handle_client_message(
                 hub.send_to_connection(conn_id, reply);
                 return;
             };
-            match subscriptions::store_subscriptions(&tenant, claims, &specs).await {
+            match subscriptions::store_subscriptions(&tenant, &claims, &specs).await {
                 Ok(stored) => stored,
                 Err(reason) => {
                     let reply = PhoenixV2Message::reply(
@@ -598,15 +592,34 @@ async fn handle_client_message(
             .get("access_token")
             .and_then(|value| value.as_str())
             .unwrap_or_default();
-        let tenant_secret = state
-            .registry
-            .get(tenant_id)
-            .map(|tenant| tenant.jwt_secret);
-        let valid = !token.is_empty()
-            && state
-                .registry
-                .verify_jwt(token, tenant_secret.as_deref())
-                .is_some();
+        let verified = (!token.is_empty())
+            .then(|| state.registry.get(tenant_id))
+            .flatten()
+            .and_then(|tenant| {
+                state
+                    .registry
+                    .verify_jwt_payload_for_tenant(token, &tenant)
+                    .map(|claims| (tenant, claims))
+            });
+        let valid = match verified {
+            Some((tenant, claims)) => {
+                let role = claims
+                    .get("role")
+                    .and_then(Value::as_str)
+                    .filter(|role| !role.is_empty())
+                    .unwrap_or("anon")
+                    .to_owned();
+                hub.update_connection_auth(conn_id, role, claims.clone());
+                let subscription_ids = hub.subscription_db_ids(conn_id);
+                if let Err(error) =
+                    subscriptions::update_claims(&tenant, &subscription_ids, &claims).await
+                {
+                    warn!(conn_id = %conn_id, error = %error, "Failed to update realtime.subscription claims");
+                }
+                true
+            }
+            None => false,
+        };
         if let Some(ref r) = reference {
             let reply = if valid {
                 PhoenixV2Message::reply(join_ref, Some(r.clone()), topic, "ok", json!({}))
