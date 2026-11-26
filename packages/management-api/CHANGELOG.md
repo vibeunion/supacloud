@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.141.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.141.1...management-api-v0.141.2) (2026-11-26)
+
+
+### Bug Fixes
+
+* **management-api:** self-heal stale systemd-unit helper and clear failed broker jobs ([#2834](https://github.com/vibeunion/supacloud/issues/2834)) ([b825023](https://github.com/vibeunion/supacloud/commit/b825023ea831d69a2afbd1d08a6d34d07771d9a7))
+
 ## [0.141.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.141.0...management-api-v0.141.1) (2026-11-26)
 
 
