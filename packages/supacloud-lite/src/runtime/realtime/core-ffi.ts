@@ -103,9 +103,7 @@ const symbols = {
 } as const
 
 /** Platform-specific file name of the core library. */
-export function realtimeCoreLibraryName(
-  platform: NodeJS.Platform = process.platform
-): string {
+export function realtimeCoreLibraryName(platform: string = process.platform): string {
   if (platform === 'darwin') return 'libsupacloud_realtime_core.dylib'
   if (platform === 'win32') return 'supacloud_realtime_core.dll'
   return 'libsupacloud_realtime_core.so'

@@ -84,7 +84,7 @@ interface PostgresBinding {
   /** table to watch, or `*` for every table in the schema */
   table: string
   /** optional `col=op.value` row filter (see {@link matchFilter}) */
-  filter?: string
+  filter?: string | undefined
 }
 
 interface Channel {
@@ -144,7 +144,7 @@ export class RealtimeEngine {
   private presence = new Map<string, Map<string, PresenceMetas>>()
   private stopCdc: EngineUnsubscribe | null = null
   private stopDbBroadcast: EngineUnsubscribe | null = null
-  private readonly core?: RealtimeProtocolCore
+  private readonly core: RealtimeProtocolCore | undefined
   private readonly ownsCore: boolean
   private coreCounter = 1
   private coreConnections = new Map<Connection, string>()
@@ -447,7 +447,7 @@ export class RealtimeEngine {
             const selected = conn.channels.get(msg.topic)
             const channels = selected ? [selected] : [...conn.channels.values()]
             try {
-              const token: unknown = msg.payload?.access_token
+              const token: unknown = msg.payload?.['access_token']
               if (token !== undefined && typeof token !== 'string') throw new Error('Invalid Realtime access token')
               const ctx = await this.contextFromToken(token)
               for (const channel of channels) {
@@ -513,14 +513,14 @@ export class RealtimeEngine {
     connectionId: string,
     msg: PhoenixMessage
   ): Promise<void> {
-    const config = (msg.payload?.config ?? {}) as {
+    const config = (msg.payload?.['config'] ?? {}) as {
       private?: boolean
       broadcast?: { self?: boolean; ack?: boolean }
       presence?: { key?: string; enabled?: boolean }
       postgres_changes?: { event?: string; schema?: string; table?: string; filter?: string }[]
     }
 
-    const token: unknown = msg.payload?.access_token
+    const token: unknown = msg.payload?.['access_token']
     if (token !== undefined && typeof token !== 'string') throw new Error('Invalid Realtime access token')
     const ctx = await this.contextFromToken(token)
     const isPrivate = config.private === true
@@ -721,14 +721,14 @@ export class RealtimeEngine {
   }
 
   private async handleJoin(conn: Connection, msg: PhoenixMessage): Promise<void> {
-    const config = (msg.payload?.config ?? {}) as {
+    const config = (msg.payload?.['config'] ?? {}) as {
       private?: boolean
       broadcast?: { self?: boolean; ack?: boolean }
       presence?: { key?: string; enabled?: boolean }
       postgres_changes?: { event?: string; schema?: string; table?: string; filter?: string }[]
     }
 
-    const token: unknown = msg.payload?.access_token
+    const token: unknown = msg.payload?.['access_token']
     if (token !== undefined && typeof token !== 'string') throw new Error('Invalid Realtime access token')
     const ctx = await this.contextFromToken(token)
     const isPrivate = config.private === true
@@ -837,12 +837,12 @@ export class RealtimeEngine {
   private removePresence(channel: Channel): void {
     const presenceRef = channel.presenceRef
     if (!presenceRef) return
-    channel.presenceRef = undefined
+    delete channel.presenceRef
     const state = this.presence.get(channel.topic)
     const current = state?.get(channel.presenceKey)
-    const leaving = current?.metas.find((meta) => meta.phx_ref === presenceRef)
+    const leaving = current?.metas.find((meta) => meta['phx_ref'] === presenceRef)
     if (!state || !current || !leaving) return
-    const remaining = current.metas.filter((meta) => meta.phx_ref !== presenceRef)
+    const remaining = current.metas.filter((meta) => meta['phx_ref'] !== presenceRef)
     if (remaining.length > 0) {
       state.set(channel.presenceKey, { metas: remaining })
     } else {
@@ -877,7 +877,7 @@ export class RealtimeEngine {
    */
   private handleBinary(conn: Connection, bytes: Uint8Array): void {
     if (bytes.length < 7 || bytes[0] !== 3) return
-    const [, joinRefLen, refLen, topicLen, eventLen, metaLen, encoding] = bytes
+    const [, joinRefLen = 0, refLen = 0, topicLen = 0, eventLen = 0, metaLen = 0, encoding = 0] = bytes
     let offset: number = 7
     const decoder = new TextDecoder()
     const read = (len: number) => {
@@ -939,28 +939,28 @@ export class RealtimeEngine {
   private handlePresence(conn: Connection, msg: PhoenixMessage): void {
     const channel = conn.channels.get(msg.topic)
     if (!channel) return
-    const event = String((msg.payload?.event ?? '')).toLowerCase()
+    const event = String((msg.payload?.['event'] ?? '')).toLowerCase()
 
     if (event === 'track') {
-      const payload = { ...((msg.payload?.payload as Record<string, unknown>) ?? {}) }
-      delete payload.phx_ref
-      delete payload.phx_ref_prev
+      const payload = { ...((msg.payload?.['payload'] as Record<string, unknown>) ?? {}) }
+      delete payload['phx_ref']
+      delete payload['phx_ref_prev']
       let state = this.presence.get(msg.topic)
       if (!state) {
         state = new Map()
         this.presence.set(msg.topic, state)
       }
       const current = state.get(channel.presenceKey)
-      const previous = current?.metas.find((meta) => meta.phx_ref === channel.presenceRef)
+      const previous = current?.metas.find((meta) => meta['phx_ref'] === channel.presenceRef)
       const meta = {
         ...payload,
         phx_ref: `F${this.phxRefCounter++}`,
-        ...(previous ? { phx_ref_prev: previous.phx_ref } : {}),
+        ...(previous ? { phx_ref_prev: previous['phx_ref'] } : {}),
       }
       // A shared presence key can belong to multiple connections; replace only our own meta.
-      const others = current?.metas.filter((meta) => meta.phx_ref !== channel.presenceRef) ?? []
+      const others = current?.metas.filter((meta) => meta['phx_ref'] !== channel.presenceRef) ?? []
       state.set(channel.presenceKey, { metas: [...others, meta] })
-      channel.presenceRef = meta.phx_ref
+      channel.presenceRef = meta['phx_ref']
       this.broadcastToTopic(msg.topic, {
         topic: msg.topic,
         event: 'presence_diff',
@@ -1176,7 +1176,10 @@ function sortJsonValue(value: unknown): unknown {
 export function matchFilter(filter: string, row: Record<string, unknown>): boolean {
   const m = filter.match(/^([^=]+)=(eq|neq|lt|lte|gt|gte|in)\.(.*)$/s)
   if (!m) return false
-  const [, column, op, rawValue] = m
+  const column = m[1]
+  const op = m[2]
+  const rawValue = m[3]
+  if (!column || !op || rawValue === undefined) return false
   const actual = row[column.trim()]
 
   if (op === 'in') {
