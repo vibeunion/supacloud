@@ -6,9 +6,11 @@
  * 1. `SUPACLOUD_LITE_REALTIME_CORE` — explicit operator override.
  * 2. Embedded single-file asset — extracted to a `0700` temp dir, SHA-256
  *    verified against the build-time digest, then loaded.
- * 3. `<dir of executable>/native/<library>` — sidecar layout for unpacked
+ * 3. Package-relative `dist/native/<triple>/<library>` — the npm package
+ *    publishes prebuilt cores for every supported platform.
+ * 4. `<dir of executable>/native/<library>` — sidecar layout for unpacked
  *    installs.
- * 4. `crates/realtime-core/target/{release,debug}` — development builds.
+ * 5. `crates/realtime-core/target/{release,debug}` — development builds.
  *
  * Missing or mismatched resources fail closed with
  * {@link RealtimeCoreUnavailableError}; there is no silent fallback to an
@@ -47,6 +49,19 @@ export interface OpenedRealtimeCore {
 
 const EXTRACT_PREFIX = 'supacloud-lite-realtime-core-'
 
+/** Rust triples staged by the release workflow for npm consumers. */
+const REALTIME_CORE_TRIPLES: Record<string, string> = {
+  'linux-x64': 'x86_64-unknown-linux-gnu',
+  'linux-arm64': 'aarch64-unknown-linux-gnu',
+  'darwin-x64': 'x86_64-apple-darwin',
+  'darwin-arm64': 'aarch64-apple-darwin',
+  'win32-x64': 'x86_64-pc-windows-msvc',
+}
+
+function hostTriple(): string | undefined {
+  return REALTIME_CORE_TRIPLES[`${process.platform}-${process.arch}`]
+}
+
 async function fileExists(path: string): Promise<boolean> {
   try {
     return (await stat(path)).isFile()
@@ -83,7 +98,19 @@ async function extractEmbedded(
     await chmod(destination, 0o700)
     return {
       path: destination,
-      cleanup: () => rm(directory, { recursive: true, force: true }),
+      cleanup: async () => {
+        try {
+          await rm(directory, { recursive: true, force: true })
+        } catch (error) {
+          // Windows keeps a loaded DLL mapped until process exit, so the
+          // freshly extracted directory stays locked. Cleanup is best effort
+          // there, matching the exit hook: a later start reclaims stale dirs.
+          const code = (error as NodeJS.ErrnoException).code
+          if (process.platform !== 'win32' || (code !== 'EPERM' && code !== 'EBUSY')) {
+            throw error
+          }
+        }
+      },
     }
   } catch (error) {
     await rm(directory, { recursive: true, force: true })
@@ -125,12 +152,29 @@ async function resolveLibraryPath(
     return extracted
   }
 
-  const sidecar = join(executableDir(), 'native', name)
-  if (await fileExists(sidecar)) {
-    return { path: sidecar, cleanup: async () => {} }
+  const here = dirname(fileURLToPath(import.meta.url))
+  const triple = hostTriple()
+  const nativeRoot = resolve(here, '..', '..', 'native')
+  const packageCandidates = [
+    join(nativeRoot, name),
+    ...(triple ? [join(nativeRoot, triple, name)] : []),
+  ]
+  for (const candidate of packageCandidates) {
+    if (await fileExists(candidate)) {
+      return { path: candidate, cleanup: async () => {} }
+    }
   }
 
-  const here = dirname(fileURLToPath(import.meta.url))
+  const sidecarCandidates = [
+    join(executableDir(), 'native', name),
+    ...(triple ? [join(executableDir(), 'native', triple, name)] : []),
+  ]
+  for (const candidate of sidecarCandidates) {
+    if (await fileExists(candidate)) {
+      return { path: candidate, cleanup: async () => {} }
+    }
+  }
+
   let current = here
   for (let depth = 0; depth < 8; depth += 1) {
     for (const profile of ['release', 'debug']) {

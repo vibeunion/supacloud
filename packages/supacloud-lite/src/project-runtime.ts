@@ -33,13 +33,14 @@ const RESET_INITIALIZATION_ERROR = 'db reset requires initialized state; run "su
 const RESET_INVALID_SECRETS_ERROR = 'db reset requires a valid project secrets marker; restore the state before retrying'
 
 /**
- * Open the embedded Rust Realtime core when explicitly requested. Failures
- * propagate: an operator who asked for the Rust core must not silently get the
- * TypeScript implementation instead.
+ * Open the embedded Rust Realtime core.
+ *
+ * Lite has one Realtime implementation. When runtime services are starting the
+ * core must load; there is no TypeScript fallback and no implementation mode
+ * to select. Failures propagate so an operator sees a capability error instead
+ * of silently serving a different protocol engine.
  */
-async function openConfiguredRealtimeCore(): Promise<RealtimeProtocolCore | undefined> {
-  const mode = process.env.SUPACLOUD_LITE_REALTIME_CORE_MODE
-  if (mode !== 'rust' && mode !== '1') return undefined
+async function openLiteRealtimeCore(): Promise<RealtimeProtocolCore> {
   const opened = await openRealtimeCore()
   const core: RealtimeProtocolCore = {
     call: opened.core.call.bind(opened.core),
@@ -105,8 +106,8 @@ export interface ProjectRuntimeOptions {
   includeSeed?: boolean
   includeIdentity?: boolean
   startRuntimeServices?: boolean
-  /** Explicit Rust Realtime core; `false` disables even when the env flag is set. */
-  realtimeCore?: RealtimeProtocolCore | false
+  /** Explicit Realtime core for tests or embedded callers. */
+  realtimeCore?: RealtimeProtocolCore
   log?: (message: string) => void
 }
 
@@ -358,9 +359,8 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
     engine = await createNativeEngine({ dataDir, installDir: options.postgresDir, log: options.log, replication })
   }
   const realtimeCore =
-    options.realtimeCore === false
-      ? undefined
-      : options.realtimeCore ?? (await openConfiguredRealtimeCore())
+    options.realtimeCore ??
+    (options.startRuntimeServices === true ? await openLiteRealtimeCore() : undefined)
   let backend: SupaCloudLiteBackend | undefined
   try {
     backend = await createBackend({

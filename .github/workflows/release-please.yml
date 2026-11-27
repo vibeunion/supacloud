@@ -439,8 +439,73 @@ jobs:
         run: gh release upload "$RELEASE_TAG" packages/pgredis-runtime/dist/* --clobber
 
 
-  publish-supacloud-lite-binaries:
+  stage-supacloud-lite-realtime-cores:
     needs: release-please
+    if: ${{ always() && (needs.release-please.outputs.supacloud_lite_released == 'true' || inputs.recover_npm == true) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: linux
+            targets: x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu
+          - os: macos-15
+            name: macos
+            targets: aarch64-apple-darwin,x86_64-apple-darwin
+          - os: windows-2025
+            name: windows
+            targets: x86_64-pc-windows-msvc
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.supacloud_lite_tag_name }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
+
+      - name: Ensure the requested Rust targets are installed
+        shell: bash
+        run: |
+          IFS=',' read -ra targets <<< "${{ matrix.targets }}"
+          for target in "${targets[@]}"; do rustup target add "$target"; done
+
+      - name: Install the Linux arm64 cross linker
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build per-target Realtime cores
+        working-directory: packages/supacloud-lite
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: |
+          IFS=',' read -ra targets <<< "${{ matrix.targets }}"
+          for target in "${targets[@]}"; do
+            bun run build:realtime-core --target "$target"
+          done
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: supacloud-lite-realtime-core-${{ matrix.name }}
+          path: packages/supacloud-lite/dist/native
+          if-no-files-found: error
+
+
+  publish-supacloud-lite-binaries:
+    needs: [release-please, stage-supacloud-lite-realtime-cores]
     if: ${{ needs.release-please.outputs.supacloud_lite_released == 'true' }}
     runs-on: ubuntu-latest
     permissions:
@@ -457,6 +522,13 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Download Realtime cores for every standalone target
+        uses: actions/download-artifact@v7
+        with:
+          pattern: supacloud-lite-realtime-core-*
+          path: packages/supacloud-lite/dist/native
+          merge-multiple: true
 
       - name: Validate strict SupaCloud Lite release identity
         env:
@@ -477,6 +549,8 @@ jobs:
 
       - name: Build standalone release matrix
         working-directory: packages/supacloud-lite
+        env:
+          SUPACLOUD_LITE_REQUIRE_REALTIME_CORE: "1"
         run: bun run build:standalone:release
 
       - name: Smoke Linux x64 standalone binary
@@ -513,7 +587,7 @@ jobs:
 
 
   publish-npm:
-    needs: release-please
+    needs: [release-please, stage-supacloud-lite-realtime-cores]
     # A previous release can leave a Git tag behind after npm publication
     # fails. Allow an explicit recovery run without creating another release.
     if: ${{ always() && needs.release-please.result == 'success' && inputs.recover_management_tag == '' && inputs.recover_edge_runtime_tag == '' && (needs.release-please.outputs.releases_created == 'true' || inputs.recover_npm == true || (inputs.recover_elysia == true && github.ref == 'refs/heads/main') || (inputs.recover_query == true && github.ref == 'refs/heads/main')) }}
@@ -645,11 +719,20 @@ jobs:
           bun run build
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
+      - name: Download Realtime cores for the npm package
+        if: ${{ needs.stage-supacloud-lite-realtime-cores.result == 'success' }}
+        uses: actions/download-artifact@v7
+        with:
+          pattern: supacloud-lite-realtime-core-*
+          path: packages/supacloud-lite/native-staging
+          merge-multiple: true
+
       - name: Publish SupaCloud Lite to NPM
         if: ${{ always() && (needs.release-please.outputs.supacloud_lite_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/supacloud-lite
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+          npm_config_ignore_scripts: "true"
         run: |
           # Build-only workspace references must not observe sibling manifests
           # already rewritten by earlier publication steps.
@@ -662,7 +745,17 @@ jobs:
           # The compatibility test imports the adapter source directly, so
           # install its source package dependencies in the isolated build root.
           (cd ../db-zenstack && bun install --force --frozen-lockfile)
+          staged_core="$GITHUB_WORKSPACE/packages/supacloud-lite/native-staging/libsupacloud_realtime_core.so"
+          if [ -f "$staged_core" ]; then
+            export SUPACLOUD_LITE_REALTIME_CORE="$staged_core"
+          else
+            bun run build:realtime-core
+          fi
           bun run check
+          if [ -d "$GITHUB_WORKSPACE/packages/supacloud-lite/native-staging" ]; then
+            mkdir -p dist/native
+            cp -R "$GITHUB_WORKSPACE/packages/supacloud-lite/native-staging/." dist/native/
+          fi
           node ../../.github/scripts/prepare-command-package.mjs
           node ../../.github/scripts/publish-npm-package.mjs
 
