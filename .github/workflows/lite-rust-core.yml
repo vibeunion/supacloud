@@ -166,7 +166,7 @@ jobs:
       - name: Install targets for the pinned Rust toolchain
         run: |
           rustup toolchain install
-          rustup target add ${{ matrix.rust-targets }}
+          rustup target add $(printf '%s' "${{ matrix.rust-targets }}" | tr ',' ' ')
       - name: Install the Linux arm64 cross linker
         if: runner.os == 'Linux'
         run: |
