@@ -23,6 +23,22 @@ export interface CoreFrame {
   frame: unknown
 }
 
+/**
+ * Marker the host puts in place of a payload it keeps on its own heap.
+ *
+ * The core treats payloads as opaque, so a large broadcast payload never has
+ * to cross the FFI boundary: the host sends `{ [CORE_PAYLOAD_REF_KEY]: id }`,
+ * the core echoes that marker back inside every frame, and the host splices the
+ * real JSON text in while writing each socket. Without this, fan-out to N
+ * subscribers serializes and parses N copies of the payload.
+ */
+export const CORE_PAYLOAD_REF_KEY = '\u0000sc_payload_ref'
+
+/** Build the marker the core echoes back for a host-owned payload. */
+export function corePayloadRef(id: string): Record<string, string> {
+  return { [CORE_PAYLOAD_REF_KEY]: id }
+}
+
 /** Work the Bun host must perform because it owns the database. */
 export type CoreEffect =
   | {
@@ -65,7 +81,17 @@ export type CoreRequest =
       topic: string
       write: boolean
     }
-  | { op: 'cdc'; event: Record<string, unknown> }
+  | {
+      op: 'cdc'
+      event: Record<string, unknown>
+      /**
+       * Host-side payload ids for `event.record` / `event.old_record`. The core
+       * still matches bindings against the real values but emits these markers
+       * in the frames, so the host can splice the bytes back in itself.
+       */
+      record_ref?: string
+      old_record_ref?: string
+    }
   | { op: 'presence_state'; connection_id: string; topic: string }
   | { op: 'disconnect'; connection_id: string }
 

@@ -23,6 +23,14 @@ use crate::protocol::{Frame, FrameError, Vsn};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 
+/// Marker key the host uses for a payload it keeps on its own heap.
+///
+/// The core treats payloads as opaque, so a host that stages a large payload
+/// sends `{ KEY: id }` instead and the core echoes that marker back inside every
+/// frame. The host splices the real bytes in while writing the socket, which
+/// keeps `subscribers x payload` bytes out of the JSON response.
+pub const PAYLOAD_REF_KEY: &str = "\u{0}sc_payload_ref";
+
 #[derive(Debug, Clone)]
 struct Binding {
     id: u32,
@@ -37,6 +45,8 @@ struct Binding {
 #[derive(Debug, Clone)]
 struct Channel {
     join_ref: Option<String>,
+    /// Client ref of the latest join push, echoed on the join reply.
+    reference: Option<String>,
     private: bool,
     pending_authz: Option<String>,
     can_broadcast: bool,
@@ -51,6 +61,8 @@ struct Channel {
 struct Connection {
     vsn: Vsn,
     channels: HashMap<String, Channel>,
+    /// Join order, so disconnect-time presence leaves match the TypeScript engine.
+    channel_order: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -214,7 +226,9 @@ impl Session {
                     .get("event")
                     .cloned()
                     .ok_or_else(|| "cdc requires `event`".to_string())?;
-                self.on_cdc(&event)
+                let record_ref = value.get("record_ref").and_then(Value::as_str);
+                let old_record_ref = value.get("old_record_ref").and_then(Value::as_str);
+                self.on_cdc(&event, record_ref, old_record_ref)
             }
             "presence_state" => {
                 let topic = value
@@ -234,14 +248,20 @@ impl Session {
             .or_insert_with(|| Connection {
                 vsn: Vsn::V1,
                 channels: HashMap::new(),
+                channel_order: Vec::new(),
             })
+    }
+
+    fn take_channel(&mut self, connection_id: &str, topic: &str) -> Option<Channel> {
+        let conn = self.connections.get_mut(connection_id)?;
+        conn.channel_order.retain(|joined| joined != topic);
+        conn.channels.remove(topic)
     }
 
     fn on_frame(&mut self, connection_id: &str, raw: Value) -> Result<Outcome, String> {
         let frame = Frame::from_value(raw).map_err(|e: FrameError| e.to_string())?;
         let vsn = frame.vsn;
         self.connection_mut(connection_id).vsn = vsn;
-        let topic = frame.topic.clone();
         let mut out = Outcome::default();
 
         match frame.event.as_str() {
@@ -270,20 +290,8 @@ impl Session {
                 Ok(out)
             }
             "access_token" => Ok(out),
-            other => {
-                out.frames.push(OutgoingFrame {
-                    connection_id: connection_id.to_string(),
-                    frame: Frame::error(
-                        vsn,
-                        frame.join_ref,
-                        frame.reference,
-                        topic,
-                        &format!("unsupported event: {other}"),
-                    )
-                    .encode(vsn),
-                });
-                Ok(out)
-            }
+            // Unknown events are ignored, exactly like the TypeScript engine.
+            _ => Ok(out),
         }
     }
 
@@ -335,6 +343,7 @@ impl Session {
 
         let channel = Channel {
             join_ref: frame.join_ref.clone(),
+            reference: frame.reference.clone(),
             private,
             pending_authz: request_id.clone(),
             can_broadcast: !private,
@@ -344,9 +353,11 @@ impl Session {
             presence_key,
             bindings,
         };
-        self.connection_mut(connection_id)
-            .channels
-            .insert(topic.clone(), channel);
+        let conn = self.connection_mut(connection_id);
+        if !conn.channel_order.iter().any(|joined| joined == &topic) {
+            conn.channel_order.push(topic.clone());
+        }
+        conn.channels.insert(topic.clone(), channel);
 
         if let Some(request_id) = request_id {
             out.effects.push(Effect::Authorize {
@@ -401,7 +412,7 @@ impl Session {
     }
 
     fn send_join_ok(&mut self, connection_id: &str, topic: &str, out: &mut Outcome) {
-        let (vsn, join_ref, bindings, presence_enabled) = {
+        let (vsn, join_ref, reference, bindings, presence_enabled) = {
             let Some(conn) = self.connections.get(connection_id) else {
                 return;
             };
@@ -423,7 +434,13 @@ impl Session {
                     Value::Object(map)
                 })
                 .collect::<Vec<_>>();
-            (conn.vsn, ch.join_ref.clone(), bindings, ch.presence_enabled)
+            (
+                conn.vsn,
+                ch.join_ref.clone(),
+                ch.reference.clone(),
+                bindings,
+                ch.presence_enabled,
+            )
         };
 
         out.frames.push(OutgoingFrame {
@@ -431,7 +448,7 @@ impl Session {
             frame: Frame::ok(
                 vsn,
                 join_ref,
-                None,
+                reference,
                 topic,
                 json!({ "postgres_changes": bindings }),
             )
@@ -467,20 +484,15 @@ impl Session {
 
         if !read {
             let vsn = self.connections[connection_id].vsn;
-            let join_ref = self.connections[connection_id].channels[&topic]
-                .join_ref
-                .clone();
-            self.connections
-                .get_mut(connection_id)
-                .unwrap()
-                .channels
-                .remove(&topic);
+            let channel = &self.connections[connection_id].channels[&topic];
+            let (join_ref, reference) = (channel.join_ref.clone(), channel.reference.clone());
+            self.take_channel(connection_id, &topic);
             out.frames.push(OutgoingFrame {
                 connection_id: connection_id.to_string(),
                 frame: Frame::error(
                     vsn,
                     join_ref,
-                    None,
+                    reference,
                     topic,
                     reason.as_deref().unwrap_or("Unauthorized"),
                 )
@@ -529,10 +541,7 @@ impl Session {
     ) -> Result<(), String> {
         let vsn = frame.vsn;
         let topic = frame.topic.clone();
-        let removed = self
-            .connections
-            .get_mut(connection_id)
-            .and_then(|c| c.channels.remove(&topic));
+        let removed = self.take_channel(connection_id, &topic);
         if removed.is_some() {
             self.broadcast_presence_leave(&topic, connection_id, out);
         }
@@ -562,29 +571,27 @@ impl Session {
                     ch.broadcast_ack,
                     ch.broadcast_self,
                 ),
-                None => {
-                    out.frames.push(OutgoingFrame {
-                        connection_id: connection_id.to_string(),
-                        frame: Frame::error(
-                            vsn,
-                            frame.join_ref,
-                            frame.reference,
-                            topic,
-                            "Not joined",
-                        )
-                        .encode(vsn),
-                    });
-                    return Ok(());
-                }
+                // Phoenix drops messages for topics without a joined channel.
+                None => return Ok(()),
             }
         };
 
         if private && !can_broadcast {
-            out.frames.push(OutgoingFrame {
-                connection_id: connection_id.to_string(),
-                frame: Frame::error(vsn, frame.join_ref, frame.reference, topic, "Unauthorized")
+            // Match the TypeScript engine: only an acked broadcast with a ref
+            // gets an error reply, and the reason is the lowercase "unauthorized".
+            if ack && frame.reference.is_some() {
+                out.frames.push(OutgoingFrame {
+                    connection_id: connection_id.to_string(),
+                    frame: Frame::error(
+                        vsn,
+                        frame.join_ref,
+                        frame.reference,
+                        topic,
+                        "unauthorized",
+                    )
                     .encode(vsn),
-            });
+                });
+            }
             return Ok(());
         }
 
@@ -683,7 +690,12 @@ impl Session {
         Ok(())
     }
 
-    fn on_cdc(&mut self, event: &Value) -> Result<Outcome, String> {
+    fn on_cdc(
+        &mut self,
+        event: &Value,
+        record_ref: Option<&str>,
+        old_record_ref: Option<&str>,
+    ) -> Result<Outcome, String> {
         let schema = event
             .get("schema")
             .and_then(Value::as_str)
@@ -703,13 +715,23 @@ impl Session {
         };
 
         let mut out = Outcome::default();
+        // Bindings still match against the real record; only the copy embedded
+        // in the fan-out frames is replaced by the host's marker.
+        let emitted_record = match record_ref {
+            Some(id) => json!({ PAYLOAD_REF_KEY: id }),
+            None => record.clone(),
+        };
+        let emitted_old_record = match old_record_ref {
+            Some(id) => json!({ PAYLOAD_REF_KEY: id }),
+            None => old_record.clone(),
+        };
         let data = json!({
             "schema": schema,
             "table": table,
             "type": change_type,
             "eventType": change_type,
-            "record": record,
-            "old_record": old_record,
+            "record": emitted_record,
+            "old_record": emitted_old_record,
             "columns": event.get("columns").cloned().unwrap_or(Value::Null),
             "commit_timestamp": event.get("commit_timestamp").cloned().unwrap_or(Value::Null),
             "errors": event.get("errors").cloned().unwrap_or(Value::Null),
@@ -727,9 +749,10 @@ impl Session {
                         .as_ref()
                         .is_none_or(|f| f.matches(filter_target));
                     if event_ok && schema_ok && table_ok && filter_ok {
-                        if let Some((_, _, ids)) = matched
-                            .iter_mut()
-                            .find(|(id, matched_topic, _)| id == connection_id && matched_topic == topic)
+                        if let Some((_, _, ids)) =
+                            matched.iter_mut().find(|(id, matched_topic, _)| {
+                                id == connection_id && matched_topic == topic
+                            })
                         {
                             ids.push(binding.id);
                         } else {
@@ -761,10 +784,19 @@ impl Session {
 
     fn on_disconnect(&mut self, connection_id: &str) -> Result<Outcome, String> {
         let mut out = Outcome::default();
-        if self.connections.remove(connection_id).is_none() {
+        let Some(conn) = self.connections.remove(connection_id) else {
             return Ok(out);
+        };
+        let mut diffs = Vec::new();
+        for topic in &conn.channel_order {
+            if let Some(diff) = self.presence.untrack(topic, connection_id) {
+                if !diff.is_empty() {
+                    diffs.push((topic.clone(), diff));
+                }
+            }
         }
-        for (topic, diff) in self.presence.untrack_all(connection_id) {
+        diffs.extend(self.presence.untrack_all(connection_id));
+        for (topic, diff) in diffs {
             let diff_value = json!({ "joins": diff.joins, "leaves": diff.leaves });
             self.fan_out_presence(&topic, "presence_diff", diff_value, &mut out);
         }
@@ -814,6 +846,7 @@ impl Session {
             event: event.to_string(),
             payload,
             vsn: conn.vsn,
+            emit_join_ref: false,
         }
         .encode(conn.vsn);
         out.frames.push(OutgoingFrame {
@@ -941,6 +974,34 @@ mod tests {
             }),
         );
         assert!(skipped["frames"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn cdc_payload_ref_keeps_record_out_of_frames() {
+        let mut session = Session::new();
+        join(
+            &mut session,
+            "c1",
+            "realtime:room",
+            json!({ "postgres_changes": [
+                { "event": "INSERT", "schema": "public", "table": "todos", "filter": "done=eq.false" }
+            ] }),
+        );
+        let out = call(
+            &mut session,
+            json!({
+                "op": "cdc",
+                "event": {
+                    "schema": "public", "table": "todos", "type": "INSERT",
+                    "record": { "id": 1, "done": false, "blob": "x".repeat(64) }
+                },
+                "record_ref": "p1",
+            }),
+        );
+        let frame = &out["frames"][0]["frame"];
+        // The filter still ran against the real record, but the frame carries the
+        // host's marker instead of a second copy of the payload.
+        assert_eq!(frame[4]["data"]["record"], json!({ PAYLOAD_REF_KEY: "p1" }));
     }
 
     #[test]

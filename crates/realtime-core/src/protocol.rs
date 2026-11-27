@@ -36,6 +36,9 @@ pub struct Frame {
     pub event: String,
     pub payload: Value,
     pub vsn: Vsn,
+    /// Serialize `join_ref` for replies. Server-initiated pushes omit it in
+    /// the v1 object serializer, matching the Supabase wire behaviour.
+    pub emit_join_ref: bool,
 }
 
 #[derive(Debug)]
@@ -101,6 +104,7 @@ impl Frame {
                     event,
                     payload,
                     vsn: Vsn::V2,
+                    emit_join_ref: true,
                 })
             }
             Value::Object(mut map) => {
@@ -116,6 +120,7 @@ impl Frame {
                     event,
                     payload,
                     vsn: Vsn::V1,
+                    emit_join_ref: true,
                 })
             }
             _ => Err(FrameError::NotAnObjectOrArray),
@@ -134,7 +139,9 @@ impl Frame {
             ]),
             Vsn::V1 => {
                 let mut map = Map::new();
-                map.insert("join_ref".into(), opt_string(self.join_ref.as_deref()));
+                if self.emit_join_ref {
+                    map.insert("join_ref".into(), opt_string(self.join_ref.as_deref()));
+                }
                 map.insert("ref".into(), opt_string(self.reference.as_deref()));
                 map.insert("topic".into(), Value::String(self.topic.clone()));
                 map.insert("event".into(), Value::String(self.event.clone()));
@@ -159,6 +166,7 @@ impl Frame {
             event: "phx_reply".into(),
             payload: serde_json::json!({ "status": status, "response": response }),
             vsn,
+            emit_join_ref: true,
         }
     }
 
@@ -197,6 +205,7 @@ impl Frame {
             event: event.into(),
             payload,
             vsn: Vsn::V1,
+            emit_join_ref: false,
         }
     }
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.45.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.44.0...supacloud-lite-v0.45.0) (2026-11-27)
+
+
+### Features
+
+* **lite:** embed shared Rust Realtime core behind opt-in FFI ([#2838](https://github.com/vibeunion/supacloud/issues/2838)) ([73aacd2](https://github.com/vibeunion/supacloud/commit/73aacd200f314bd6610094e4d9bf791bbc49e14e))
+* **lite:** serve Realtime through the Rust core only ([#2862](https://github.com/vibeunion/supacloud/issues/2862)) ([dee73db](https://github.com/vibeunion/supacloud/commit/dee73db0c2f371a9407c2e2646bab4f59b9f7163))
+
 ## [0.44.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.43.2...supacloud-lite-v0.44.0) (2026-11-24)
 
 
