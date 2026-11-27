@@ -85,8 +85,9 @@ dist
 # Rust build artifacts
 crates/*/target/
 
-# Generated native assets staged for standalone builds
+# Generated native assets staged for standalone builds and npm releases
 packages/supacloud-lite/src/runtime/realtime/native/
+packages/supacloud-lite/native-staging/
 
 # Gatsby files
 .cache/

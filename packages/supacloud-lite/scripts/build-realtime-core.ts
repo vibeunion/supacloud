@@ -6,18 +6,26 @@
  *   bun run scripts/build-realtime-core.ts            # cargo build --release + stage
  *   bun run scripts/build-realtime-core.ts --debug    # cargo build (dev profile)
  *   bun run scripts/build-realtime-core.ts --embed    # also generate embedded-core.ts
+ *   bun run scripts/build-realtime-core.ts --target aarch64-unknown-linux-gnu
  *   bun run scripts/build-realtime-core.ts --reset    # restore the null module
  *
  * `--embed` rewrites `src/runtime/realtime/embedded-core.ts` with a
  * `with { type: 'file' }` import so Bun compiles the library into the
  * single-file executable. `build-standalone.ts` calls `--reset` afterwards so
- * the working tree keeps the checked-in `null` module.
+ * the working tree keeps the checked-in `null` module. Cross builds stage the
+ * library under `dist/native/<triple>/` so `build-standalone.ts` can embed it
+ * when the same target is requested.
  */
 import { createHash } from 'node:crypto'
 import { $ } from 'bun'
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
-import { realtimeCoreLibraryName } from '../src/runtime/realtime/core-ffi.js'
+import { dirname, join, resolve } from 'node:path'
+import {
+  coreArtifactPath,
+  libraryNameForPlatform,
+  platformFromRustTarget,
+  type CorePlatform,
+} from './realtime-core-targets.js'
 
 const packageDir = resolve(import.meta.dir, '..')
 const repoRoot = resolve(packageDir, '..', '..')
@@ -68,6 +76,8 @@ export interface BuildRealtimeCoreOptions {
   embed?: boolean
   /** Skip the cargo invocation and reuse an existing artifact. */
   reuseExisting?: boolean
+  /** Rust target triple; omit to build for the host. */
+  target?: string
 }
 
 /** Restore the checked-in `null` module and drop generated native assets. */
@@ -76,19 +86,33 @@ export async function resetEmbeddedRealtimeCore(): Promise<void> {
   await writeFile(embedModule, EMPTY_MODULE)
 }
 
+/** Turn an already-built library into the embedded module for a standalone build. */
+export async function stageEmbeddedCore(source: string, filename: string): Promise<string> {
+  const bytes = await readFile(source)
+  const sha256 = createHash('sha256').update(bytes).digest('hex')
+  await mkdir(nativeDir, { recursive: true, mode: 0o700 })
+  await copyFile(source, join(nativeDir, filename))
+  await writeFile(embedModule, generatedModule(filename, sha256))
+  return sha256
+}
+
 /**
- * Compile the cdylib for the host target and stage it under `dist/native`.
+ * Compile the cdylib for the host or `options.target` and stage it under
+ * `dist/native` (or `dist/native/<triple>` for cross targets).
  * Returns the staged path and its SHA-256 digest.
  */
 export async function buildRealtimeCore(
   options: BuildRealtimeCoreOptions = {}
 ): Promise<{ path: string; filename: string; sha256: string }> {
-  const filename = realtimeCoreLibraryName()
-  const targetDir = join(crateDir, 'target', options.debug ? 'debug' : 'release')
-  const artifact = join(targetDir, filename)
+  const target = options.target ?? null
+  const filename = libraryNameForPlatform(
+    target ? platformFromRustTarget(target) : (process.platform as CorePlatform)
+  )
+  const artifact = coreArtifactPath(crateDir, target, options.debug ? 'debug' : 'release')
 
   if (!options.reuseExisting) {
     const args = ['build', '--manifest-path', join(crateDir, 'Cargo.toml')]
+    if (target) args.push('--target', target)
     if (!options.debug) args.push('--release')
     console.log(`[realtime-core] cargo ${args.join(' ')}`)
     await $`cargo ${args}`.cwd(crateDir)
@@ -98,13 +122,12 @@ export async function buildRealtimeCore(
   const sha256 = createHash('sha256').update(bytes).digest('hex')
 
   await mkdir(stagedDir, { recursive: true })
-  const staged = join(stagedDir, filename)
+  const staged = target ? join(stagedDir, target, filename) : join(stagedDir, filename)
+  await mkdir(dirname(staged), { recursive: true })
   await copyFile(artifact, staged)
 
   if (options.embed) {
-    await mkdir(nativeDir, { recursive: true, mode: 0o700 })
-    await copyFile(artifact, join(nativeDir, filename))
-    await writeFile(embedModule, generatedModule(filename, sha256))
+    await stageEmbeddedCore(artifact, filename)
   }
 
   return { path: staged, filename, sha256 }
@@ -116,13 +139,17 @@ if (import.meta.main) {
     await resetEmbeddedRealtimeCore()
     console.log('[realtime-core] embedded module reset to null')
   } else {
+    const targetIndex = process.argv.indexOf('--target')
+    const target = targetIndex === -1 ? undefined : process.argv[targetIndex + 1]
+    if (targetIndex !== -1 && !target) throw new Error('--target requires a Rust target triple')
     const result = await buildRealtimeCore({
       debug: args.has('--debug'),
       embed: args.has('--embed'),
       reuseExisting: args.has('--reuse-existing'),
+      target,
     })
     console.log(
-      `[realtime-core] ${result.filename} sha256=${result.sha256} -> ${result.path}`
+      `[realtime-core] ${result.filename}${target ? ` (${target})` : ''} sha256=${result.sha256} -> ${result.path}`
     )
   }
 }

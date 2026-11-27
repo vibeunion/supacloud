@@ -241,6 +241,107 @@ describeNative('RealtimeEngine with the Rust core', () => {
     await isolated.stop()
   })
 
+  test('keeps a large broadcast payload out of the core request', async () => {
+    const requests: unknown[] = []
+    const isolated = new RealtimeEngine(fakeDatabase(), undefined, undefined, {
+      core: {
+        call: (request) => {
+          requests.push(request)
+          return opened.core.call(request)
+        },
+        close: () => {},
+      },
+    })
+    const sockets = Array.from({ length: 3 }, () => new TestSocket())
+    const handlers = sockets.map((socket) => isolated.connect(socket, { vsn: '1.0.0' }))
+    for (const handler of handlers) {
+      handler.onMessage(
+        JSON.stringify({
+          join_ref: '1',
+          ref: '1',
+          topic: 'realtime:room',
+          event: 'phx_join',
+          payload: { config: { broadcast: { self: false } } },
+        })
+      )
+    }
+    await flush()
+
+    const blob = 'x'.repeat(64 * 1024)
+    handlers[0]!.onMessage(
+      JSON.stringify({
+        join_ref: '1',
+        ref: '2',
+        topic: 'realtime:room',
+        event: 'broadcast',
+        payload: { type: 'broadcast', event: 'm', payload: { blob } },
+      })
+    )
+    await flush()
+
+    const request = JSON.stringify(requests.at(-1))
+    expect(request).toContain('sc_payload_ref')
+    expect(request).not.toContain(blob)
+    for (const socket of sockets.slice(1)) {
+      expect(socket.events('broadcast')[0]?.payload.payload).toEqual({ blob })
+    }
+    await isolated.stop()
+  })
+
+  test('keeps a large CDC record out of the core response', async () => {
+    const requests: unknown[] = []
+    const responses: unknown[] = []
+    const isolated = new RealtimeEngine(fakeDatabase(), undefined, undefined, {
+      core: {
+        call: (request) => {
+          requests.push(request)
+          const response = opened.core.call(request)
+          responses.push(response)
+          return response
+        },
+        close: () => {},
+      },
+    })
+    const socket = new TestSocket()
+    const { onMessage } = isolated.connect(socket, { vsn: '1.0.0' })
+    onMessage(
+      JSON.stringify({
+        topic: 'realtime:cdc',
+        event: 'phx_join',
+        ref: '1',
+        payload: {
+          config: { postgres_changes: [{ event: 'INSERT', schema: 'public', table: 'todos' }] },
+        },
+      })
+    )
+    await flush()
+
+    const blob = 'x'.repeat(64 * 1024)
+    const dispatch = (isolated as unknown as { dispatchCdc: (event: unknown) => Promise<void> }).dispatchCdc.bind(
+      isolated
+    )
+    await dispatch({
+      schema: 'public',
+      table: 'todos',
+      type: 'INSERT',
+      commit_timestamp: '2026-01-01T00:00:00Z',
+      record: { id: 1, done: false, blob },
+      old_record: null,
+    })
+    await flush()
+
+    // The record still crosses once so the core can match filters, but the
+    // fan-out frames come back carrying the marker instead of N copies.
+    expect(JSON.stringify(requests.at(-1))).toContain('record_ref')
+    const response = JSON.stringify(responses.at(-1))
+    expect(response).toContain('sc_payload_ref')
+    expect(response).not.toContain(blob)
+
+    const data = socket.events('postgres_changes')[0]?.payload.data as { record: { blob: string } }
+    expect(data.record.blob).toBe(blob)
+    await isolated.stop()
+  })
+
   test('ownsCore releases the core on stop', async () => {
     let closed = 0
     const isolated = new RealtimeEngine(fakeDatabase(), undefined, undefined, {
