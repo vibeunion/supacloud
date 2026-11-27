@@ -801,14 +801,16 @@ export class RealtimeEngine {
       })),
     })
 
-    // initial presence snapshot
-    const state = this.presence.get(msg.topic)
-    this.send(conn, {
-      topic: msg.topic,
-      event: 'presence_state',
-      payload: state ? Object.fromEntries(state) : {},
-      ref: null,
-    })
+    // initial presence snapshot (skipped when the client disabled presence)
+    if (channel.presenceEnabled) {
+      const state = this.presence.get(msg.topic)
+      this.send(conn, {
+        topic: msg.topic,
+        event: 'presence_state',
+        payload: state ? Object.fromEntries(state) : {},
+        ref: null,
+      })
+    }
 
     // postgres_changes readiness signal (realtime-js listens for this)
     if (bindings.length > 0) {
@@ -939,6 +941,7 @@ export class RealtimeEngine {
   private handlePresence(conn: Connection, msg: PhoenixMessage): void {
     const channel = conn.channels.get(msg.topic)
     if (!channel) return
+    if (!channel.presenceEnabled) return
     const event = String((msg.payload?.['event'] ?? '')).toLowerCase()
 
     if (event === 'track') {
