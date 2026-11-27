@@ -13,6 +13,11 @@
  * core injected. Numbers are synthetic, in-process and machine dependent; they
  * are regression guards, not a production SLA.
  *
+ * The `core *` rows call the core directly with the payload inline, so they show
+ * the raw cost of the JSON protocol. The `rust engine *` rows go through the
+ * engine, which stages payloads of 16 KiB and up on the Bun heap and sends the
+ * core a marker instead; comparing the two is the point of the exercise.
+ *
  *   bun run scripts/benchmark-realtime-core.ts [--json] [--quick]
  *     [--connections 200] [--iterations 200] [--assert-max-lag 250]
  */
@@ -412,6 +417,21 @@ try {
     if (worst.lag.max_lag_ms > assertMaxLag) {
       console.error(`${worstLabel}: event loop lag ${worst.lag.max_lag_ms} ms exceeded the ${assertMaxLag} ms budget`)
       process.exit(1)
+    }
+    // Absolute budgets are loose enough to hide a fan-out regression: before the
+    // host staged large payloads, the Rust engine sat ~15x behind TypeScript on
+    // the 1 MiB rows while still clearing the budget above. Guard the ratio too,
+    // with a floor so tiny rows (where FFI overhead dominates) stay comparable.
+    for (const [label, rust] of Object.entries(engineRustCore)) {
+      const typescript = engineTypescript[label]
+      if (!typescript) continue
+      const budget = Math.max(typescript.stats.p50_ms * 5, 5)
+      if (rust.stats.p50_ms > budget) {
+        console.error(
+          `rust engine ${label}: p50 ${rust.stats.p50_ms} ms exceeded ${budget} ms (typescript ${typescript.stats.p50_ms} ms)`
+        )
+        process.exit(1)
+      }
     }
     // Keep stdout pure JSON when a report is requested.
     ;(jsonOutput ? console.error : console.log)(

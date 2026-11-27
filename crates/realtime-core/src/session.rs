@@ -23,6 +23,14 @@ use crate::protocol::{Frame, FrameError, Vsn};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 
+/// Marker key the host uses for a payload it keeps on its own heap.
+///
+/// The core treats payloads as opaque, so a host that stages a large payload
+/// sends `{ KEY: id }` instead and the core echoes that marker back inside every
+/// frame. The host splices the real bytes in while writing the socket, which
+/// keeps `subscribers x payload` bytes out of the JSON response.
+pub const PAYLOAD_REF_KEY: &str = "\u{0}sc_payload_ref";
+
 #[derive(Debug, Clone)]
 struct Binding {
     id: u32,
@@ -218,7 +226,9 @@ impl Session {
                     .get("event")
                     .cloned()
                     .ok_or_else(|| "cdc requires `event`".to_string())?;
-                self.on_cdc(&event)
+                let record_ref = value.get("record_ref").and_then(Value::as_str);
+                let old_record_ref = value.get("old_record_ref").and_then(Value::as_str);
+                self.on_cdc(&event, record_ref, old_record_ref)
             }
             "presence_state" => {
                 let topic = value
@@ -680,7 +690,12 @@ impl Session {
         Ok(())
     }
 
-    fn on_cdc(&mut self, event: &Value) -> Result<Outcome, String> {
+    fn on_cdc(
+        &mut self,
+        event: &Value,
+        record_ref: Option<&str>,
+        old_record_ref: Option<&str>,
+    ) -> Result<Outcome, String> {
         let schema = event
             .get("schema")
             .and_then(Value::as_str)
@@ -700,13 +715,23 @@ impl Session {
         };
 
         let mut out = Outcome::default();
+        // Bindings still match against the real record; only the copy embedded
+        // in the fan-out frames is replaced by the host's marker.
+        let emitted_record = match record_ref {
+            Some(id) => json!({ PAYLOAD_REF_KEY: id }),
+            None => record.clone(),
+        };
+        let emitted_old_record = match old_record_ref {
+            Some(id) => json!({ PAYLOAD_REF_KEY: id }),
+            None => old_record.clone(),
+        };
         let data = json!({
             "schema": schema,
             "table": table,
             "type": change_type,
             "eventType": change_type,
-            "record": record,
-            "old_record": old_record,
+            "record": emitted_record,
+            "old_record": emitted_old_record,
             "columns": event.get("columns").cloned().unwrap_or(Value::Null),
             "commit_timestamp": event.get("commit_timestamp").cloned().unwrap_or(Value::Null),
             "errors": event.get("errors").cloned().unwrap_or(Value::Null),
@@ -949,6 +974,34 @@ mod tests {
             }),
         );
         assert!(skipped["frames"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn cdc_payload_ref_keeps_record_out_of_frames() {
+        let mut session = Session::new();
+        join(
+            &mut session,
+            "c1",
+            "realtime:room",
+            json!({ "postgres_changes": [
+                { "event": "INSERT", "schema": "public", "table": "todos", "filter": "done=eq.false" }
+            ] }),
+        );
+        let out = call(
+            &mut session,
+            json!({
+                "op": "cdc",
+                "event": {
+                    "schema": "public", "table": "todos", "type": "INSERT",
+                    "record": { "id": 1, "done": false, "blob": "x".repeat(64) }
+                },
+                "record_ref": "p1",
+            }),
+        );
+        let frame = &out["frames"][0]["frame"];
+        // The filter still ran against the real record, but the frame carries the
+        // host's marker instead of a second copy of the payload.
+        assert_eq!(frame[4]["data"]["record"], json!({ PAYLOAD_REF_KEY: "p1" }));
     }
 
     #[test]
