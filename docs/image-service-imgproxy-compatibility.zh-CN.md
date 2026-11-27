@@ -94,8 +94,8 @@ const signature = createHmac("sha256", key)
 | `plain` / Base64 / `enc` 源 | 是 | 是 | 是 | `enc` 使用 AES-CBC |
 | S3 原生源 | 是 | 是 | 否 | 可用预签名 URL |
 | GCS 原生源 | 是 | 是 | 否 | |
-| Azure Blob 原生源 | 是 | 是 | 否 | |
-| OpenStack Swift 原生源 | 是 | 是 | 否 | |
+| Azure Blob 原生源 | 否 | 是 | 否 | |
+| OpenStack Swift 原生源 | 否 | 是 | 否 | |
 | `IMGPROXY_BASE_URL` | 是 | 是 | 是 | |
 | `IMGPROXY_ALLOWED_SOURCES` | 是 | 是 | 是 | 支持 `*` 通配 |
 | 环回/私网/链路本地 SSRF 开关 | 是 | 是 | 是 | 默认允许私网，便于内网 MinIO |
