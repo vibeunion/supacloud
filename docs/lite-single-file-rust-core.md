@@ -1,8 +1,8 @@
 # Lite 单文件发行与 Rust Realtime 核心嵌入
 
-状态：第一、二阶段已落地（Rust core + `bun:ffi` 绑定 + standalone 资源管线 + `RealtimeEngine` 可选注入）。
-默认仍使用 TypeScript Realtime 引擎；设置 `SUPACLOUD_LITE_REALTIME_CORE_MODE=rust`
-才启用 Rust core，且启用后缺失或校验失败会直接报错，不会静默回退。
+状态：Lite 服务 Realtime 时只使用 Rust core。没有 TypeScript/Rust 实现模式，
+也没有运行时开关；core 缺失、校验失败或 ABI 不匹配都会直接报错。
+TypeScript 引擎仅作为 parity 测试的参考实现保留。
 
 ## 1. 目标与边界
 
@@ -16,7 +16,7 @@
 
 - 不把 PGlite 内部替换成 Rust/PostgreSQL。
 - 不把完整 `postrust-server` 改造成 FFI 库。
-- 不在本阶段把 Rust core 设为默认 Realtime 路径。
+- 不为 Lite 保留可切换的 TypeScript Realtime 运行时。
 
 ## 2. 为什么是“核心嵌入”而不是“整个服务嵌入”
 
@@ -148,20 +148,27 @@ SUPACLOUD_LITE_SKIP_REALTIME_CORE=1 bun run build:standalone:host
 3. 执行 `Bun.build({ compile })`，让库成为单文件内嵌资源。
 4. 在 `finally` 中恢复 `embedded-core.ts` 为 `null`，保持工作树干净。
 
-跨平台发行仍需为每个目标平台提供对应 cdylib；当前管线只自动嵌入 host 目标，
-跨目标构建需要预编译产物，避免在单一 CI runner 上隐式交叉编译。
+每个 standalone 目标必须携带对应平台/架构的 cdylib：
 
-### 5.1 运行时启用
+- 与构建机同平台的目标直接 `cargo build`。
+- 跨平台目标使用 `build:realtime-core --target <triple>` 在匹配平台预构建，
+  再通过 `dist/native/<triple>/` 或 `SUPACLOUD_LITE_REALTIME_CORE_DIR` 暂存。
+- 发布构建设置 `SUPACLOUD_LITE_REQUIRE_REALTIME_CORE=1`，缺少 core 时构建失败，
+  不再产出运行期才失败的二进制。
+- npm 发布会下载各平台预构建 core 到 `dist/native/<triple>/`，运行时按
+  `platform-arch` 解析；没有调整 `prepack`，因此发布时跳过生命周期脚本，
+  避免 `clean` 删除已暂存的 core。
+
+### 5.1 运行时行为
 
 ```bash
-# 默认：TypeScript Realtime 引擎
+# Realtime 使用内嵌 Rust core；missing core 会直接启动失败
 supacloud-lite start
-
-# 灰度：使用内嵌 Rust core
-SUPACLOUD_LITE_REALTIME_CORE_MODE=rust supacloud-lite start
 ```
 
-启用后职责划分：
+`migrate`、`status`、`gen` 等不启动运行时服务的命令不会加载 core。
+
+职责划分：
 
 | 能力 | 归属 |
 | --- | --- |
@@ -187,10 +194,11 @@ new RealtimeEngine(db, jwtSecret, resolver, { core: opened.core })
 | `bun:ffi` 加载、ABI 校验、缓冲区释放、错误映射 | 已完成，5 个 Bun FFI 测试 |
 | SHA-256 校验、`0700` 临时解包、退出清理、fail-closed | 已完成 |
 | standalone 构建自动嵌入 host cdylib | 已完成 |
-| `RealtimeEngine` 显式 `core` 注入点（默认关闭） | 已完成，7 个引擎集成测试 |
+| `RealtimeEngine` 显式 `core` 注入点 | 已完成，7 个引擎集成测试 |
 | RLS 授权 effect、CDC 逐订阅者可见性、token 刷新同步 | 已完成 |
-| 环境变量灰度 `SUPACLOUD_LITE_REALTIME_CORE_MODE=rust` | 已完成 |
-| 全量 parity 向量与默认切换 | 未开始 |
+| TS/Rust parity 向量、生命周期回归、跨平台 core 构建 | 已完成，接入 `lite-rust-core.yml` |
+| Lite 服务 Realtime 时固定使用 Rust（无模式开关） | 已完成 |
+| 各平台 standalone 与 npm 包内附带对应 core | 已完成，发布流水线强制校验 |
 | Postrust sidecar | 不在本阶段 |
 
 ## 7. 验收标准
@@ -218,8 +226,6 @@ Scenario: 资源缺失时失败关闭
 
 ## 8. 后续工作
 
-1. 用同一组 parity vectors 同时跑 TypeScript 引擎与 Rust core，并纳入 CI。
-2. 覆盖 `broadcast` effect 的跨实例持久化（当前 Lite 单进程无需）。
-3. 在真实 PGlite/native PostgreSQL 项目上跑长连接与断线重连回归。
-4. 通过开关灰度后，再决定是否设为默认路径。
-5. 评估 native 模式下 Postrust 作为可选 sidecar 的内嵌发行。
+1. 覆盖 `broadcast` effect 的跨实例持久化（当前 Lite 单进程无需）。
+2. 持续运行 PGlite/native PostgreSQL 长连接与断线重连 soak。
+3. 评估 native 模式下 Postrust 作为可选 sidecar 的内嵌发行。
