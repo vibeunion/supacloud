@@ -1,0 +1,17 @@
+[package]
+name = "supacloud-realtime-core"
+version = "0.1.0"
+edition = "2021"
+description = "Embeddable, transport-agnostic SupaCloud Realtime protocol core exposed over a C ABI"
+license = "Apache-2.0"
+
+[lib]
+name = "supacloud_realtime_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+default = []

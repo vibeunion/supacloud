@@ -18,6 +18,8 @@ import { chmod, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { openRealtimeCore } from './runtime/realtime/core-asset.js'
+import { embeddedRealtimeCore } from './runtime/realtime/embedded-core.js'
 import {
   STANDALONE_PGLITE_ASSETS,
   type StandaloneExtensionName,
@@ -64,5 +66,14 @@ const pgliteAssets: StandalonePgliteAssets = {
 
 // The npm entry point does not set this symbol, so it retains PGlite package's own asset resolution logic.
 ;(globalThis as typeof globalThis & { [key: symbol]: unknown })[STANDALONE_PGLITE_ASSETS] = pgliteAssets
+
+// Keep the embedded Realtime core and its `bun:ffi` binding in the single-file
+// module graph. The engine opens it lazily once core wiring is enabled; until
+// then this hook only guarantees the native library ships inside the binary.
+;(globalThis as typeof globalThis & { __supacloudRealtimeCore?: unknown })
+  .__supacloudRealtimeCore ??= {
+  open: openRealtimeCore,
+  embedded: embeddedRealtimeCore,
+}
 
 await import('./cli.js')
