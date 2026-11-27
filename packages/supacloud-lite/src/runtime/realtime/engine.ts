@@ -13,7 +13,7 @@ import { quoteIdent } from '../db/database.js'
 import type { EngineUnsubscribe } from '../db/engine.js'
 import { verifyJwt } from '../jwt.js'
 import type { RequestContext } from '../types.js'
-import type { CoreRequest, CoreResponse } from './core-ffi.js'
+import { corePayloadRef, type CoreRequest, type CoreResponse } from './core-ffi.js'
 
 /**
  * The subset of the embedded Realtime core the engine needs. Keeping this
@@ -39,6 +39,14 @@ export interface RealtimeEngineOptions {
 
 /** Events handled by the Rust core when it is injected. */
 const CORE_EVENTS = new Set(['phx_join', 'phx_leave', 'broadcast', 'presence', 'heartbeat'])
+
+/**
+ * Payloads at least this large stay on the Bun heap instead of crossing the
+ * core as JSON. The core echoes a marker back and the host splices the text in
+ * per socket, so fan-out no longer serializes `subscribers x payload` bytes
+ * twice (once in Rust, once in Bun).
+ */
+const CORE_PAYLOAD_REF_MIN_BYTES = 16 * 1024
 
 /** The minimal socket surface the engine needs; any transport can supply it. */
 export interface RealtimeSocketLike {
@@ -153,6 +161,11 @@ export class RealtimeEngine {
   private corePendingJoins = new Map<string, { conn: Connection; channel: Channel }>()
   /** authorize request id → pending join, so repeated joins cannot cross-authorize */
   private corePendingAuthz = new Map<string, { key: string; conn: Connection; channel: Channel }>()
+  /** payload ref id → serialized JSON the host splices back into outgoing frames */
+  private corePayloads = new Map<string, string>()
+  private corePayloadCounter = 1
+  private readonly corePayloadNonce = Math.random().toString(36).slice(2, 10)
+  private coreOutcomeDepth = 0
 
   constructor(
     private db: Database,
@@ -503,9 +516,52 @@ export class RealtimeEngine {
     const response = this.core.call({
       op: 'frame',
       connection_id: connectionId,
-      frame: this.coreFrame(conn, msg),
+      frame: this.coreFrame(conn, msg, this.coreMessagePayload(msg)),
     })
     await this.consumeCoreOutcome(response)
+  }
+
+  /**
+   * Broadcast payloads are opaque to the core, so a large one stays on the Bun
+   * heap and only a marker crosses the FFI boundary.
+   */
+  private coreMessagePayload(msg: PhoenixMessage): unknown {
+    if (msg.event !== 'broadcast') return msg.payload
+    const envelope = msg.payload as { payload?: unknown } | null
+    if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) return msg.payload
+    if (!('payload' in envelope)) return msg.payload
+    return { ...envelope, payload: this.stageCorePayload(envelope.payload).value }
+  }
+
+  /**
+   * Keep a large payload on the Bun heap and hand the core a marker instead.
+   * Returns the value to put on the wire plus the ref id when it was staged.
+   */
+  private stageCorePayload(
+    value: unknown,
+    into: Map<string, string> = this.corePayloads
+  ): { value: unknown; ref?: string } {
+    if (value === null || typeof value !== 'object') return { value }
+    const text = JSON.stringify(value)
+    if (text.length < CORE_PAYLOAD_REF_MIN_BYTES) return { value }
+    const id = `${this.corePayloadNonce}${this.corePayloadCounter++}`
+    into.set(id, text)
+    return { value: corePayloadRef(id), ref: id }
+  }
+
+  /** Encode a core frame, splicing any staged payload markers back in. */
+  private encodeCoreFrame(frame: unknown, payloads: Map<string, string> = this.corePayloads): string {
+    const encoded = JSON.stringify(frame)
+    return payloads.size > 0 ? this.spliceCorePayloads(encoded, payloads) : encoded
+  }
+
+  private spliceCorePayloads(encoded: string, payloads: Map<string, string>): string {
+    for (const [id, payload] of payloads) {
+      const marker = JSON.stringify(corePayloadRef(id))
+      if (!encoded.includes(marker)) continue
+      encoded = encoded.replaceAll(marker, () => payload)
+    }
+    return encoded
   }
 
   private async handleCoreJoin(
@@ -611,8 +667,14 @@ export class RealtimeEngine {
   }
 
   private async consumeCoreOutcome(response: CoreResponse): Promise<void> {
-    for (const effect of response.effects) await this.handleCoreEffect(effect)
-    for (const frame of response.frames) this.sendCoreFrame(frame)
+    this.coreOutcomeDepth += 1
+    try {
+      for (const effect of response.effects) await this.handleCoreEffect(effect)
+      for (const frame of response.frames) this.sendCoreFrame(frame)
+    } finally {
+      this.coreOutcomeDepth -= 1
+      if (this.coreOutcomeDepth === 0) this.corePayloads.clear()
+    }
   }
 
   private async handleCoreEffect(effect: CoreResponse['effects'][number]): Promise<void> {
@@ -676,16 +738,16 @@ export class RealtimeEngine {
     }
   }
 
-  private coreFrame(conn: Connection, msg: PhoenixMessage): unknown {
+  private coreFrame(conn: Connection, msg: PhoenixMessage, payload: unknown = msg.payload): unknown {
     if (conn.vsn === '2.0.0') {
-      return [msg.join_ref ?? null, msg.ref ?? null, msg.topic, msg.event, msg.payload]
+      return [msg.join_ref ?? null, msg.ref ?? null, msg.topic, msg.event, payload]
     }
     return {
       join_ref: msg.join_ref ?? null,
       ref: msg.ref ?? null,
       topic: msg.topic,
       event: msg.event,
-      payload: msg.payload,
+      payload,
     }
   }
 
@@ -693,7 +755,7 @@ export class RealtimeEngine {
     const conn = this.coreConnectionIds.get(frame.connection_id)
     if (!conn) return
     try {
-      conn.socket.send(JSON.stringify(frame.frame))
+      conn.socket.send(this.encodeCoreFrame(frame.frame))
     } catch {
       // transport already closed
     }
@@ -801,14 +863,16 @@ export class RealtimeEngine {
       })),
     })
 
-    // initial presence snapshot
-    const state = this.presence.get(msg.topic)
-    this.send(conn, {
-      topic: msg.topic,
-      event: 'presence_state',
-      payload: state ? Object.fromEntries(state) : {},
-      ref: null,
-    })
+    // initial presence snapshot (skipped when the client disabled presence)
+    if (channel.presenceEnabled) {
+      const state = this.presence.get(msg.topic)
+      this.send(conn, {
+        topic: msg.topic,
+        event: 'presence_state',
+        payload: state ? Object.fromEntries(state) : {},
+        ref: null,
+      })
+    }
 
     // postgres_changes readiness signal (realtime-js listens for this)
     if (bindings.length > 0) {
@@ -939,6 +1003,7 @@ export class RealtimeEngine {
   private handlePresence(conn: Connection, msg: PhoenixMessage): void {
     const channel = conn.channels.get(msg.topic)
     if (!channel) return
+    if (!channel.presenceEnabled) return
     const event = String((msg.payload?.['event'] ?? '')).toLowerCase()
 
     if (event === 'track') {
@@ -1104,6 +1169,11 @@ export class RealtimeEngine {
       ? (await this.db.getSchemaInfo(event.schema)).tables.get(event.table)?.primaryKey ?? []
       : []
 
+    // CDC fan-out awaits RLS checks between frames, so it stages into its own
+    // table: a concurrent broadcast must not be able to clear it mid-flight.
+    const payloads = new Map<string, string>()
+    const stagedRecord = this.stageCorePayload(event.record ?? {}, payloads)
+    const stagedOldRecord = this.stageCorePayload(event.old_record ?? {}, payloads)
     const response = this.core!.call({
       op: 'cdc',
       event: {
@@ -1116,6 +1186,8 @@ export class RealtimeEngine {
         commit_timestamp: event.commit_timestamp,
         errors: event.errors ?? null,
       },
+      ...(stagedRecord.ref ? { record_ref: stagedRecord.ref } : {}),
+      ...(stagedOldRecord.ref ? { old_record_ref: stagedOldRecord.ref } : {}),
     })
 
     for (const frame of response.frames) {
@@ -1126,7 +1198,7 @@ export class RealtimeEngine {
       if (!channel) continue
       if (!(await this.canSee(channel.ctx, event, rlsEnabled, pk))) continue
       try {
-        conn.socket.send(JSON.stringify(frame.frame))
+        conn.socket.send(this.encodeCoreFrame(frame.frame, payloads))
       } catch {
         // transport already closed
       }
