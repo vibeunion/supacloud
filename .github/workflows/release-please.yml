@@ -475,6 +475,12 @@ jobs:
         with:
           targets: ${{ matrix.targets }}
 
+      - name: Ensure the requested Rust targets are installed
+        shell: bash
+        run: |
+          IFS=',' read -ra targets <<< "${{ matrix.targets }}"
+          for target in "${targets[@]}"; do rustup target add "$target"; done
+
       - name: Install the Linux arm64 cross linker
         if: runner.os == 'Linux'
         run: |

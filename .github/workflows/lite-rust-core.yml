@@ -78,6 +78,9 @@ jobs:
       - name: Install dependencies
         working-directory: packages/supacloud-lite
         run: bun install --frozen-lockfile
+      - name: Install database adapter dependencies for typecheck
+        working-directory: packages/db-zenstack
+        run: bun install --force --frozen-lockfile
       - name: Build the Realtime core
         working-directory: packages/supacloud-lite
         run: bun run build:realtime-core
@@ -162,8 +165,11 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust-targets }}
+      - name: Ensure the requested Rust targets are installed
+        shell: bash
+        run: |
+          IFS=',' read -ra targets <<< "${{ matrix.rust-targets }}"
+          for target in "${targets[@]}"; do rustup target add "$target"; done
       - name: Install the Linux arm64 cross linker
         if: runner.os == 'Linux'
         run: |
