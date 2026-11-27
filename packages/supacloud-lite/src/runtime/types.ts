@@ -34,6 +34,12 @@ export interface BackendConfig {
    * a native runtime module). Default: PGlite on `dataDir`.
    */
   engine?: import('./db/engine.js').DbEngine
+  /**
+   * Opt-in Rust Realtime protocol core. When set, Phoenix framing, channel
+   * state, presence, broadcast fan-out and CDC matching run in the shared Rust
+   * core; JWT, RLS, CDC triggers and binary broadcasts stay in Bun.
+   */
+  realtimeCore?: import('./realtime/engine.js').RealtimeProtocolCore
   /** Secret used to sign/verify every JWT. Defaults to the Supabase local-dev secret. */
   jwtSecret?: string
   /**

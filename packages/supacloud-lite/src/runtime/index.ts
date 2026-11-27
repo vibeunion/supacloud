@@ -258,7 +258,7 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
     const context = await resolveContext(request, new URL(request.url))
     if (context instanceof Response) throw new Error('Realtime authentication denied')
     return context
-  } : undefined)
+  } : undefined, config.realtimeCore ? { core: config.realtimeCore, ownsCore: true } : undefined)
   const webhooks = new WebhooksService(
     db,
     config.webhookFetch,
@@ -273,9 +273,9 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
   )
 
   if (config.startRuntimeServices !== false) {
+    cleanup.push(() => realtime.stop())
     try {
       await realtime.start()
-      cleanup.push(() => realtime.stop())
       if (config.webhooks?.length) await webhooks.start(config.webhooks)
       cleanup.push(() => webhooks.stopService())
       cron.start()

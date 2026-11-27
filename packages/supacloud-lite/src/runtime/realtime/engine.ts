@@ -13,6 +13,32 @@ import { quoteIdent } from '../db/database.js'
 import type { EngineUnsubscribe } from '../db/engine.js'
 import { verifyJwt } from '../jwt.js'
 import type { RequestContext } from '../types.js'
+import type { CoreRequest, CoreResponse } from './core-ffi.js'
+
+/**
+ * The subset of the embedded Realtime core the engine needs. Keeping this
+ * structural lets tests inject a fake and keeps `bun:ffi` out of the engine's
+ * runtime imports.
+ */
+export interface RealtimeProtocolCore {
+  call(request: CoreRequest): CoreResponse
+  /** Release native resources when the owning backend shuts down. */
+  close?: () => void | Promise<void>
+}
+
+export interface RealtimeEngineOptions {
+  /**
+   * Opt-in Rust protocol core. When present, frame parsing, channel state,
+   * broadcast fan-out, presence and CDC matching move to the core; JWT, RLS,
+   * CDC triggers, binary broadcasts and column metadata stay in Bun.
+   */
+  core?: RealtimeProtocolCore
+  /** Whether this engine owns the core and should release it on stop. */
+  ownsCore?: boolean
+}
+
+/** Events handled by the Rust core when it is injected. */
+const CORE_EVENTS = new Set(['phx_join', 'phx_leave', 'broadcast', 'presence', 'heartbeat'])
 
 /** The minimal socket surface the engine needs; any transport can supply it. */
 export interface RealtimeSocketLike {
@@ -118,12 +144,25 @@ export class RealtimeEngine {
   private presence = new Map<string, Map<string, PresenceMetas>>()
   private stopCdc: EngineUnsubscribe | null = null
   private stopDbBroadcast: EngineUnsubscribe | null = null
+  private readonly core?: RealtimeProtocolCore
+  private readonly ownsCore: boolean
+  private coreCounter = 1
+  private coreConnections = new Map<Connection, string>()
+  private coreConnectionIds = new Map<string, Connection>()
+  /** connectionId → topic → metadata needed for RLS and token expiry */
+  private corePendingJoins = new Map<string, { conn: Connection; channel: Channel }>()
+  /** authorize request id → pending join, so repeated joins cannot cross-authorize */
+  private corePendingAuthz = new Map<string, { key: string; conn: Connection; channel: Channel }>()
 
   constructor(
     private db: Database,
     private jwtSecret?: string,
-    private resolveExternalToken?: (token: string) => Promise<RequestContext>
-  ) {}
+    private resolveExternalToken?: (token: string) => Promise<RequestContext>,
+    options: RealtimeEngineOptions = {}
+  ) {
+    this.core = options.core
+    this.ownsCore = options.ownsCore ?? false
+  }
 
   /** Resolve a subscriber's access token to a role/claims context. */
   private async contextFromToken(token: string | undefined): Promise<RequestContext> {
@@ -260,16 +299,33 @@ export class RealtimeEngine {
     this.stopCdc = null
     this.stopDbBroadcast = null
     for (const conn of this.connections) {
+      if (this.core) {
+        const id = this.coreConnections.get(conn)
+        if (id) this.core.call({ op: 'disconnect', connection_id: id })
+      }
       for (const topic of conn.channels.keys()) this.leaveChannel(conn, topic)
       conn.socket.close(1001, 'server shutting down')
     }
+    this.coreConnections.clear()
+    this.coreConnectionIds.clear()
+    this.corePendingJoins.clear()
+    this.corePendingAuthz.clear()
     this.connections.clear()
     const [cdcStop, broadcastStop] = await Promise.allSettled([
       Promise.resolve().then(() => stopCdc?.()),
       Promise.resolve().then(() => stopDbBroadcast?.()),
     ])
-    if (cdcStop.status === 'rejected') throw cdcStop.reason
-    if (broadcastStop.status === 'rejected') throw broadcastStop.reason
+    let firstError: unknown
+    if (cdcStop.status === 'rejected') firstError = cdcStop.reason
+    if (broadcastStop.status === 'rejected') firstError ??= broadcastStop.reason
+    if (this.ownsCore) {
+      try {
+        await this.core?.close?.()
+      } catch (error) {
+        firstError ??= error
+      }
+    }
+    if (firstError !== undefined) throw firstError
   }
 
   /** Attach a socket. Returns callbacks the transport must wire up. */
@@ -279,11 +335,27 @@ export class RealtimeEngine {
   } {
     const conn: Connection = { socket, channels: new Map(), vsn: opts.vsn ?? '1.0.0' }
     this.connections.add(conn)
+    if (this.core) {
+      const id = `conn_${this.coreCounter++}`
+      this.coreConnections.set(conn, id)
+      this.coreConnectionIds.set(id, conn)
+    }
     return {
       onMessage: (data) => {
         void this.handleMessage(conn, data)
       },
       onClose: () => {
+        if (this.core) {
+          const id = this.coreConnections.get(conn)
+          if (id) {
+            const response = this.core.call({ op: 'disconnect', connection_id: id })
+            // Presence leaves must reach the sockets that are still open.
+            void this.consumeCoreOutcome(response)
+            this.coreConnections.delete(conn)
+            this.coreConnectionIds.delete(id)
+            this.clearCorePendingForConnection(id)
+          }
+        }
         for (const topic of conn.channels.keys()) this.leaveChannel(conn, topic)
         this.connections.delete(conn)
       },
@@ -336,6 +408,16 @@ export class RealtimeEngine {
     } catch {
       return
     }
+    if (this.core && CORE_EVENTS.has(msg.event)) {
+      try {
+        await this.handleCoreMessage(conn, msg)
+      } catch (error) {
+        this.reply(conn, msg, 'error', {
+          reason: error instanceof Error ? error.message : String(error),
+        })
+      }
+      return
+    }
     if (msg.topic === 'phoenix' && msg.event === 'heartbeat') {
       this.reply(conn, msg, 'ok', {})
       return
@@ -369,10 +451,16 @@ export class RealtimeEngine {
               if (token !== undefined && typeof token !== 'string') throw new Error('Invalid Realtime access token')
               const ctx = await this.contextFromToken(token)
               for (const channel of channels) {
-                if (this.resolveExternalToken && channel.private) {
-                  const access = await this.authorizePrivate(channel.topic.replace(/^realtime:/, ''), ctx)
+                if (channel.private) {
+                  const access = this.db.engine.minimalBootstrap
+                    ? { read: true, write: true }
+                    : await this.authorizePrivate(channel.topic.replace(/^realtime:/, ''), ctx)
                   if (!access.read) throw new Error('Realtime authentication denied')
                   channel.canBroadcast = access.write
+                  const connectionId = this.core ? this.coreConnections.get(conn) : undefined
+                  if (connectionId && this.core) {
+                    this.core.call({ op: 'authorize', connection_id: connectionId, topic: channel.topic, write: access.write })
+                  }
                 }
                 channel.ctx = ctx
                 this.scheduleExternalExpiry(conn, channel)
@@ -388,6 +476,247 @@ export class RealtimeEngine {
       }
     } catch (e) {
       this.reply(conn, msg, 'error', { reason: e instanceof Error ? e.message : String(e) })
+    }
+  }
+
+  // ── Rust protocol core (opt-in) ──────────────────────────────────────
+
+  private async handleCoreMessage(conn: Connection, msg: PhoenixMessage): Promise<void> {
+    const connectionId = this.coreConnections.get(conn)
+    if (!connectionId || !this.core) return
+
+    if (msg.event === 'phx_join') {
+      await this.handleCoreJoin(conn, connectionId, msg)
+      return
+    }
+    // Phoenix binary broadcasts carry arbitrary bytes; the JSON core stays out
+    // of that path and the TypeScript fallback keeps framing them.
+    if (msg.event === 'broadcast' && (msg.payload as { payload?: unknown })?.payload instanceof Uint8Array) {
+      this.handleBroadcast(conn, msg)
+      return
+    }
+    if (msg.event === 'phx_leave') {
+      this.clearCorePending(this.corePendingKey(connectionId, msg.topic))
+      this.leaveChannel(conn, msg.topic)
+    }
+
+    const response = this.core.call({
+      op: 'frame',
+      connection_id: connectionId,
+      frame: this.coreFrame(conn, msg),
+    })
+    await this.consumeCoreOutcome(response)
+  }
+
+  private async handleCoreJoin(
+    conn: Connection,
+    connectionId: string,
+    msg: PhoenixMessage
+  ): Promise<void> {
+    const config = (msg.payload?.config ?? {}) as {
+      private?: boolean
+      broadcast?: { self?: boolean; ack?: boolean }
+      presence?: { key?: string; enabled?: boolean }
+      postgres_changes?: { event?: string; schema?: string; table?: string; filter?: string }[]
+    }
+
+    const token: unknown = msg.payload?.access_token
+    if (token !== undefined && typeof token !== 'string') throw new Error('Invalid Realtime access token')
+    const ctx = await this.contextFromToken(token)
+    const isPrivate = config.private === true
+
+    const bindings: PostgresBinding[] = []
+    for (const spec of config.postgres_changes ?? []) {
+      const binding: PostgresBinding = {
+        id: this.bindingCounter++,
+        event: (spec.event ?? '*').toUpperCase(),
+        schema: spec.schema ?? 'public',
+        table: spec.table ?? '*',
+        filter: spec.filter,
+      }
+      bindings.push(binding)
+      if (binding.table !== '*') {
+        try {
+          await this.db.ensureCdcTrigger(binding.schema, binding.table)
+        } catch {
+          this.reply(conn, msg, 'error', {
+            reason: `unable to subscribe to changes on ${binding.schema}.${binding.table}`,
+          })
+          return
+        }
+      } else {
+        const info = await this.db.getSchemaInfo(binding.schema)
+        for (const table of info.tables.keys()) {
+          await this.db.ensureCdcTrigger(binding.schema, table).catch(() => {})
+        }
+      }
+    }
+
+    const channel: Channel = {
+      topic: msg.topic,
+      joinRef: msg.join_ref ?? msg.ref ?? null,
+      bindings,
+      broadcastSelf: config.broadcast?.self ?? false,
+      broadcastAck: config.broadcast?.ack ?? false,
+      presenceKey: config.presence?.key || crypto.randomUUID(),
+      presenceEnabled: config.presence?.enabled ?? true,
+      ctx,
+      private: isPrivate,
+      canBroadcast: !isPrivate,
+    }
+
+    const key = this.corePendingKey(connectionId, msg.topic)
+    this.clearCorePending(key)
+    const pending = { conn, channel }
+    this.corePendingJoins.set(key, pending)
+    const coreConfig = {
+      ...config,
+      presence: {
+        ...config.presence,
+        key: channel.presenceKey,
+        enabled: channel.presenceEnabled,
+      },
+      postgres_changes: bindings.map((b) => ({
+        id: b.id,
+        event: b.event,
+        schema: b.schema,
+        table: b.table,
+        ...(b.filter ? { filter: b.filter } : {}),
+      })),
+    }
+
+    const response = this.core!.call({
+      op: 'frame',
+      connection_id: connectionId,
+      frame: this.coreFrame(conn, {
+        ...msg,
+        payload: { ...(msg.payload ?? {}), config: coreConfig },
+      }),
+    })
+    const needsAuthz = response.effects.some(
+      (effect) => effect.type === 'authorize' && effect.connection_id === connectionId && effect.topic === msg.topic
+    )
+    const authorizeEffect = response.effects.find(
+      (effect): effect is Extract<CoreResponse['effects'][number], { type: 'authorize' }> =>
+        effect.type === 'authorize' && effect.connection_id === connectionId && effect.topic === msg.topic
+    )
+    if (authorizeEffect) {
+      this.corePendingAuthz.set(authorizeEffect.request_id, { key, ...pending })
+    }
+    await this.consumeCoreOutcome(response)
+    if (!needsAuthz) {
+      this.corePendingJoins.delete(key)
+      this.commitCoreChannel(pending)
+    }
+  }
+
+  private async consumeCoreOutcome(response: CoreResponse): Promise<void> {
+    for (const effect of response.effects) await this.handleCoreEffect(effect)
+    for (const frame of response.frames) this.sendCoreFrame(frame)
+  }
+
+  private async handleCoreEffect(effect: CoreResponse['effects'][number]): Promise<void> {
+    if (effect.type !== 'authorize') {
+      // Local fan-out already happened in the core; Lite has no cross-instance
+      // broadcast bus to persist into.
+      return
+    }
+    const key = this.corePendingKey(effect.connection_id, effect.topic)
+    const pendingAuthz = this.corePendingAuthz.get(effect.request_id)
+    this.corePendingAuthz.delete(effect.request_id)
+    const pending = pendingAuthz ?? this.corePendingJoins.get(key)
+    if (!pending || !this.core) {
+      this.core?.call({
+        op: 'authorize_result',
+        connection_id: effect.connection_id,
+        request_id: effect.request_id,
+        read: false,
+        write: false,
+        reason: 'Realtime authorization context was lost',
+      })
+      return
+    }
+
+    const sub = effect.topic.replace(/^realtime:/, '')
+    const authz = this.db.engine.minimalBootstrap
+      ? { read: true, write: true }
+      : await this.authorizePrivate(sub, pending.channel.ctx)
+    const response = this.core.call({
+      op: 'authorize_result',
+      connection_id: effect.connection_id,
+      request_id: effect.request_id,
+      read: authz.read,
+      write: authz.write,
+      reason: `You do not have permissions to read from this Channel topic: ${sub}`,
+    })
+    this.corePendingJoins.delete(pendingAuthz?.key ?? key)
+    await this.consumeCoreOutcome(response)
+    if (authz.read) this.commitCoreChannel(pending)
+  }
+
+  private commitCoreChannel(pending: { conn: Connection; channel: Channel }): void {
+    const { conn, channel } = pending
+    const existing = conn.channels.get(channel.topic)
+    if (existing?.expiryTimer) clearTimeout(existing.expiryTimer)
+    conn.channels.set(channel.topic, channel)
+    this.scheduleExternalExpiry(conn, channel)
+
+    if (channel.bindings.length > 0) {
+      this.send(conn, {
+        topic: channel.topic,
+        event: 'system',
+        payload: {
+          status: 'ok',
+          extension: 'postgres_changes',
+          message: 'Subscribed to PostgreSQL',
+          channel: channel.topic.replace(/^realtime:/, ''),
+        },
+        ref: null,
+      })
+    }
+  }
+
+  private coreFrame(conn: Connection, msg: PhoenixMessage): unknown {
+    if (conn.vsn === '2.0.0') {
+      return [msg.join_ref ?? null, msg.ref ?? null, msg.topic, msg.event, msg.payload]
+    }
+    return {
+      join_ref: msg.join_ref ?? null,
+      ref: msg.ref ?? null,
+      topic: msg.topic,
+      event: msg.event,
+      payload: msg.payload,
+    }
+  }
+
+  private sendCoreFrame(frame: CoreResponse['frames'][number]): void {
+    const conn = this.coreConnectionIds.get(frame.connection_id)
+    if (!conn) return
+    try {
+      conn.socket.send(JSON.stringify(frame.frame))
+    } catch {
+      // transport already closed
+    }
+  }
+
+  private corePendingKey(connectionId: string, topic: string): string {
+    return `${connectionId}\u0000${topic}`
+  }
+
+  private clearCorePending(key: string): void {
+    this.corePendingJoins.delete(key)
+    for (const [requestId, pending] of this.corePendingAuthz) {
+      if (pending.key === key) this.corePendingAuthz.delete(requestId)
+    }
+  }
+
+  private clearCorePendingForConnection(connectionId: string): void {
+    const prefix = `${connectionId}\u0000`
+    for (const key of this.corePendingJoins.keys()) {
+      if (key.startsWith(prefix)) this.clearCorePending(key)
+    }
+    for (const [requestId, pending] of this.corePendingAuthz) {
+      if (pending.key.startsWith(prefix)) this.corePendingAuthz.delete(requestId)
     }
   }
 
@@ -660,6 +989,10 @@ export class RealtimeEngine {
   // ── postgres_changes fan-out ──────────────────────────────────────────
 
   private async dispatchCdc(event: CdcEvent): Promise<void> {
+    if (this.core) {
+      await this.dispatchCoreCdc(event)
+      return
+    }
     // column metadata lets realtime-js run its type conversion
     let columns: { name: string; type: string }[] = []
     try {
@@ -748,6 +1081,58 @@ export class RealtimeEngine {
     }
   }
 
+  /**
+   * Core-driven CDC: the Rust core matches bindings and emits per-connection
+   * frames; Bun still performs the per-subscriber RLS visibility check before
+   * anything reaches a socket.
+   */
+  private async dispatchCoreCdc(event: CdcEvent): Promise<void> {
+    let columns: { name: string; type: string }[] = []
+    try {
+      const info = await this.db.getSchemaInfo(event.schema)
+      columns = (info.tables.get(event.table)?.columns ?? []).map((c) => ({
+        name: c.name,
+        type: c.udtName,
+      }))
+    } catch {
+      // schema went away - still deliver the event without columns
+    }
+
+    const rlsTables = await this.db.getRlsTables(event.schema).catch(() => new Set<string>())
+    const rlsEnabled = rlsTables.has(event.table)
+    const pk = rlsEnabled
+      ? (await this.db.getSchemaInfo(event.schema)).tables.get(event.table)?.primaryKey ?? []
+      : []
+
+    const response = this.core!.call({
+      op: 'cdc',
+      event: {
+        schema: event.schema,
+        table: event.table,
+        type: event.type,
+        record: event.record ?? {},
+        old_record: event.old_record ?? {},
+        columns,
+        commit_timestamp: event.commit_timestamp,
+        errors: event.errors ?? null,
+      },
+    })
+
+    for (const frame of response.frames) {
+      const conn = this.coreConnectionIds.get(frame.connection_id)
+      if (!conn) continue
+      const topic = coreFrameTopic(frame.frame)
+      const channel = topic ? conn.channels.get(topic) : undefined
+      if (!channel) continue
+      if (!(await this.canSee(channel.ctx, event, rlsEnabled, pk))) continue
+      try {
+        conn.socket.send(JSON.stringify(frame.frame))
+      } catch {
+        // transport already closed
+      }
+    }
+  }
+
   private bindingMatches(b: PostgresBinding, e: CdcEvent): boolean {
     if (b.schema !== '*' && b.schema !== e.schema) return false
     if (b.table !== '*' && b.table !== e.table) return false
@@ -758,6 +1143,17 @@ export class RealtimeEngine {
     }
     return true
   }
+}
+
+/** Topic of an already-encoded Phoenix frame (v1 object or v2 array). */
+function coreFrameTopic(frame: unknown): string | undefined {
+  if (Array.isArray(frame)) {
+    return typeof frame[2] === 'string' ? frame[2] : undefined
+  }
+  if (frame !== null && typeof frame === 'object' && typeof (frame as { topic?: unknown }).topic === 'string') {
+    return (frame as { topic: string }).topic
+  }
+  return undefined
 }
 
 function sameJsonValue(left: unknown, right: unknown): boolean {

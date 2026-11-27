@@ -82,6 +82,12 @@ out
 .nuxt
 dist
 
+# Rust build artifacts
+crates/*/target/
+
+# Generated native assets staged for standalone builds
+packages/supacloud-lite/src/runtime/realtime/native/
+
 # Gatsby files
 .cache/
 # Comment in the public line in if your project uses Gatsby and not Next.js

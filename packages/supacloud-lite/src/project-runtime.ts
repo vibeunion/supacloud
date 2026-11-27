@@ -22,6 +22,8 @@ import type { SmsSender, StorageDriver } from './runtime/types.js'
 import { validateExternalIdentityClaims, type ExternalIdentityVerifier } from './runtime/identity.js'
 import { isRecord } from './runtime/validation.js'
 import type { DbEngine } from './runtime/db/engine.js'
+import { openRealtimeCore } from './runtime/realtime/core-asset.js'
+import type { RealtimeProtocolCore } from './runtime/realtime/engine.js'
 import type { RuntimeMode } from './runtime/functions/profile.js'
 import type { GraphqlOptions } from './runtime/graphql.js'
 import { createExternalAuthProxy } from './runtime/auth/proxy.js'
@@ -29,6 +31,25 @@ import type { SeedOptions } from './runtime/node/project.js'
 
 const RESET_INITIALIZATION_ERROR = 'db reset requires initialized state; run "supacloud-lite migrate" first'
 const RESET_INVALID_SECRETS_ERROR = 'db reset requires a valid project secrets marker; restore the state before retrying'
+
+/**
+ * Open the embedded Rust Realtime core when explicitly requested. Failures
+ * propagate: an operator who asked for the Rust core must not silently get the
+ * TypeScript implementation instead.
+ */
+async function openConfiguredRealtimeCore(): Promise<RealtimeProtocolCore | undefined> {
+  const mode = process.env.SUPACLOUD_LITE_REALTIME_CORE_MODE
+  if (mode !== 'rust' && mode !== '1') return undefined
+  const opened = await openRealtimeCore()
+  const core: RealtimeProtocolCore = {
+    call: opened.core.call.bind(opened.core),
+    close: opened.close,
+  }
+  process.once('exit', () => {
+    void opened.close()
+  })
+  return core
+}
 
 export interface ProjectSecrets {
   jwtSecret: string
@@ -84,6 +105,8 @@ export interface ProjectRuntimeOptions {
   includeSeed?: boolean
   includeIdentity?: boolean
   startRuntimeServices?: boolean
+  /** Explicit Rust Realtime core; `false` disables even when the env flag is set. */
+  realtimeCore?: RealtimeProtocolCore | false
   log?: (message: string) => void
 }
 
@@ -334,10 +357,15 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
     if (dataDir === undefined) throw new Error('native PostgreSQL requires a data directory')
     engine = await createNativeEngine({ dataDir, installDir: options.postgresDir, log: options.log, replication })
   }
+  const realtimeCore =
+    options.realtimeCore === false
+      ? undefined
+      : options.realtimeCore ?? (await openConfiguredRealtimeCore())
   let backend: SupaCloudLiteBackend | undefined
   try {
     backend = await createBackend({
       engine,
+      realtimeCore,
       runtimeMode: config.lite.runtimeMode,
       graphql: options.graphql ?? config.lite.graphql,
       externalIdentity,
@@ -378,18 +406,25 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
       await ensurePowerSyncReplicationCatalog(backend.db.engine, replication)
     }
   } catch (error) {
+    let cleanupError: unknown
     if (backend) {
       try {
         await backend.close()
-      } catch (cleanupError) {
-        throw new AggregateError([error, cleanupError], 'project database startup cleanup failed')
+      } catch (caught) {
+        cleanupError = caught
       }
     } else if (engine) {
       try {
         await engine.close()
-      } catch (cleanupError) {
-        throw new AggregateError([error, cleanupError], 'project database startup cleanup failed')
+      } catch (caught) {
+        cleanupError = caught
       }
+    }
+    if (!backend) {
+      await Promise.resolve(realtimeCore?.close?.()).catch(() => {})
+    }
+    if (cleanupError !== undefined) {
+      throw new AggregateError([error, cleanupError], 'project database startup cleanup failed')
     }
     throw error
   }
