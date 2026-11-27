@@ -745,6 +745,12 @@ jobs:
           # The compatibility test imports the adapter source directly, so
           # install its source package dependencies in the isolated build root.
           (cd ../db-zenstack && bun install --force --frozen-lockfile)
+          staged_core="$GITHUB_WORKSPACE/packages/supacloud-lite/native-staging/libsupacloud_realtime_core.so"
+          if [ -f "$staged_core" ]; then
+            export SUPACLOUD_LITE_REALTIME_CORE="$staged_core"
+          else
+            bun run build:realtime-core
+          fi
           bun run check
           if [ -d "$GITHUB_WORKSPACE/packages/supacloud-lite/native-staging" ]; then
             mkdir -p dist/native
