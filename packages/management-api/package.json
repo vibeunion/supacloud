@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
+    "start:image": "bun run src/image-service/main.ts",
     "db:init": "bun run src/db/init.ts",
     "realtime:reconcile": "bun run scripts/reconcile-realtime-tenants.ts",
     "realtime:reconcile-schema": "bun run scripts/reconcile-realtime-schema-privileges.ts",
@@ -46,6 +47,8 @@
   "dependencies": {
     "@clack/prompts": "^1.8.1",
     "@elysia/openapi": "2.0.0-rc.0",
+    "@napi-rs/canvas": "^1.2.1",
+    "@napi-rs/image": "^1.16.0",
     "@supacloud/delivery": "file:../delivery",
     "@supacloud/db": "file:../db",
     "acorn": "^8.19.0",

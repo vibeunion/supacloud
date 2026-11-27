@@ -101,8 +101,8 @@ describe("Management pre-start recovery sandbox", () => {
     const managementUnit = readRepoFile("infrastructure/systemd/supacloud.service");
     const realtimeUnit = readRepoFile("infrastructure/systemd/supacloud-realtime.service");
     const installer = readRepoFile("install.sh");
-    const imagorSection = installer.slice(
-      installer.indexOf("# --- 1. Deploy Imagor"),
+    const imageSection = installer.slice(
+      installer.indexOf("# --- 1. Deploy the native image service"),
       installer.indexOf("# --- 2. Deploy Supabase Realtime"),
     );
 
@@ -112,11 +112,8 @@ describe("Management pre-start recovery sandbox", () => {
     expect(realtimeUnit).toContain("ExecStart=/usr/local/libexec/supacloud/realtime-launcher");
     expect(realtimeUnit).toContain("Environment=CONTAINER_RUNTIME=/usr/bin/podman");
     expect(realtimeUnit).not.toContain("SystemCallFilter=");
-    expect(imagorSection).toContain("--restart=always");
-    expect(imagorSection).toContain("--name supacloud-imagor");
-    expect(imagorSection).toContain("-upload-loader-enable");
-    expect(imagorSection).toContain("-p 127.0.0.1:9010:8000");
-    expect(imagorSection).toContain('local IMAGOR_UPLOAD_ACCEPT="image/*,application/pdf"');
-    expect(imagorSection).toContain("Recreating Imagor container so PDF uploads are accepted");
+    expect(imageSection).toContain("deploy_image_service");
+    expect(imageSection).toContain('supacloud_wait_http_health "http://127.0.0.1:9010/healthcheck"');
+    expect(imageSection).not.toContain("--name supacloud-imagor");
   });
 });

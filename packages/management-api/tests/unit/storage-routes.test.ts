@@ -6,11 +6,11 @@ import { StorageService } from "../../src/services/storage.service";
 import { mockBuckets, StorageRLS } from "../../src/services/storage-rls";
 import { storageVectorInternals } from "../../src/services/storage-vector.service";
 import {
-  buildImagorRequest,
-  DEFAULT_IMAGOR_MAX_BYTES,
+  buildImageTransformRequest,
+  DEFAULT_IMAGE_TRANSFORM_MAX_BYTES,
   imageTransformUsesAccept,
-  resolveImagorMaxBytes,
-} from "../../src/services/imagor.service";
+  resolveImageTransformMaxBytes,
+} from "../../src/services/image-transform.service";
 
 const BASE = "http://localhost";
 const CURRENT_REVISION = "1786406400000000";
@@ -23,22 +23,22 @@ function request(path: string, init?: RequestInit) {
 
 describe("storage management routes", () => {
   test("image transformation limits default to 64 MiB and accept lower operator settings", () => {
-    expect(DEFAULT_IMAGOR_MAX_BYTES).toBe(64 * 1024 * 1024);
-    expect(resolveImagorMaxBytes("128")).toBe(128);
-    expect(resolveImagorMaxBytes(String(DEFAULT_IMAGOR_MAX_BYTES))).toBe(DEFAULT_IMAGOR_MAX_BYTES);
-    expect(resolveImagorMaxBytes(String(DEFAULT_IMAGOR_MAX_BYTES + 1))).toBe(DEFAULT_IMAGOR_MAX_BYTES);
-    expect(resolveImagorMaxBytes("invalid")).toBe(DEFAULT_IMAGOR_MAX_BYTES);
+    expect(DEFAULT_IMAGE_TRANSFORM_MAX_BYTES).toBe(64 * 1024 * 1024);
+    expect(resolveImageTransformMaxBytes("128")).toBe(128);
+    expect(resolveImageTransformMaxBytes(String(DEFAULT_IMAGE_TRANSFORM_MAX_BYTES))).toBe(DEFAULT_IMAGE_TRANSFORM_MAX_BYTES);
+    expect(resolveImageTransformMaxBytes(String(DEFAULT_IMAGE_TRANSFORM_MAX_BYTES + 1))).toBe(DEFAULT_IMAGE_TRANSFORM_MAX_BYTES);
+    expect(resolveImageTransformMaxBytes("invalid")).toBe(DEFAULT_IMAGE_TRANSFORM_MAX_BYTES);
   });
   test("image transforms negotiate AVIF/WebP and reject remote watermark sources by default", () => {
-    const avif = buildImagorRequest({ width: 320 }, "standard", "image/avif,image/webp");
-    const webp = buildImagorRequest({ width: 320 }, "standard", "image/webp");
-    const origin = buildImagorRequest({ width: 320, format: "origin" }, "standard", "image/avif");
+    const avif = buildImageTransformRequest({ width: 320 }, "standard", "image/avif,image/webp");
+    const webp = buildImageTransformRequest({ width: 320 }, "standard", "image/webp");
     expect(avif.path).toContain("format(avif)");
     expect(webp.path).toContain("format(webp)");
-    expect(origin.path).toContain("format(avif)");
     expect(imageTransformUsesAccept({ width: 320 })).toBe(true);
     expect(imageTransformUsesAccept({ format: "png" })).toBe(false);
-    expect(() => buildImagorRequest({ image: "https://untrusted.example/image.png" }, "watermark"))
+    expect(() => buildImageTransformRequest({ width: 320, format: "origin" }, "standard", "image/avif"))
+      .toThrow("format=origin is not supported");
+    expect(() => buildImageTransformRequest({ image: "https://untrusted.example/image.png" }, "watermark"))
       .toThrow("Remote watermark images are not allowed");
   });
   test("Web Console can manage vector buckets through project-scoped routes", async () => {
@@ -614,7 +614,7 @@ describe("storage management routes", () => {
     bucketSpy.mockRestore();
   });
 
-  test("image transforms stream source bytes to imagor instead of a remote url", async () => {
+  test("image transforms stream source bytes to the native image service instead of a remote url", async () => {
     const bucketSpy = spyOn(StorageRLS, "getLogicalBucket").mockResolvedValue({
       id: "evidence",
       name: "evidence",
@@ -696,7 +696,7 @@ describe("storage management routes", () => {
       headers: {
         Authorization: "Bearer dev-master-token",
         "Content-Type": "image/png",
-        "Content-Length": String(DEFAULT_IMAGOR_MAX_BYTES + 1),
+        "Content-Length": String(DEFAULT_IMAGE_TRANSFORM_MAX_BYTES + 1),
       },
       body: new Uint8Array([1]),
     });
@@ -704,52 +704,16 @@ describe("storage management routes", () => {
   });
 
 
-  test("raw PDF transforms default to the first page and reject pages outside the render limit", async () => {
-    const calls: Array<{ url: string; method?: string; contentType?: string }> = [];
-    const fetcher = spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      calls.push({
-        url: String(input),
-        method: init?.method,
-        contentType: (init?.headers as Record<string, string>)?.["Content-Type"],
-      });
-      return new Response("png", { headers: { "content-type": "image/png" } });
+  test("raw transforms reject PDF because the native engine is raster-only", async () => {
+    const response = await request("/v1/storage/proj_1/transform/bytes?width=300&height=200&format=png", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer dev-master-token",
+        "Content-Type": "application/pdf",
+      },
+      body: new Uint8Array([0x25, 0x50, 0x44, 0x46]),
     });
-
-    try {
-      const response = await request("/v1/storage/proj_1/transform/bytes?width=300&height=200&format=png", {
-        method: "POST",
-        headers: {
-          Authorization: "Bearer dev-master-token",
-          "Content-Type": "application/pdf",
-        },
-        body: new Uint8Array([0x25, 0x50, 0x44, 0x46]),
-      });
-      expect(response.status).toBe(200);
-      expect(response.headers.get("content-type")).toBe("image/png");
-      expect(calls).toHaveLength(1);
-      expect(calls[0]?.method).toBe("POST");
-      expect(calls[0]?.contentType).toBe("application/pdf");
-      const pathname = new URL(calls[0]?.url || "").pathname;
-      expect(pathname).toContain("page(1)");
-      expect(pathname).toContain("dpi(120)");
-
-      const invalid = await request("/v1/storage/proj_1/transform/bytes?page=21&dpi=201", {
-        method: "POST",
-        headers: {
-          Authorization: "Bearer dev-master-token",
-          "Content-Type": "application/pdf",
-        },
-        body: new Uint8Array([0x25, 0x50, 0x44, 0x46]),
-      });
-      expect(invalid.status).toBe(400);
-      expect(await invalid.json()).toMatchObject({
-        code: "400",
-        message: "PDF page must be an integer from 1 to 20",
-      });
-      expect(calls).toHaveLength(1);
-    } finally {
-      fetcher.mockRestore();
-    }
+    expect(response.status).toBe(415);
   });
 
   test("image transforms report a missing source object as 404 and oversized sources as 413", async () => {
@@ -765,7 +729,7 @@ describe("storage management routes", () => {
       expect(missing.status).toBe(404);
       expect(await missing.json()).toMatchObject({ code: "404" });
       downloadSpy.mockResolvedValue(
-        new Response("x", { headers: { "content-type": "image/tiff", "content-length": String(DEFAULT_IMAGOR_MAX_BYTES + 1) } }),
+        new Response("x", { headers: { "content-type": "image/tiff", "content-length": String(DEFAULT_IMAGE_TRANSFORM_MAX_BYTES + 1) } }),
       );
       const oversized = await request("/v1/storage/proj_1/transform/thumbnail/evidence/huge.tiff");
       expect(oversized.status).toBe(413);
