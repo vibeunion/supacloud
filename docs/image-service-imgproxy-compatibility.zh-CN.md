@@ -114,7 +114,7 @@ const signature = createHmac("sha256", key)
 | Bearer 鉴权 | 是 | 是 | 是 | `IMGPROXY_SECRET` |
 | CORS | 是 | 是 | 是 | `IMGPROXY_ALLOW_ORIGIN` |
 | `expires` | 是 | 是 | 是 | 过期返回 404 |
-| `hashsum` | 是 | 是 | 是 | MD5/SHA1/SHA256/SHA512 |
+| `hashsum` | 是 | 是 | 是 | MD5/SHA1/SHA256/SHA512；`raw` 流式不校验 |
 | `fallback_image_url` | 是 | 是 | 是 | 源失败时返回兜底图 |
 | `presets` / `IMGPROXY_ONLY_PRESETS` | 是 | 是 | 是 | 支持 `default` 预设 |
 | `raw` | 是 | 是 | 是 | 流式返回源文件 |
