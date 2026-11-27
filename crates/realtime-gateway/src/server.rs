@@ -413,6 +413,26 @@ async fn handle_client_message(
 
     // 2. phx_join
     if event == "phx_join" {
+        if let Some(token) = msg.payload.get("access_token").and_then(Value::as_str) {
+            if !token.is_empty() {
+                match verify_join_access_token(state, tenant_id, token) {
+                    Ok((role, claims)) => {
+                        hub.update_connection_auth(conn_id, role, claims);
+                    }
+                    Err(reason) => {
+                        let reply = PhoenixV2Message::reply(
+                            join_ref,
+                            reference,
+                            topic,
+                            "error",
+                            json!({ "reason": reason }),
+                        );
+                        hub.send_to_connection(conn_id, reply);
+                        return;
+                    }
+                }
+            }
+        }
         let Some(claims) = hub.connection_claims(conn_id) else {
             return;
         };
@@ -491,9 +511,7 @@ async fn handle_client_message(
         };
 
         let mut change_subs = Vec::new();
-        let mut response_postgres_changes = Vec::new();
         for (spec, row) in specs.iter().zip(stored.iter()) {
-            response_postgres_changes.push(json!({ "id": spec.client_id }));
             change_subs.push(PostgresChangeSubscription {
                 id: Some(spec.client_id.clone()),
                 db_id: Some(row.db_id.clone()),
@@ -520,17 +538,17 @@ async fn handle_client_message(
             topic,
             "ok",
             json!({
-                "postgres_changes": response_postgres_changes
+                "postgres_changes": postgres_changes_reply(&specs)
             }),
         );
         hub.send_to_connection(conn_id, reply);
 
-        // Send current presence_state if any directly to connecting client
+        // Phoenix clients buffer presence diffs until they receive the initial
+        // state, so an empty room still needs this frame. Without it a client's
+        // own first track() never appears in presenceState().
         let pres_state = hub.get_presence_state(tenant_id, topic);
-        if pres_state != json!({}) {
-            let state_msg = PhoenixV2Message::presence_state(topic, pres_state);
-            hub.send_to_connection(conn_id, state_msg);
-        }
+        let state_msg = PhoenixV2Message::presence_state(topic, pres_state);
+        hub.send_to_connection(conn_id, state_msg);
         return;
     }
 
@@ -574,7 +592,8 @@ async fn handle_client_message(
         let pres_type = msg.payload.get("event").and_then(|v| v.as_str());
         if pres_type == Some("track") {
             let payload = msg.payload.get("payload").cloned().unwrap_or(json!({}));
-            let diff = hub.track_presence(conn_id, tenant_id, topic, None, payload);
+            let key = hub.presence_key(conn_id, topic);
+            let diff = hub.track_presence(conn_id, tenant_id, topic, key, payload);
             let diff_msg =
                 PhoenixV2Message::presence_diff(topic, json!(diff.joins), json!(diff.leaves));
             hub.send_to_topic(tenant_id, topic, None, diff_msg);
@@ -660,12 +679,73 @@ async fn handle_client_message(
     }
 }
 
+fn verify_join_access_token(
+    state: &AppState,
+    tenant_id: &str,
+    token: &str,
+) -> Result<(String, Value), String> {
+    let tenant = state
+        .registry
+        .get(tenant_id)
+        .ok_or_else(|| "tenant is not registered".to_string())?;
+    let claims = state
+        .registry
+        .verify_jwt_payload_for_tenant(token, &tenant)
+        .ok_or_else(|| "invalid access_token".to_string())?;
+    let role = claims
+        .get("role")
+        .and_then(Value::as_str)
+        .filter(|role| !role.is_empty())
+        .unwrap_or("anon")
+        .to_owned();
+    Ok((role, claims))
+}
+
+fn postgres_changes_reply(specs: &[ChangeSpec]) -> Value {
+    Value::Array(
+        specs
+            .iter()
+            .map(|spec| {
+                json!({
+                    "id": spec.client_id,
+                    "event": spec.client_event,
+                    "schema": spec.client_schema,
+                    "table": spec.client_table,
+                    "filter": spec.filter,
+                })
+            })
+            .collect(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::broadcast::TopicSubscriptionConfig;
     use crate::postgres::PostgresListenerManager;
     use crate::tenant::TenantRegistry;
+    use base64::Engine as _;
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    fn hs256_token(secret: &str, role: &str, subject: &str) -> String {
+        let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(r#"{"alg":"HS256","typ":"JWT"}"#);
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(format!(
+            r#"{{"role":"{role}","sub":"{subject}","exp":{}}}"#,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                + 600
+        ));
+        let signing_input = format!("{header}.{payload}");
+        let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).unwrap();
+        mac.update(signing_input.as_bytes());
+        let signature =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+        format!("{signing_input}.{signature}")
+    }
 
     fn user_broadcast_push(
         join_ref: &str,
@@ -721,6 +801,57 @@ mod tests {
             messages.push(message);
         }
         messages
+    }
+
+    #[test]
+    fn postgres_changes_reply_echoes_the_client_binding() {
+        let reply = postgres_changes_reply(&[ChangeSpec {
+            client_id: "client-1".into(),
+            client_event: "insert".into(),
+            client_schema: None,
+            client_table: Some("cards".into()),
+            action_filter: "INSERT".into(),
+            schema: "public".into(),
+            table: "cards".into(),
+            filter: Some("id=eq.42".into()),
+            filters: Vec::new(),
+            selected_columns: None,
+        }]);
+        assert_eq!(reply[0]["id"], "client-1");
+        assert_eq!(reply[0]["event"], "insert");
+        assert_eq!(reply[0]["schema"], Value::Null);
+        assert_eq!(reply[0]["table"], "cards");
+        assert_eq!(reply[0]["filter"], "id=eq.42");
+    }
+
+    #[test]
+    fn join_access_token_is_verified_against_the_tenant() {
+        let secret = "join-access-token-test-secret-at-least-32-characters";
+        let registry = TenantRegistry::new(None);
+        registry.register(
+            TenantConfig::from_registration(json!({
+                "id": "tenant",
+                "jwt_secret": secret,
+            }))
+            .unwrap(),
+        );
+        let hub = ChannelHub::new();
+        let state = AppState {
+            registry,
+            hub: hub.clone(),
+            pg_manager: PostgresListenerManager::new(hub),
+            control_token: "control".into(),
+        };
+
+        let (role, claims) = verify_join_access_token(
+            &state,
+            "tenant",
+            &hs256_token(secret, "authenticated", "u1"),
+        )
+        .unwrap();
+        assert_eq!(role, "authenticated");
+        assert_eq!(claims["sub"], "u1");
+        assert!(verify_join_access_token(&state, "tenant", "not-a-jwt").is_err());
     }
 
     #[tokio::test]

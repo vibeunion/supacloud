@@ -267,17 +267,20 @@ impl Socket {
     }
 
     fn join(&mut self, reference: &str, topic: &str) -> serde_json::Value {
-        self.send_text(&format!(
-            r#"[null,"{reference}","{topic}","phx_join",{{"config":{{}}}}]"#
-        ));
-        let reply = self
-            .read_frame(|frame| frame[3] == "phx_reply")
-            .expect("a join should be answered with phx_reply");
+        let reply = self.join_with(reference, topic, "{}");
         assert_eq!(
             reply[4]["status"], "ok",
             "join was not acknowledged: {reply}"
         );
         reply
+    }
+
+    fn join_with(&mut self, reference: &str, topic: &str, payload: &str) -> serde_json::Value {
+        self.send_text(&format!(
+            r#"[null,"{reference}","{topic}","phx_join",{payload}]"#
+        ));
+        self.read_frame(|frame| frame[3] == "phx_reply")
+            .expect("a join should be answered with phx_reply")
     }
 }
 
@@ -433,6 +436,58 @@ fn postgres_changes_without_a_stored_subscription_is_refused() {
     assert!(
         reason.contains("postgres_changes subscription was not stored"),
         "unexpected refusal reason: {reason}"
+    );
+}
+
+#[test]
+fn join_rejects_an_invalid_access_token() {
+    let server = Server::start();
+    server.register_tenant();
+    let mut socket = server.socket(&token("anon"), TENANT);
+
+    let reply = socket.join_with(
+        "1",
+        "room:auth",
+        r#"{"access_token":"not-a-jwt","config":{}}"#,
+    );
+
+    assert_eq!(
+        reply[4]["status"], "error",
+        "invalid join auth was accepted: {reply}"
+    );
+    assert_eq!(reply[4]["response"]["reason"], "invalid access_token");
+}
+
+#[test]
+fn presence_tracking_uses_the_joined_presence_key() {
+    let server = Server::start();
+    server.register_tenant();
+    let mut socket = server.socket(&token("authenticated"), TENANT);
+    let reply = socket.join_with(
+        "1",
+        "room:presence",
+        r#"{"config":{"presence":{"key":"alice"}}}"#,
+    );
+    assert_eq!(reply[4]["status"], "ok", "presence join failed: {reply}");
+    let state = socket
+        .read_frame(|frame| frame[3] == "presence_state")
+        .expect("a presence join should emit the initial state");
+    assert_eq!(state[4], serde_json::json!({}));
+
+    socket.send_text(
+        r#"[null,"2","room:presence","presence",{"event":"track","payload":{"name":"Alice"}}]"#,
+    );
+    let diff = socket
+        .read_frame(|frame| frame[3] == "presence_diff")
+        .expect("tracking should emit a presence diff");
+    assert_eq!(diff[4]["joins"]["alice"]["metas"][0]["name"], "Alice");
+    assert!(
+        diff[4]["joins"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .all(|key| !key.starts_with("conn_")),
+        "presence fell back to the connection id: {diff}"
     );
 }
 
