@@ -44,13 +44,13 @@ import {
     validateLifecycleConfiguration,
 } from "../services/storage-versioning";
 import {
-    ImagorRequestError,
-    imagorOutputContentType,
+    ImageTransformRequestError,
     imageTransformEtag,
+    imageTransformOutputContentType,
     imageTransformUsesAccept,
     PUBLIC_IMAGE_TRANSFORM_CACHE_CONTROL,
-    runImagorWithRequest,
-} from "../services/imagor.service";
+    runImageTransformWithRequest,
+} from "../services/image-transform.service";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { matchProjectRefFromHost } from "../utils/project-routing";
@@ -1024,9 +1024,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, undefined, true);
         if (!bucket || !bucket.public) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Bucket is not public' });
 
-        // If transform params are present, proxy to imagor
+        // If transform params are present, proxy to the image service
         if (hasTransformQuery(query as Record<string, unknown>)) {
-            return proxyToImagor(ref, params.bucket, filePath, query, set as { headers: Record<string, string> }, true, headers.accept);
+            return proxyToImageTransform(ref, params.bucket, filePath, query, set as { headers: Record<string, string> }, true, headers.accept);
         }
 
         const versionId = typeof query.versionId === 'string' ? query.versionId : undefined;
@@ -1096,7 +1096,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         if (!permitted.permitted) return status(permitted.error === 'Bucket not found' || permitted.error === 'Object not found' ? 404 : 403, { statusCode: permitted.error === 'Bucket not found' || permitted.error === 'Object not found' ? '404' : '403', error: permitted.error === 'Object not found' ? 'Not Found' : 'Forbidden', message: permitted.error || 'Access Denied.' });
 
         if (hasTransformQuery(query as Record<string, unknown>)) {
-            return proxyToImagor(ref, params.bucket, filePath, query, set as { headers: Record<string, string> }, false, headers.accept);
+            return proxyToImageTransform(ref, params.bucket, filePath, query, set as { headers: Record<string, string> }, false, headers.accept);
         }
 
         try {
@@ -1227,7 +1227,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         if (!permitted.permitted) return status(permitted.error === 'Object not found' ? 404 : 403, { statusCode: permitted.error === 'Object not found' ? '404' : '403', error: permitted.error === 'Object not found' ? 'Not Found' : 'Forbidden', message: permitted.error || 'Access Denied.' });
 
         if (hasTransformQuery(query as Record<string, unknown>)) {
-            return proxyToImagor(ref, params.bucket, filePath, query, set as { headers: Record<string, string> }, false, headers.accept);
+            return proxyToImageTransform(ref, params.bucket, filePath, query, set as { headers: Record<string, string> }, false, headers.accept);
         }
 
         try {
@@ -1516,7 +1516,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
         // Transform support for signed URLs
         if (hasTransformQuery(query as Record<string, unknown>)) {
-            return proxyToImagor(ref, params.bucket, filePath, query, set as { headers: Record<string, string> }, false, headers.accept);
+            return proxyToImageTransform(ref, params.bucket, filePath, query, set as { headers: Record<string, string> }, false, headers.accept);
         }
 
         try {
@@ -1555,7 +1555,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return status(401, { statusCode: "401", error: 'Unauthorized', message: 'Invalid or expired signed URL' });
         }
 
-        return proxyToImagor(ref, params.bucket, filePath, query, set as { headers: Record<string, string> }, false, headers.accept);
+        return proxyToImageTransform(ref, params.bucket, filePath, query, set as { headers: Record<string, string> }, false, headers.accept);
     })
 
     // GET /render/image/authenticated/:bucket/* — Download authenticated transformed file
@@ -1592,7 +1592,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             if (!permitted.permitted) return status(403, { statusCode: "403", error: 'Forbidden', message: permitted.error || 'Access Denied.' });
         }
 
-        return proxyToImagor(ref, params.bucket, filePath, query, set as { headers: Record<string, string> }, false, headers.accept);
+        return proxyToImageTransform(ref, params.bucket, filePath, query, set as { headers: Record<string, string> }, false, headers.accept);
     })
 
     // ════════════════════════════════════════════════════════
@@ -2005,7 +2005,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, undefined, true);
         if (!bucket || !bucket.public) return status(400, { message: 'Bucket is not public' });
 
-        return proxyToImagor(ref, params.bucket, filePath, query, set as { headers: Record<string, string> }, true, headers.accept);
+        return proxyToImageTransform(ref, params.bucket, filePath, query, set as { headers: Record<string, string> }, true, headers.accept);
     })
 
     // ════════════════════════════════════════════════════════
@@ -2410,13 +2410,13 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     });
 
 
-// ── Shared imagor proxy helper ────────────────────────────────────
-// POST image body directly to imagor instead of having imagor fetch via URL.
+// ── Shared image transform proxy helper ───────────────────────────
+// POST image body directly to the image service instead of a URL fetch.
 // This works for both local/JuiceFS and S3 storage backends.
 const transformRateLimits = new Map<string, { count: number; windowStart: number }>();
 const MAX_TRANSFORMS_PER_MINUTE = 500;
 
-async function proxyToImagor(
+async function proxyToImageTransform(
     ref: string,
     logicalBucket: string,
     filePath: string,
@@ -2448,15 +2448,15 @@ async function proxyToImagor(
     const sourceInfo = await StorageRLS.getObjectInfo(ref, logicalBucket, filePath, undefined, true);
     const sourceContentType = resolveDownloadContentType(downloadRes, sourceInfo);
 
-    // Images and single PDF pages are rendered by Imagor. Other types are rejected
-    // before the bytes are posted.
+    // Only raster images are rendered by the native service. Other types are
+    // rejected before the bytes are posted.
     const sourceMediaType = sourceContentType.split(';', 1)[0]?.trim().toLowerCase() || '';
-    if (sourceMediaType && !sourceMediaType.startsWith('image/') && sourceMediaType !== 'application/pdf') {
+    if (sourceMediaType && !sourceMediaType.startsWith('image/')) {
         return status(400, { message: `Cannot transform non-image file (Content-Type: ${sourceContentType})` }) as unknown as { message: string };
     }
 
-    // Imagor uses one path grammar for all operations. The operation label
-    // selects compatibility defaults while the service maps the full query.
+    // The service uses one path grammar for all operations. The operation
+    // label selects compatibility defaults while the service maps the query.
     const resizeMode = query.resize || 'cover';
     const operation = query.smartcrop === 'true' || query.smartcrop === '1' || resizeMode === 'smartcrop'
         ? 'smartcrop'
@@ -2467,20 +2467,25 @@ async function proxyToImagor(
                 : 'standard';
 
     try {
-        // POST the raw image body to imagor (no URL fetch needed).
+        // POST the raw image body to the image service (no URL fetch needed).
         const imageBody = await downloadRes.arrayBuffer();
-        const imagorQuery = query as Record<string, unknown>;
-        const { request: imagorRequest, response: res } = await runImagorWithRequest(imagorQuery, {
+        const transformQuery = query as Record<string, unknown>;
+        if (operation === 'smartcrop') {
+            delete transformQuery.smartcrop;
+            delete transformQuery.smart;
+            if (String(transformQuery.resize || '').toLowerCase() === 'smartcrop') delete transformQuery.resize;
+        }
+        const { request: transformRequest, response: res } = await runImageTransformWithRequest(transformQuery, {
             bytes: imageBody,
             contentType: sourceContentType,
         }, operation, { accept });
         if (!res.ok) {
             const errText = await res.text();
-            logger.error(`Imagor ${operation} failed:`, { status: res.status, error: errText });
+            logger.error(`Image ${operation} transform failed:`, { status: res.status, error: errText });
             return status(502, { message: `Image transform failed: ${errText}`, code: "502" }) as unknown as { message: string };
         }
 
-        set.headers['Content-Type'] = imagorOutputContentType(res, imagorRequest, sourceContentType) || 'image/webp';
+        set.headers['Content-Type'] = imageTransformOutputContentType(res, transformRequest, sourceContentType) || 'image/webp';
 
         if (isPublic) {
             set.headers['Cache-Control'] = PUBLIC_IMAGE_TRANSFORM_CACHE_CONTROL;
@@ -2488,16 +2493,16 @@ async function proxyToImagor(
             set.headers['Cache-Control'] = 'private, max-age=3600';
         }
         const sourceVersion = String(sourceInfo?.version || sourceInfo?.etag || sourceInfo?.updated_at || sourceInfo?.id || filePath);
-        set.headers['ETag'] = imageTransformEtag(sourceVersion, imagorRequest);
-        if (imageTransformUsesAccept(imagorQuery)) set.headers['Vary'] = 'Accept';
+        set.headers['ETag'] = imageTransformEtag(sourceVersion, transformRequest);
+        if (imageTransformUsesAccept(transformQuery)) set.headers['Vary'] = 'Accept';
         setDownloadDisposition(query as Record<string, string | undefined>, filePath, set as { headers: Record<string, string> });
-        set.headers['X-Image-Engine'] = 'imagor/libvips';
+        set.headers['X-Image-Engine'] = 'supacloud-image/napi-rs';
         return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
     } catch (err: unknown) {
-        if (err instanceof ImagorRequestError) {
+        if (err instanceof ImageTransformRequestError) {
             return status(400, { message: err.message, code: "400" }) as unknown as { message: string };
         }
-        logger.error('Imagor proxy error:', { error: err instanceof Error ? err.message : String(err) });
+        logger.error('Image transform proxy error:', { error: err instanceof Error ? err.message : String(err) });
         return status(502, { message: 'Image processing service unavailable', code: "502" }) as unknown as { message: string };
     }
 }

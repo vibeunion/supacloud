@@ -22,17 +22,16 @@ import { logger } from "../utils/logger";
 import { config } from "../config";
 import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
 import {
-    buildImagorRequest,
-    checkImagorHealth,
-    ImagorRequestError,
-    imagorOutputContentType,
+    checkImageTransformHealth,
+    ImageTransformRequestError,
     imageTransformEtag,
+    imageTransformOutputContentType,
     imageTransformUsesAccept,
     PUBLIC_IMAGE_TRANSFORM_CACHE_CONTROL,
-    resolveImagorMaxBytes,
-    runImagor,
-    runImagorWithRequest,
-} from "../services/imagor.service";
+    resolveImageTransformMaxBytes,
+    runImageTransform,
+    runImageTransformWithRequest,
+} from "../services/image-transform.service";
 
 const ErrorResponse = t.Object({ message: t.String() });
 const SuccessResponse = t.Object({ success: t.Boolean(), message: t.String() });
@@ -109,7 +108,7 @@ async function runProjectVectorOperation(ref: string, operation: string, body: R
     }
 }
 
-const MAX_TRANSFORM_SOURCE_BYTES = resolveImagorMaxBytes();
+const MAX_TRANSFORM_SOURCE_BYTES = resolveImageTransformMaxBytes();
 
 function isValidBucketName(bucket: string): boolean {
     return /^[a-zA-Z0-9._-]+$/.test(bucket);
@@ -149,8 +148,8 @@ class TransformSourceTooLargeError extends Error {}
 
 /**
  * Load the source image through the storage driver. Transform routes no longer
- * hand imagor a remote URL: private buckets need no anonymous access and the
- * imagor HTTP loader is not required.
+ * hand the image service a remote URL: private buckets need no anonymous
+ * access and the service HTTP loader is not required.
  */
 async function loadTransformSource(ref: string, bucket: string, path: string): Promise<TransformSource | null> {
     if (!isValidBucketName(bucket)) throw new Error("Invalid bucket name");
@@ -194,7 +193,7 @@ async function transformRawImageBytes(
     if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
 
     const sourceContentType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() || "";
-    if (!sourceContentType.startsWith("image/") && sourceContentType !== "application/pdf") {
+    if (!sourceContentType.startsWith("image/")) {
         return status(415, { message: "Image content type is required", code: "415" });
     }
 
@@ -218,25 +217,29 @@ async function transformRawImageBytes(
 
     try {
         const accept = request.headers.get("accept") || undefined;
-        const imagorRequest = buildImagorRequest(query, "standard", accept);
-        const { response: result } = await runImagorWithRequest(query, { bytes, contentType: sourceContentType }, "standard", { accept });
+        const { request: transformRequest, response: result } = await runImageTransformWithRequest(
+            query,
+            { bytes, contentType: sourceContentType },
+            "standard",
+            { accept },
+        );
         if (!result.ok) {
             await result.body?.cancel();
-            logger.error("Imagor raw image transform failed:", { status: result.status });
+            logger.error("Image transform failed:", { status: result.status });
             return status(502, { message: "Image transform failed", code: "502" });
         }
 
         set.headers["Content-Type"] =
-            imagorOutputContentType(result, imagorRequest, sourceContentType) || "image/webp";
+            imageTransformOutputContentType(result, transformRequest, sourceContentType) || "image/webp";
         set.headers["Cache-Control"] = "private, max-age=3600";
         if (imageTransformUsesAccept(query)) set.headers["Vary"] = "Accept";
-        set.headers["X-Image-Engine"] = "imagor/libvips";
+        set.headers["X-Image-Engine"] = "supacloud-image/napi-rs";
         return new Response(result.body, { headers: set.headers as unknown as HeadersInit });
     } catch (error: unknown) {
-        if (error instanceof ImagorRequestError) {
+        if (error instanceof ImageTransformRequestError) {
             return status(400, { message: error.message, code: "400" });
         }
-        logger.error("Imagor raw image transform proxy failed");
+        logger.error("Image transform proxy failed");
         return status(502, { message: "Image processing service unavailable", code: "502" });
     }
 }
@@ -522,7 +525,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         };
     })
 
-    // ── Supabase-compatible Image Transform (via imagor) ──────────
+    // ── Supabase-compatible Image Transform (native image service) ──
     // Matches: GET /v1/storage/:ref/render/image/public/:bucket/*
     // This is the exact pattern that supabase-js SDK sends for .download(path, { transform })
     .get('/:ref/render/image/public/:bucket/*', { detail: { tags: ["storage"], summary: "Render a public image with transforms" } }, async ({ params, query, request, set }) => {
@@ -531,7 +534,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         if ('error' in resolved) return resolved.error;
 
         try {
-            const { request: imagorRequest, response: res } = await runImagorWithRequest(
+            const { request: transformRequest, response: res } = await runImageTransformWithRequest(
                 query as Record<string, unknown>,
                 resolved.source,
                 "standard",
@@ -539,22 +542,22 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             );
             if (!res.ok) {
                 await res.body?.cancel();
-                logger.error("Imagor image transform failed:", { status: res.status });
+                logger.error("Image transform failed:", { status: res.status });
                 return status(502, { message: "Image transform failed", code: "502" });
             }
 
             // Stream the processed image back to client with caching headers
-            set.headers['Content-Type'] = imagorOutputContentType(res, imagorRequest, resolved.source.contentType) || "image/webp";
+            set.headers['Content-Type'] = imageTransformOutputContentType(res, transformRequest, resolved.source.contentType) || "image/webp";
             set.headers['Cache-Control'] = PUBLIC_IMAGE_TRANSFORM_CACHE_CONTROL;
-            set.headers['ETag'] = imageTransformEtag(resolved.source.version, imagorRequest);
+            set.headers['ETag'] = imageTransformEtag(resolved.source.version, transformRequest);
             if (imageTransformUsesAccept(query as Record<string, unknown>)) set.headers['Vary'] = 'Accept';
-            set.headers['X-Image-Engine'] = 'imagor/libvips';
+            set.headers['X-Image-Engine'] = 'supacloud-image/napi-rs';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
-            if (err instanceof ImagorRequestError) {
+            if (err instanceof ImageTransformRequestError) {
                 return status(400, { message: err.message, code: "400" });
             }
-            logger.error('Imagor image transform proxy failed');
+            logger.error('Image transform proxy failed');
             return status(502, { message: 'Image processing service unavailable', code: '502' });
         }
     })
@@ -570,33 +573,33 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         );
     })
 
-    // ── Enhanced imagor Features (beyond Supabase standard) ───────
+    // ── Native image features ─────────────────────────────────────
 
-    // Smart Crop: intelligent focus-point detection
+    // Smart Crop: focus-point aware crop
     // GET /v1/storage/:ref/transform/smartcrop/:bucket/*?width=300&height=300
     .get('/:ref/transform/smartcrop/:bucket/*', { detail: { tags: ["storage"], summary: "Smart crop an image with focus detection" } }, async ({ params, query, request, set }) => {
         const resolved = await resolveTransformSource(request, params.ref, params.bucket, params['*']);
         if ('error' in resolved) return resolved.error;
         try {
             const transformQuery = { ...query, width: query.width || 300, height: query.height || 300, smartcrop: true };
-            const { request: imagorRequest, response: res } = await runImagorWithRequest(
+            const { request: transformRequest, response: res } = await runImageTransformWithRequest(
                 transformQuery,
                 resolved.source,
                 "smartcrop",
                 { accept: request.headers.get("accept") || undefined },
             );
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
-            set.headers['Content-Type'] = imagorOutputContentType(
+            set.headers['Content-Type'] = imageTransformOutputContentType(
                 res,
-                imagorRequest,
+                transformRequest,
                 resolved.source.contentType,
             ) || 'image/webp';
             set.headers['Cache-Control'] = PUBLIC_IMAGE_TRANSFORM_CACHE_CONTROL;
-            set.headers['ETag'] = imageTransformEtag(resolved.source.version, imagorRequest);
+            set.headers['ETag'] = imageTransformEtag(resolved.source.version, transformRequest);
             if (imageTransformUsesAccept(transformQuery)) set.headers['Vary'] = 'Accept';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
-            if (err instanceof ImagorRequestError) {
+            if (err instanceof ImageTransformRequestError) {
                 return status(400, { message: err.message, code: "400" });
             }
             return status(502, { message: 'Smartcrop service unavailable', code: '502' });
@@ -616,24 +619,24 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
                 opacity: query.opacity || 0.3,
                 quality: query.quality || 85,
             };
-            const { request: imagorRequest, response: res } = await runImagorWithRequest(
+            const { request: transformRequest, response: res } = await runImageTransformWithRequest(
                 transformQuery,
                 resolved.source,
                 "watermark",
                 { accept: request.headers.get("accept") || undefined },
             );
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
-            set.headers['Content-Type'] = imagorOutputContentType(
+            set.headers['Content-Type'] = imageTransformOutputContentType(
                 res,
-                imagorRequest,
+                transformRequest,
                 resolved.source.contentType,
             ) || 'image/webp';
             set.headers['Cache-Control'] = PUBLIC_IMAGE_TRANSFORM_CACHE_CONTROL;
-            set.headers['ETag'] = imageTransformEtag(resolved.source.version, imagorRequest);
+            set.headers['ETag'] = imageTransformEtag(resolved.source.version, transformRequest);
             if (imageTransformUsesAccept(transformQuery)) set.headers['Vary'] = 'Accept';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
-            if (err instanceof ImagorRequestError) {
+            if (err instanceof ImageTransformRequestError) {
                 return status(400, { message: err.message, code: "400" });
             }
             return status(502, { message: 'Watermark service unavailable', code: '502' });
@@ -651,24 +654,24 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
                 sigma: query.sigma || 10,
                 quality: query.quality || 60,
             };
-            const { request: imagorRequest, response: res } = await runImagorWithRequest(
+            const { request: transformRequest, response: res } = await runImageTransformWithRequest(
                 transformQuery,
                 resolved.source,
                 "blur",
                 { accept: request.headers.get("accept") || undefined },
             );
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
-            set.headers['Content-Type'] = imagorOutputContentType(
+            set.headers['Content-Type'] = imageTransformOutputContentType(
                 res,
-                imagorRequest,
+                transformRequest,
                 resolved.source.contentType,
             ) || 'image/webp';
             set.headers['Cache-Control'] = PUBLIC_IMAGE_TRANSFORM_CACHE_CONTROL;
-            set.headers['ETag'] = imageTransformEtag(resolved.source.version, imagorRequest);
+            set.headers['ETag'] = imageTransformEtag(resolved.source.version, transformRequest);
             if (imageTransformUsesAccept(transformQuery)) set.headers['Vary'] = 'Accept';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
-            if (err instanceof ImagorRequestError) {
+            if (err instanceof ImageTransformRequestError) {
                 return status(400, { message: err.message, code: "400" });
             }
             return status(502, { message: 'Blur service unavailable', code: '502' });
@@ -681,11 +684,11 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         const resolved = await resolveTransformSource(request, params.ref, params.bucket, params['*']);
         if ('error' in resolved) return resolved.error;
         try {
-            const res = await runImagor(query as Record<string, unknown>, resolved.source, "info");
+            const res = await runImageTransform(query as Record<string, unknown>, resolved.source, "info");
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
             return res.json();
         } catch (err: unknown) {
-            if (err instanceof ImagorRequestError) {
+            if (err instanceof ImageTransformRequestError) {
                 return status(400, { message: err.message, code: "400" });
             }
             return status(502, { message: 'Image info service unavailable', code: '502' });
@@ -703,39 +706,39 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
                 width: query.width || 150,
                 quality: query.quality || 70,
             };
-            const { request: imagorRequest, response: res } = await runImagorWithRequest(
+            const { request: transformRequest, response: res } = await runImageTransformWithRequest(
                 transformQuery,
                 resolved.source,
                 "thumbnail",
                 { accept: request.headers.get("accept") || undefined },
             );
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
-            set.headers['Content-Type'] = imagorOutputContentType(
+            set.headers['Content-Type'] = imageTransformOutputContentType(
                 res,
-                imagorRequest,
+                transformRequest,
                 resolved.source.contentType,
             ) || 'image/webp';
             set.headers['Cache-Control'] = PUBLIC_IMAGE_TRANSFORM_CACHE_CONTROL;
-            set.headers['ETag'] = imageTransformEtag(resolved.source.version, imagorRequest);
+            set.headers['ETag'] = imageTransformEtag(resolved.source.version, transformRequest);
             if (imageTransformUsesAccept(transformQuery)) set.headers['Vary'] = 'Accept';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
-            if (err instanceof ImagorRequestError) {
+            if (err instanceof ImageTransformRequestError) {
                 return status(400, { message: err.message, code: "400" });
             }
             return status(502, { message: 'Thumbnail service unavailable', code: '502' });
         }
     })
 
-    // Health check for imagor service
-    .get('/imagor/health', { detail: { tags: ["storage"], summary: "Check imagor image service health" } }, async () => {
+    // Health check for the native image service
+    .get('/image-transform/health', { detail: { tags: ["storage"], summary: "Check image transform service health" } }, async () => {
         try {
-            const res = await checkImagorHealth();
+            const res = await checkImageTransformHealth();
             if (!res.ok) return { status: 'unhealthy', statusCode: res.status };
-            return { status: 'healthy', engine: 'imagor/libvips' };
+            return { status: 'healthy', engine: 'supacloud-image/napi-rs' };
         } catch (err: unknown) {
-            logger.warn(`[Storage] Imagor service health check failed: ${(err as Error).message}`);
-            return { status: 'unreachable', message: 'Cannot connect to imagor service' };
+            logger.warn(`[Storage] Image service health check failed: ${(err as Error).message}`);
+            return { status: 'unreachable', message: 'Cannot connect to image transform service' };
         }
     });
 

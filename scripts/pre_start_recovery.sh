@@ -124,7 +124,7 @@ main() {
     fix_gotrue_search_path
     ensure_gateway_running
     # Container recovery stays outside this sandbox. Realtime has a dedicated
-    # systemd unit, and Imaginary uses the installer-managed restart policy.
+    # systemd unit, and the native image service has its own systemd unit.
     # Container CLIs require mount-family syscalls that this unit denies.
     restart_failed_tenants
     

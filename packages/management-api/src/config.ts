@@ -86,7 +86,7 @@ export interface Config {
   s3Region: string;
   storageType: string;
   storageMountPoint: string;
-  imagorUrl: string;
+  imageTransformUrl: string;
   gatewayProvider: "caddy";
   caddyAdminUrl: string;
   caddyConfigPath: string;
@@ -304,7 +304,7 @@ export const config: Config = {
   storageType,
   storageMountPoint: getEnv("STORAGE_MOUNT_POINT", "/data/storage"),
 
-  imagorUrl: getEnv("IMAGOR_URL", getEnv("IMAGINARY_URL", "http://127.0.0.1:9010")),
+  imageTransformUrl: getEnv("IMAGE_TRANSFORM_URL", "http://127.0.0.1:9010"),
   gatewayProvider: "caddy",
   caddyAdminUrl: getEnv("CADDY_ADMIN_URL", "http://127.0.0.1:2019"),
   caddyConfigPath: getEnv(

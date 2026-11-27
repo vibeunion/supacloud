@@ -133,9 +133,13 @@ show_status() {
     command -v podman &>/dev/null || crt="docker"
     local rt_status im_status
     rt_status=$($crt ps -a --filter "name=supabase-realtime" --format "{{.Status}}" 2>/dev/null || echo "Not deployed")
-    im_status=$($crt ps -a --filter "name=supacloud-imagor" --format "{{.Status}}" 2>/dev/null || echo "Not deployed")
+    if systemctl is-active --quiet supacloud-image 2>/dev/null; then
+        im_status="active (napi-rs)"
+    else
+        im_status="inactive"
+    fi
     echo "  Realtime:  ${rt_status:-Not deployed}"
-    echo "  Imagor: ${im_status:-Not deployed}"
+    echo "  Image Service: ${im_status}"
     echo ""
 
     echo "Config file locations:"

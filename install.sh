@@ -97,7 +97,7 @@ SUPACLOUD_INSTALL_KEYS=(
     S3_ENDPOINT S3_PROTOCOL S3_REGION S3_BUCKET S3_ACCESS_KEY S3_SECRET_KEY
     S3_FORCE_PATH_STYLE
     EXTERNAL_S3_ENDPOINT EXTERNAL_S3_REGION EXTERNAL_S3_BUCKET
-    EXTERNAL_S3_ACCESS_KEY EXTERNAL_S3_SECRET_KEY SUPACLOUD_IMAGE_ENGINE SUPACLOUD_IMAGE_WATERMARK_ALLOWED_ORIGINS IMAGOR_IMAGE IMAGINARY_IMAGE EDGE_RUNTIME EDGE_RUNTIME_PORT EDGE_MAX_BODY_SIZE_MB
+    EXTERNAL_S3_ACCESS_KEY EXTERNAL_S3_SECRET_KEY SUPACLOUD_IMAGE_WATERMARK_ALLOWED_ORIGINS EDGE_RUNTIME EDGE_RUNTIME_PORT EDGE_MAX_BODY_SIZE_MB
     SUPACLOUD_LOGS_ENABLED VICTORIALOGS_VERSION VICTORIALOGS_DATA_DIR VICTORIALOGS_RETENTION
     SUPACLOUD_PIPELINES_ENABLED SUPACLOUD_ETL_COMMIT SUPACLOUD_ETL_IMAGE
     JIT_DATABASE_GATEWAY_PUBLIC_HOST JIT_DATABASE_GATEWAY_PORT_RANGE
@@ -474,11 +474,11 @@ persist_resolved_install_config() {
         PORT MANAGEMENT_API_URL DATABASE_URL MASTER_TOKEN SCRIPTS_PATH PIGSTY_PATH BASE_DOMAIN \
         SUPACLOUD_JWT_SECRET REALTIME_SECRET_KEY_BASE REALTIME_DB_ENC_KEY REALTIME_API_SECRET \
         PG_HOST PG_PORT PG_USER PG_DATABASE PGPASSWORD SECRETS_ENCRYPTION_KEY SUPAOAUTH_BFF_SIGNING_SECRET SUPABASE_SCHEMA_PATH \
-        IMAGOR_URL IMAGINARY_URL REALTIME_ADMIN_URL
+        IMAGE_TRANSFORM_URL REALTIME_ADMIN_URL
     unset PORT MANAGEMENT_API_URL DATABASE_URL MASTER_TOKEN SCRIPTS_PATH PIGSTY_PATH BASE_DOMAIN \
         SUPACLOUD_JWT_SECRET REALTIME_SECRET_KEY_BASE REALTIME_DB_ENC_KEY REALTIME_API_SECRET \
         PG_HOST PG_PORT PG_USER PG_DATABASE PGPASSWORD SECRETS_ENCRYPTION_KEY SUPAOAUTH_BFF_SIGNING_SECRET SUPABASE_SCHEMA_PATH \
-        IMAGOR_URL IMAGINARY_URL REALTIME_ADMIN_URL
+        IMAGE_TRANSFORM_URL REALTIME_ADMIN_URL
 }
 
 apply_recovered_env_value() {
@@ -498,13 +498,8 @@ recover_legacy_install_config() {
     apply_recovered_env_value S3_STORAGE_TYPE "$MANAGEMENT_ENV_FILE" S3_STORAGE_TYPE
     apply_recovered_env_value EDGE_RUNTIME_PORT "$MANAGEMENT_ENV_FILE" EDGE_RUNTIME_PORT
     apply_recovered_env_value EDGE_MAX_BODY_SIZE_MB "$MANAGEMENT_ENV_FILE" EDGE_MAX_BODY_SIZE_MB
-    apply_recovered_env_value SUPACLOUD_IMAGE_ENGINE "$MANAGEMENT_ENV_FILE" SUPACLOUD_IMAGE_ENGINE
     apply_recovered_env_value SUPACLOUD_IMAGE_WATERMARK_ALLOWED_ORIGINS "$MANAGEMENT_ENV_FILE" SUPACLOUD_IMAGE_WATERMARK_ALLOWED_ORIGINS
     apply_recovered_env_value SUPACLOUD_REALTIME_ENGINE "$MANAGEMENT_ENV_FILE" SUPACLOUD_REALTIME_ENGINE
-    apply_recovered_env_value IMAGOR_IMAGE "$MANAGEMENT_ENV_FILE" IMAGOR_IMAGE
-    if [[ -z "${IMAGOR_IMAGE:-}" ]]; then
-        apply_recovered_env_value IMAGOR_IMAGE "$MANAGEMENT_ENV_FILE" IMAGINARY_IMAGE
-    fi
     local recovered_base_domain
     recovered_base_domain=$(supacloud_env_value "$MANAGEMENT_ENV_FILE" BASE_DOMAIN)
     [[ -z "$recovered_base_domain" ]] || SUPABASE_PUBLIC_DOMAIN="api.${recovered_base_domain}"
@@ -1838,7 +1833,7 @@ install_pgredis_runtime() {
         return 1
     fi
     if [[ "$PGREDIS_RUNTIME_PORT" == "9010" ]]; then
-        log_error "PGREDIS_RUNTIME_PORT=9010 conflicts with the SupaCloud Imagor service"
+        log_error "PGREDIS_RUNTIME_PORT=9010 conflicts with the SupaCloud image service"
         return 1
     fi
     ARCH=$(uname -m)
@@ -3758,9 +3753,7 @@ install_management_api() {
         S3_FORCE_PATH_STYLE "${S3_FORCE_PATH_STYLE:-}" \
         TUS_MAX_SIZE "${TUS_MAX_SIZE:-524288000}" \
         TUS_MAX_CHUNK_SIZE "${TUS_MAX_CHUNK_SIZE:-16777216}" \
-        SUPACLOUD_IMAGE_ENGINE "${SUPACLOUD_IMAGE_ENGINE:-rust}" \
         SUPACLOUD_IMAGE_WATERMARK_ALLOWED_ORIGINS "${SUPACLOUD_IMAGE_WATERMARK_ALLOWED_ORIGINS:-}" \
-        IMAGOR_IMAGE "${IMAGOR_IMAGE:-${IMAGINARY_IMAGE:-shumc/imagor:1.9.8}}" \
         JWT_SECRET "$JWT_SECRET" \
         SUPACLOUD_JWT_SECRET "$JWT_SECRET" \
         SUPABASE_PUBLISHABLE_KEY "$SUPABASE_PUBLISHABLE_KEY" \
@@ -4454,7 +4447,7 @@ persist_service_container_runtime_env() {
     fi
 
     supacloud_write_service_env_pairs "$MANAGEMENT_ENV_FILE" \
-        IMAGOR_URL http://127.0.0.1:9010 \
+        IMAGE_TRANSFORM_URL http://127.0.0.1:9010 \
         REALTIME_ADMIN_URL http://127.0.0.1:4000 \
         REALTIME_API_SECRET "$JWT_SECRET"
 }
@@ -5233,10 +5226,13 @@ start_realtime_container() {
     )
 }
 
-install_rust_image_binary() {
+# ========== Deploy Service Containers (Image + Realtime) ==========
+install_image_service_binary() {
     local target="/usr/local/bin/supacloud-image"
-    if [[ -x "$target" ]]; then
-        log_info "supacloud-image already installed: $($target --version 2>/dev/null || echo installed)"
+    # Older Rust builds do not implement --version and would start a server, so
+    # bound the probe and replace anything that is not the napi-rs engine.
+    if [[ -x "$target" ]] && timeout 5 "$target" --version 2>/dev/null | grep -q 'napi-rs'; then
+        log_info "supacloud-image already installed: $(timeout 5 "$target" --version 2>/dev/null || echo installed)"
         return 0
     fi
 
@@ -5245,7 +5241,7 @@ install_rust_image_binary() {
         x86_64|amd64) arch="amd64" ;;
         aarch64|arm64) arch="arm64" ;;
         *)
-            log_warn "Unsupported architecture for native image service: $(uname -m)"
+            log_warn "Unsupported architecture for image service: $(uname -m)"
             return 1
             ;;
     esac
@@ -5255,48 +5251,63 @@ install_rust_image_binary() {
         candidate="${SCRIPT_DIR}/dist/supacloud-image-linux-${arch}"
     elif [[ -f "${SCRIPT_DIR}/dist/supacloud-image" ]]; then
         candidate="${SCRIPT_DIR}/dist/supacloud-image"
-    elif [[ -f "${SCRIPT_DIR}/crates/image-service/target/release/supacloud-image-service" ]]; then
-        candidate="${SCRIPT_DIR}/crates/image-service/target/release/supacloud-image-service"
     fi
 
     if [[ -n "$candidate" ]]; then
         install -m 0755 "$candidate" "$target"
-        log_info "Installed supacloud-image binary from $candidate"
+        log_info "Installed supacloud-image from $candidate"
         return 0
     fi
 
-    if [[ -x "${SCRIPT_DIR}/scripts/build_supacloud_image.sh" ]] && command -v cargo >/dev/null 2>&1; then
-        log_info "Building supacloud-image locally with cargo..."
-        local temp_out
-        temp_out=$(mktemp -d)
-        trap 'rm -rf "${temp_out:-}"' RETURN
-        OUT_DIR="$temp_out" "${SCRIPT_DIR}/scripts/build_supacloud_image.sh" || return 1
-        install -m 0755 "${temp_out}/supacloud-image" "$target"
-        log_info "Successfully built and installed supacloud-image to $target"
-        return 0
-    elif [[ -d "${SCRIPT_DIR}/crates/image-service" ]] && command -v cargo >/dev/null 2>&1; then
-        log_info "Compiling crates/image-service release binary..."
-        cargo build --release --locked --manifest-path "${SCRIPT_DIR}/crates/image-service/Cargo.toml" || return 1
-        install -m 0755 "${SCRIPT_DIR}/crates/image-service/target/release/supacloud-image-service" "$target"
-        log_info "Installed supacloud-image to $target"
-        return 0
+    if ! command -v bun >/dev/null 2>&1; then
+        ensure_bun_version || return 1
     fi
 
-    log_warn "Native supacloud-image binary not found and cargo not available"
-    return 1
+    log_info "Building supacloud-image with Bun..."
+    local temp_out
+    temp_out=$(mktemp -d)
+    trap 'rm -rf "${temp_out:-}"' RETURN
+    OUT_DIR="$temp_out" "${SCRIPT_DIR}/scripts/build_supacloud_image.sh" || return 1
+    install -m 0755 "${temp_out}/supacloud-image" "$target"
+    log_info "Installed supacloud-image to $target"
 }
 
-deploy_rust_image_service() {
-    install_rust_image_binary || return 1
+deploy_image_service() {
+    install_image_service_binary || return 1
     local unit_src="${SCRIPT_DIR}/infrastructure/systemd/supacloud-image.service"
     [[ -f "$unit_src" ]] || {
         log_error "Missing supacloud-image systemd unit at $unit_src"
         return 1
     }
+
+    local font_path=""
+    local candidate
+    for candidate in \
+        /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc \
+        /usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc \
+        /usr/share/fonts/truetype/wqy/wqy-microhei.ttc; do
+        if [[ -f "$candidate" ]]; then
+            font_path="$candidate"
+            break
+        fi
+    done
+    if [[ -n "$font_path" ]]; then
+        supacloud_write_service_env_pairs /etc/supabase/image-service.env \
+            IMAGE_WATERMARK_FONT_PATH "$font_path" || true
+    fi
+    supacloud_write_service_env_pairs /etc/supabase/image-service.env \
+        IMGPROXY_KEY "$IMGPROXY_KEY" \
+        IMGPROXY_SALT "$IMGPROXY_SALT" \
+        IMGPROXY_ALLOWED_SOURCES "$IMGPROXY_ALLOWED_SOURCES" \
+        IMGPROXY_LOCAL_FILESYSTEM_ROOT "$IMGPROXY_LOCAL_FILESYSTEM_ROOT" \
+        IMGPROXY_SOURCE_URL_ENCRYPTION_KEY "$IMGPROXY_SOURCE_URL_ENCRYPTION_KEY" \
+        IMGPROXY_SECRET "$IMGPROXY_SECRET" || true
+
     install -m 644 "$unit_src" /etc/systemd/system/supacloud-image.service
     systemctl daemon-reload
-    systemctl enable --now supacloud-image
-    log_info "Native Rust image service running as supacloud-image.service"
+    systemctl enable supacloud-image
+    systemctl restart supacloud-image
+    log_info "Native image service running as supacloud-image.service"
 }
 
 install_realtime_gateway_binary() {
@@ -5385,74 +5396,23 @@ deploy_rust_realtime_gateway() {
     return 1
 }
 
-
-# ========== Deploy Service Containers (Imagor + Realtime) ==========
 deploy_service_containers() {
     log_step "Deploying SupaCloud service containers..."
 
     local RUNTIME="${CONTAINER_RUNTIME:-podman}"
-    local MIRROR_PREFIX="${DOCKER_MIRROR_PREFIX:-docker.1ms.run/}"
 
-    # --- 1. Deploy Imagor (Image Transformation Engine) ---
-    local image_engine="${SUPACLOUD_IMAGE_ENGINE:-rust}"
-    local deployed_rust_image=false
-    if [[ "$image_engine" == "rust" ]]; then
-        if deploy_rust_image_service; then
-            deployed_rust_image=true
-            if $RUNTIME ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^supacloud-imagor$'; then
-                log_info "Stopping legacy containerized Imagor in favor of native Rust image service"
-                $RUNTIME rm -f supacloud-imagor 2>/dev/null || true
-            fi
-        else
-            log_warn "Failed to deploy native Rust image service; falling back to containerized Imagor"
-        fi
+    # --- 1. Deploy the native image service ---
+    if ! deploy_image_service; then
+        log_error "Unable to deploy the native image service"
+        return 1
     fi
-
-    if [[ "$deployed_rust_image" != "true" ]]; then
-        if $RUNTIME ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^supacloud-imaginary$'; then
-            log_info "Removing the legacy Imaginary container before the Imagor migration"
-            $RUNTIME rm -f supacloud-imaginary
-        fi
-        local IMAGOR_UPLOAD_ACCEPT="image/*,application/pdf"
-        local imagor_action="create"
-        if $RUNTIME ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^supacloud-imagor$'; then
-            local imagor_cmd=""
-            if imagor_cmd="$($RUNTIME inspect supacloud-imagor --format '{{json .Config.Entrypoint}} {{json .Config.Cmd}}' 2>/dev/null)" \
-                && [[ "$imagor_cmd" == *"application/pdf"* ]]; then
-                log_info "Imagor container already exists, skipping"
-                imagor_action="skip"
-            elif [[ -n "$imagor_cmd" ]]; then
-                log_info "Recreating Imagor container so PDF uploads are accepted"
-                imagor_action="recreate"
-            else
-                log_warn "Could not inspect Imagor container arguments; leaving the existing container in place"
-                imagor_action="skip"
-            fi
-        fi
-        if [[ "$imagor_action" != "skip" ]]; then
-            local IMAGOR_IMAGE_VALUE="${IMAGOR_IMAGE:-${IMAGINARY_IMAGE:-shumc/imagor:1.9.8}}"
-            local IMAGOR_IMAGE_PULL="${MIRROR_PREFIX}${IMAGOR_IMAGE_VALUE}"
-            log_info "Pulling and deploying Imagor (image processing): ${IMAGOR_IMAGE_VALUE}"
-            if ! $RUNTIME pull "$IMAGOR_IMAGE_PULL" 2>/dev/null; then
-                IMAGOR_IMAGE_PULL="$IMAGOR_IMAGE_VALUE"
-                $RUNTIME pull "$IMAGOR_IMAGE_PULL"
-            fi
-            if [[ "$imagor_action" == "recreate" ]]; then
-                $RUNTIME rm -f supacloud-imagor
-            fi
-
-            $RUNTIME run -d \
-                --name supacloud-imagor \
-                --restart=always \
-                -p 127.0.0.1:9010:8000 \
-                "$IMAGOR_IMAGE_PULL" \
-                -imagor-unsafe \
-                -upload-loader-enable \
-                -upload-loader-max-allowed-size 67108864 \
-                -upload-loader-accept "$IMAGOR_UPLOAD_ACCEPT"
-
-            log_info "Imagor deployed on port 9010"
-        fi
+    if $RUNTIME ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^supacloud-imagor$'; then
+        log_info "Removing legacy Imagor container in favor of the native image service"
+        $RUNTIME rm -f supacloud-imagor 2>/dev/null || true
+    fi
+    if $RUNTIME ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^supacloud-imaginary$'; then
+        log_info "Removing legacy Imaginary container in favor of the native image service"
+        $RUNTIME rm -f supacloud-imaginary 2>/dev/null || true
     fi
     supacloud_wait_http_health "http://127.0.0.1:9010/healthcheck" || return 1
 
@@ -5792,7 +5752,7 @@ main() {
     fi
     install_web_console
 
-    # Deploy Imagor + Realtime containers
+    # Deploy native image service + Realtime containers
     deploy_service_containers
     run_legacy_supabase_compose_migration_if_requested
 
