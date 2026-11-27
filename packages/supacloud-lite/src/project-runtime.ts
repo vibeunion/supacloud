@@ -360,7 +360,7 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
   }
   const realtimeCore =
     options.realtimeCore ??
-    (options.startRuntimeServices === false ? undefined : await openLiteRealtimeCore())
+    (options.startRuntimeServices === true ? await openLiteRealtimeCore() : undefined)
   let backend: SupaCloudLiteBackend | undefined
   try {
     backend = await createBackend({
