@@ -5,6 +5,7 @@ import {
 } from "./engine";
 import { parsePath } from "./parser";
 import type { TargetFormat } from "./types";
+import { handleImgproxyRequest } from "./imgproxy/handler";
 
 export const ENGINE_NAME = "supacloud-image/napi-rs";
 export const ENGINE_VERSION = "0.2.0";
@@ -39,6 +40,10 @@ export function createImageServiceHandler(): (request: Request) => Promise<Respo
                 }),
                 { status: 200, headers },
             );
+        }
+
+        if (request.method === "GET" || request.method === "HEAD" || request.method === "OPTIONS") {
+            return handleImgproxyRequest(request, url);
         }
 
         if (request.method !== "POST") {

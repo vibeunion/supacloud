@@ -5295,6 +5295,13 @@ deploy_image_service() {
         supacloud_write_service_env_pairs /etc/supabase/image-service.env \
             IMAGE_WATERMARK_FONT_PATH "$font_path" || true
     fi
+    supacloud_write_service_env_pairs /etc/supabase/image-service.env \
+        IMGPROXY_KEY "$IMGPROXY_KEY" \
+        IMGPROXY_SALT "$IMGPROXY_SALT" \
+        IMGPROXY_ALLOWED_SOURCES "$IMGPROXY_ALLOWED_SOURCES" \
+        IMGPROXY_LOCAL_FILESYSTEM_ROOT "$IMGPROXY_LOCAL_FILESYSTEM_ROOT" \
+        IMGPROXY_SOURCE_URL_ENCRYPTION_KEY "$IMGPROXY_SOURCE_URL_ENCRYPTION_KEY" \
+        IMGPROXY_SECRET "$IMGPROXY_SECRET" || true
 
     install -m 644 "$unit_src" /etc/systemd/system/supacloud-image.service
     systemctl daemon-reload

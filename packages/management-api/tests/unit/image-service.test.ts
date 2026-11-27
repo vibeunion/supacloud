@@ -17,12 +17,25 @@ test("config.env does not deploy imagor", () => {
   expect(template).not.toContain("shumc/imagor");
 });
 
+test("config.env exposes imgproxy signature settings", () => {
+  const template = readRepoFile("config.env");
+  expect(template).toContain("IMGPROXY_KEY");
+  expect(template).toContain("IMGPROXY_SALT");
+  expect(template).toContain("IMGPROXY_ALLOWED_SOURCES");
+  expect(template).toContain("IMGPROXY_LOCAL_FILESYSTEM_ROOT");
+  expect(template).toContain("IMGPROXY_SOURCE_URL_ENCRYPTION_KEY");
+  expect(template).toContain("IMGPROXY_SECRET");
+});
+
 test("install.sh deploys the native image service without an imagor fallback", () => {
   const installer = readRepoFile("install.sh");
   expect(installer).toContain("install_image_service_binary()");
   expect(installer).toContain("deploy_image_service()");
   expect(installer).toContain("supacloud-image.service");
   expect(installer).toContain("scripts/build_supacloud_image.sh");
+  expect(installer).toContain("IMGPROXY_KEY");
+  expect(installer).toContain("IMGPROXY_SALT");
+  expect(installer).toContain("IMGPROXY_ALLOWED_SOURCES");
   expect(installer).not.toContain("crates/image-service");
   expect(installer).not.toContain("install_rust_image_binary");
   expect(installer).not.toContain("deploy_rust_image_service");

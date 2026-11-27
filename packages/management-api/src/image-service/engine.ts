@@ -1,15 +1,35 @@
 import {
-    BlendMode,
+    ChromaSubsampling,
     FastResizeFilter,
-    JsColorType,
-    Orientation,
     ResizeFit,
     Transformer,
     pngQuantizeSync,
     type Metadata,
 } from "@napi-rs/image";
-import { anchorOffset, renderTextWatermark } from "./watermark";
-import type { ProcessedImage, TransformOptions } from "./types";
+import {
+    applyFilters,
+    applyMinimumDimensions,
+    applyOrientation,
+    applyPadding,
+    applyWatermarks,
+    clamp,
+    cropTransformer,
+    extendImage,
+    flattenImage,
+    formatSupportsAlpha,
+    gravityRect,
+    hasAlphaChannel,
+    smartCropRect,
+    trimImage,
+} from "./effects";
+import { decodeGif, encodeGif } from "./gif";
+import type {
+    CropOptions,
+    Gravity,
+    ProcessedImage,
+    TargetFormat,
+    TransformOptions,
+} from "./types";
 
 export const MAX_IMAGE_WIDTH = 10000;
 export const MAX_IMAGE_HEIGHT = 10000;
@@ -23,20 +43,129 @@ export class ImageEngineError extends Error {
     }
 }
 
-type CropRect = { x: number; y: number; width: number; height: number };
+type ResizeResult = {
+    transformer: Transformer;
+    target: { width: number; height: number } | null;
+    result: { width: number; height: number };
+};
+
+export type DecodedImage = {
+    transformer: Transformer;
+    metadata: Metadata;
+    input: Uint8Array;
+    format: string;
+};
 
 function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
 }
 
-function hasAlphaChannel(colorType: JsColorType): boolean {
-    return [
-        JsColorType.La8,
-        JsColorType.Rgba8,
-        JsColorType.La16,
-        JsColorType.Rgba16,
-        JsColorType.Rgba32F,
-    ].includes(colorType);
+function normalizeFormat(format: string): string {
+    const value = format.toLowerCase();
+    if (value === "jpg") return "jpeg";
+    if (value === "tif") return "tiff";
+    return value;
+}
+
+function looksLikeSvg(input: Uint8Array): boolean {
+    const head = new TextDecoder().decode(input.slice(0, 1024)).toLowerCase();
+    return head.includes("<svg") || (head.includes("<?xml") && head.includes("<svg"));
+}
+
+function injectSvgStyle(svg: string, css: string): string {
+    const style = `<style>${css.replace(/<\/style/gi, "<\\/style")}</style>`;
+    const open = svg.indexOf("<svg");
+    if (open < 0) return svg;
+    const tagEnd = svg.indexOf(">", open);
+    if (tagEnd < 0) return svg;
+    return `${svg.slice(0, tagEnd + 1)}${style}${svg.slice(tagEnd + 1)}`;
+}
+
+function parseSvgSize(svg: string): { width: number; height: number } | undefined {
+    const widthMatch = svg.match(/\bwidth\s*=\s*["']\s*([\d.]+)(?:px)?\s*["']/i);
+    const heightMatch = svg.match(/\bheight\s*=\s*["']\s*([\d.]+)(?:px)?\s*["']/i);
+    const viewBoxMatch = svg.match(/\bviewBox\s*=\s*["']\s*[\d.-]+\s+[\d.-]+\s+([\d.]+)\s+([\d.]+)/i);
+    const width = widthMatch ? Number.parseFloat(widthMatch[1]) : NaN;
+    const height = heightMatch ? Number.parseFloat(heightMatch[1]) : NaN;
+    if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+        return { width: Math.round(width), height: Math.round(height) };
+    }
+    if (viewBoxMatch) {
+        const viewBoxWidth = Number.parseFloat(viewBoxMatch[1]);
+        const viewBoxHeight = Number.parseFloat(viewBoxMatch[2]);
+        if (viewBoxWidth > 0 && viewBoxHeight > 0) {
+            return { width: Math.round(viewBoxWidth), height: Math.round(viewBoxHeight) };
+        }
+    }
+    return undefined;
+}
+
+export function decodeImage(input: Uint8Array, svgStyle?: string, maxSourcePixels = 0): DecodedImage {
+    if (input.byteLength === 0) {
+        throw new ImageEngineError("Empty image payload", 400);
+    }
+    if (input.byteLength > MAX_PAYLOAD_BYTES) {
+        throw new ImageEngineError(
+            `Image exceeds maximum payload size of ${MAX_PAYLOAD_BYTES} bytes`,
+            413,
+        );
+    }
+
+    const svg = looksLikeSvg(input);
+    let transformer: Transformer;
+    try {
+        if (svg) {
+            const source = new TextDecoder().decode(input);
+            transformer = Transformer.fromSvg(svgStyle ? injectSvgStyle(source, svgStyle) : source);
+            const intrinsic = parseSvgSize(source);
+            if (intrinsic) {
+                const rendered = transformer.metadataSync();
+                if (rendered.width !== intrinsic.width || rendered.height !== intrinsic.height) {
+                    transformer.fastResize({
+                        width: Math.min(intrinsic.width, MAX_IMAGE_WIDTH),
+                        height: Math.min(intrinsic.height, MAX_IMAGE_HEIGHT),
+                        fit: ResizeFit.Fill,
+                    });
+                }
+            }
+        } else if (isGif(input)) {
+            transformer = decodeGif(input);
+        } else {
+            transformer = new Transformer(input);
+        }
+    } catch (error) {
+        throw new ImageEngineError(`Failed to decode image: ${errorMessage(error)}`, 415);
+    }
+
+    const metadata = transformer.metadataSync();
+    const pixelLimit = maxSourcePixels > 0
+        ? Math.min(MAX_IMAGE_PIXELS, maxSourcePixels)
+        : MAX_IMAGE_PIXELS;
+    if (
+        metadata.width > MAX_IMAGE_WIDTH
+        || metadata.height > MAX_IMAGE_HEIGHT
+        || metadata.width * metadata.height > pixelLimit
+    ) {
+        throw new ImageEngineError(
+            `Image dimensions (${metadata.width}x${metadata.height}) exceed maximum allowed pixels (${pixelLimit})`,
+            422,
+        );
+    }
+
+    return {
+        transformer,
+        metadata,
+        input,
+        format: svg ? "svg" : isGif(input) ? "gif" : normalizeFormat(metadata.format),
+    };
+}
+
+function isGif(input: Uint8Array): boolean {
+    return input.byteLength > 6
+        && input[0] === 0x47
+        && input[1] === 0x49
+        && input[2] === 0x46
+        && input[3] === 0x38;
 }
 
 export function processImage(
@@ -44,400 +173,318 @@ export function processImage(
     options: TransformOptions,
     watermarkImage?: Uint8Array,
 ): ProcessedImage {
-    if (input.byteLength === 0) {
-        throw new ImageEngineError("Empty image payload", 400);
-    }
-    if (input.byteLength > MAX_PAYLOAD_BYTES) {
-        throw new ImageEngineError(`Image exceeds maximum payload size of ${MAX_PAYLOAD_BYTES} bytes`, 413);
-    }
-
-    let transformer: Transformer;
-    let metadata: Metadata;
-    try {
-        transformer = new Transformer(input);
-        metadata = transformer.metadataSync();
-    } catch (error) {
-        throw new ImageEngineError(`Failed to decode image: ${errorMessage(error)}`, 415);
-    }
-
-    if (
-        metadata.width > MAX_IMAGE_WIDTH
-        || metadata.height > MAX_IMAGE_HEIGHT
-        || metadata.width * metadata.height > MAX_IMAGE_PIXELS
-    ) {
-        throw new ImageEngineError(
-            `Image dimensions (${metadata.width}x${metadata.height}) exceed maximum allowed pixels (${MAX_IMAGE_PIXELS})`,
-            422,
-        );
-    }
-
+    const decoded = decodeImage(input, options.svgStyle, options.maxSourcePixels ?? 0);
     if (options.isMeta) {
-        const payload = JSON.stringify({
-            format: metadata.format.toLowerCase(),
-            width: metadata.width,
-            height: metadata.height,
-            size_bytes: input.byteLength,
-            has_alpha: hasAlphaChannel(metadata.colorType),
-        }, null, 2);
         return {
-            bytes: new TextEncoder().encode(payload),
+            bytes: new TextEncoder().encode(JSON.stringify({
+                format: decoded.format,
+                width: decoded.metadata.width,
+                height: decoded.metadata.height,
+                orientation: decoded.metadata.orientation ?? 1,
+                size_bytes: input.byteLength,
+                has_alpha: hasAlphaChannel(decoded.metadata.colorType),
+                ...(decoded.metadata.exif ? { exif: decoded.metadata.exif } : {}),
+            }, null, 2)),
             contentType: "application/json",
         };
     }
 
-    const target = calculateTargetDimensions(metadata.width, metadata.height, options);
-    if (target) {
-        if (
-            !options.fitIn
-            && !options.stretch
-            && options.width !== undefined
-            && options.height !== undefined
-        ) {
-            if (options.smart) {
-                const rect = smartCropRect(
-                    input,
-                    metadata.width,
-                    metadata.height,
-                    target.width,
-                    target.height,
-                );
-                transformer.crop(rect.x, rect.y, rect.width, rect.height);
-                // napi-rs/image 1.16 subtracts the crop's y offset from the next
-                // resize's target height. Rebuilding the cropped pixels resets it.
-                transformer = rebuildCroppedTransformer(transformer);
-                transformer.fastResize({
-                    width: target.width,
-                    height: target.height,
-                    filter: FastResizeFilter.Lanczos3,
-                    fit: ResizeFit.Fill,
-                });
-            } else {
-                transformer.fastResize({
-                    width: target.width,
-                    height: target.height,
-                    filter: FastResizeFilter.Lanczos3,
-                    fit: ResizeFit.Cover,
-                });
-            }
-        } else {
-            transformer.fastResize({
-                width: target.width,
-                height: target.height,
-                filter: FastResizeFilter.Lanczos3,
-                fit: ResizeFit.Fill,
-            });
-        }
-    }
-
-    applyFilters(transformer, options);
-    applyWatermarks(transformer, options, watermarkImage);
-
-    return encodeImage(transformer, options);
+    const transformer = applyMaxResultDimension(
+        applyPipeline(decoded, options, watermarkImage),
+        options.maxResultDimension,
+    );
+    return encodeImage(transformer, options, decoded);
 }
 
-function calculateTargetDimensions(
-    originalWidth: number,
-    originalHeight: number,
-    options: TransformOptions,
-): { width: number; height: number } | null {
-    if (options.width !== undefined && options.height !== undefined) {
-        if (options.fitIn) {
-            const ratio = Math.min(options.width / originalWidth, options.height / originalHeight);
-            return {
-                width: Math.max(1, Math.round(originalWidth * ratio)),
-                height: Math.max(1, Math.round(originalHeight * ratio)),
-            };
-        }
-        return { width: options.width, height: options.height };
-    }
-    if (options.width !== undefined) {
-        const ratio = options.width / originalWidth;
-        return { width: options.width, height: Math.max(1, Math.round(originalHeight * ratio)) };
-    }
-    if (options.height !== undefined) {
-        const ratio = options.height / originalHeight;
-        return { width: Math.max(1, Math.round(originalWidth * ratio)), height: options.height };
-    }
-    return null;
-}
-
-function isEightBit(colorType: JsColorType): boolean {
-    return [
-        JsColorType.L8,
-        JsColorType.La8,
-        JsColorType.Rgb8,
-        JsColorType.Rgba8,
-    ].includes(colorType);
-}
-
-function rebuildCroppedTransformer(transformer: Transformer): Transformer {
+function applyMaxResultDimension(
+    transformer: Transformer,
+    maxDimension?: number,
+): Transformer {
+    if (!maxDimension || maxDimension <= 0) return transformer;
     const metadata = transformer.metadataSync();
-    if (!isEightBit(metadata.colorType)) {
-        return new Transformer(new Uint8Array(transformer.pngSync()));
-    }
-
-    const pixels = new Uint8Array(transformer.rawPixelsSync());
-    const channels = Math.round(pixels.length / (metadata.width * metadata.height));
-    if (channels < 1 || channels > 4) {
-        return new Transformer(new Uint8Array(transformer.pngSync()));
-    }
-
-    const rgba = new Uint8Array(metadata.width * metadata.height * 4);
-    for (let index = 0, offset = 0; index < pixels.length; index += channels, offset += 4) {
-        if (channels === 1) {
-            const value = pixels[index];
-            rgba[offset] = value;
-            rgba[offset + 1] = value;
-            rgba[offset + 2] = value;
-            rgba[offset + 3] = 255;
-        } else if (channels === 2) {
-            const value = pixels[index];
-            rgba[offset] = value;
-            rgba[offset + 1] = value;
-            rgba[offset + 2] = value;
-            rgba[offset + 3] = pixels[index + 1];
-        } else if (channels === 3) {
-            rgba[offset] = pixels[index];
-            rgba[offset + 1] = pixels[index + 1];
-            rgba[offset + 2] = pixels[index + 2];
-            rgba[offset + 3] = 255;
-        } else {
-            rgba[offset] = pixels[index];
-            rgba[offset + 1] = pixels[index + 1];
-            rgba[offset + 2] = pixels[index + 2];
-            rgba[offset + 3] = pixels[index + 3];
-        }
-    }
-
-    return Transformer.fromRgbaPixels(rgba, metadata.width, metadata.height);
-}
-
-function luma(pixels: Uint8Array, index: number, channels: number): number {
-    if (channels === 1 || channels === 2) return pixels[index] ?? 0;
-    return 0.299 * (pixels[index] ?? 0) + 0.587 * (pixels[index + 1] ?? 0) + 0.114 * (pixels[index + 2] ?? 0);
-}
-
-function skinScore(pixels: Uint8Array, index: number, channels: number): number {
-    if (channels < 3) return 0;
-    const red = pixels[index] ?? 0;
-    const green = pixels[index + 1] ?? 0;
-    const blue = pixels[index + 2] ?? 0;
-    const max = Math.max(red, green, blue);
-    const min = Math.min(red, green, blue);
-    if (max < 60 || min > 240) return 0;
-    return red > 60 && red > green && red > blue && red - green > 15 && red - blue > 15 ? 1 : 0;
-}
-
-function smartCropRect(
-    input: Uint8Array,
-    originalWidth: number,
-    originalHeight: number,
-    targetWidth: number,
-    targetHeight: number,
-): CropRect {
-    const targetAspect = targetWidth / targetHeight;
-    const originalAspect = originalWidth / originalHeight;
-    let cropWidth: number;
-    let cropHeight: number;
-    if (originalAspect > targetAspect) {
-        cropHeight = originalHeight;
-        cropWidth = Math.round(originalHeight * targetAspect);
-    } else {
-        cropWidth = originalWidth;
-        cropHeight = Math.round(originalWidth / targetAspect);
-    }
-
-    if (cropWidth >= originalWidth && cropHeight >= originalHeight) {
-        cropWidth = Math.min(cropWidth, originalWidth);
-        cropHeight = Math.min(cropHeight, originalHeight);
-        return {
-            x: Math.floor((originalWidth - cropWidth) / 2),
-            y: Math.floor((originalHeight - cropHeight) / 2),
-            width: cropWidth,
-            height: cropHeight,
-        };
-    }
-
-    const maxSide = 256;
-    const scale = maxSide / Math.max(originalWidth, originalHeight);
-    const smallWidth = Math.max(1, Math.round(originalWidth * scale));
-    const smallHeight = Math.max(1, Math.round(originalHeight * scale));
-    const analysis = new Transformer(input).fastResize({
-        width: smallWidth,
-        height: smallHeight,
-        filter: FastResizeFilter.Bilinear,
+    if (metadata.width <= maxDimension && metadata.height <= maxDimension) return transformer;
+    const scale = maxDimension / Math.max(metadata.width, metadata.height);
+    transformer.fastResize({
+        width: Math.max(1, Math.round(metadata.width * scale)),
+        height: Math.max(1, Math.round(metadata.height * scale)),
         fit: ResizeFit.Fill,
     });
-    const meta = analysis.metadataSync();
-    const pixels = new Uint8Array(analysis.rawPixelsSync());
-    const channels = Math.max(1, Math.min(4, Math.round(pixels.length / (meta.width * meta.height))));
-    const interest = new Float32Array(meta.width * meta.height);
+    return transformer;
+}
 
-    for (let y = 1; y < meta.height - 1; y += 1) {
-        for (let x = 1; x < meta.width - 1; x += 1) {
-            const index = (y * meta.width + x) * channels;
-            const left = (y * meta.width + x - 1) * channels;
-            const right = (y * meta.width + x + 1) * channels;
-            const up = ((y - 1) * meta.width + x) * channels;
-            const down = ((y + 1) * meta.width + x) * channels;
-            const edge = Math.sqrt(
-                (luma(pixels, right, channels) - luma(pixels, left, channels)) ** 2
-                + (luma(pixels, down, channels) - luma(pixels, up, channels)) ** 2,
+function applyPipeline(
+    decoded: DecodedImage,
+    options: TransformOptions,
+    watermarkImage?: Uint8Array,
+): Transformer {
+    let transformer = decoded.transformer;
+
+    if (options.autoRotate !== false) {
+        try {
+            transformer.rotate();
+            decoded.metadata = transformer.metadataSync();
+        } catch {
+            // Some formats cannot be auto-rotated; keep the original pixels.
+        }
+    }
+
+    if (options.trim) {
+        transformer = trimImage(transformer, options.trim);
+    }
+    if (options.crop) {
+        transformer = applyCrop(transformer, options.crop, options.gravity, options.cropAspectRatio);
+    }
+
+    const resized = applyResize(transformer, options);
+    transformer = resized.transformer;
+
+    if (options.extend || options.extendAspectRatio) {
+        transformer = extendImage(transformer, options, resized.target);
+    }
+    if (options.minWidth !== undefined || options.minHeight !== undefined) {
+        transformer = applyMinimumDimensions(transformer, options);
+    }
+
+    applyOrientation(transformer, options);
+    applyFilters(transformer, options);
+
+    if (options.padding) {
+        transformer = applyPadding(transformer, options.padding, options.background);
+    }
+
+    applyWatermarks(transformer, options, watermarkImage);
+
+    if (options.background && !formatSupportsAlpha(options.format)) {
+        transformer = flattenImage(transformer, options.background);
+    }
+
+    return transformer;
+}
+
+function applyResize(transformer: Transformer, options: TransformOptions): ResizeResult {
+    const metadata = transformer.metadataSync();
+    const zoom = options.zoom ?? 1;
+    const dpr = options.dpr ?? 1;
+    let targetWidth = options.width ? Math.round(options.width * zoom * dpr) : 0;
+    let targetHeight = options.height ? Math.round(options.height * zoom * dpr) : 0;
+
+    if (targetWidth === 0 && targetHeight === 0) {
+        return {
+            transformer,
+            target: null,
+            result: { width: metadata.width, height: metadata.height },
+        };
+    }
+    if (targetWidth === 0) {
+        targetWidth = Math.max(1, Math.round((metadata.width * targetHeight) / metadata.height));
+    }
+    if (targetHeight === 0) {
+        targetHeight = Math.max(1, Math.round((metadata.height * targetWidth) / metadata.width));
+    }
+
+    let type = options.resizeType;
+    if (!type) {
+        if (options.fitIn) type = "fit";
+        else if (options.stretch) type = "force";
+        else if (options.smart || options.gravity?.type === "sm") type = "smart";
+        else type = "fill";
+    }
+
+    const smartGravity = options.gravity?.type === "sm"
+        || options.gravity?.type === "obj"
+        || options.gravity?.type === "objw";
+    if (type === "smart" || smartGravity) {
+        const rect = smartCropRect(
+            new Uint8Array(transformer.pngSync()),
+            metadata.width,
+            metadata.height,
+            targetWidth,
+            targetHeight,
+        );
+        if (rect.width !== metadata.width || rect.height !== metadata.height) {
+            transformer = cropTransformer(transformer, rect);
+        }
+    }
+
+    const current = transformer.metadataSync();
+    let actualType = type;
+    if (type === "auto") {
+        const sourceLandscape = current.width >= current.height;
+        const targetLandscape = targetWidth >= targetHeight;
+        actualType = sourceLandscape === targetLandscape ? "fill" : "fit";
+    }
+    if (type === "smart") actualType = "fill";
+
+    let scale: number;
+    if (actualType === "fit") {
+        scale = Math.min(targetWidth / current.width, targetHeight / current.height);
+    } else {
+        scale = Math.max(targetWidth / current.width, targetHeight / current.height);
+    }
+    if (!options.enlarge && scale > 1) scale = 1;
+
+    let resultWidth = Math.max(1, Math.round(current.width * scale));
+    let resultHeight = Math.max(1, Math.round(current.height * scale));
+    if (actualType === "force") {
+        resultWidth = targetWidth;
+        resultHeight = targetHeight;
+    }
+
+    if (resultWidth !== current.width || resultHeight !== current.height) {
+        transformer.fastResize({
+            width: resultWidth,
+            height: resultHeight,
+            filter: mapResizeFilter(options.resizeFilter),
+            fit: ResizeFit.Fill,
+        });
+    }
+
+    if (actualType === "fill" || actualType === "fill-down") {
+        const cropWidth = Math.min(targetWidth, resultWidth);
+        const cropHeight = Math.min(targetHeight, resultHeight);
+        if (cropWidth !== resultWidth || cropHeight !== resultHeight) {
+            const rect = gravityRect(
+                resultWidth,
+                resultHeight,
+                cropWidth,
+                cropHeight,
+                options.gravity,
             );
-            const red = pixels[index] ?? 0;
-            const green = pixels[index + 1] ?? 0;
-            const blue = pixels[index + 2] ?? 0;
-            const max = Math.max(red, green, blue);
-            const min = Math.min(red, green, blue);
-            const saturation = max > 0 ? (max - min) / max : 0;
-            interest[y * meta.width + x] = edge * 0.5 + saturation * 24 + skinScore(pixels, index, channels) * 48;
-        }
-    }
-
-    const integral = new Float64Array((meta.width + 1) * (meta.height + 1));
-    for (let y = 0; y < meta.height; y += 1) {
-        let rowSum = 0;
-        for (let x = 0; x < meta.width; x += 1) {
-            rowSum += interest[y * meta.width + x];
-            integral[(y + 1) * (meta.width + 1) + x + 1] =
-                integral[y * (meta.width + 1) + x + 1] + rowSum;
-        }
-    }
-
-    const cropSmallWidth = clamp(Math.round((cropWidth * meta.width) / originalWidth), 1, meta.width);
-    const cropSmallHeight = clamp(Math.round((cropHeight * meta.height) / originalHeight), 1, meta.height);
-    let bestX = 0;
-    let bestY = 0;
-    let bestScore = Number.NEGATIVE_INFINITY;
-
-    for (let y = 0; y <= meta.height - cropSmallHeight; y += 1) {
-        for (let x = 0; x <= meta.width - cropSmallWidth; x += 1) {
-            const x2 = x + cropSmallWidth;
-            const y2 = y + cropSmallHeight;
-            const sum =
-                integral[y2 * (meta.width + 1) + x2]
-                - integral[y * (meta.width + 1) + x2]
-                - integral[y2 * (meta.width + 1) + x]
-                + integral[y * (meta.width + 1) + x];
-            if (sum > bestScore) {
-                bestScore = sum;
-                bestX = x;
-                bestY = y;
+            transformer = cropTransformer(transformer, rect);
+        } else if (actualType === "fill-down" && resultWidth < targetWidth && resultHeight < targetHeight) {
+            const aspect = targetWidth / targetHeight;
+            let cropW = resultWidth;
+            let cropH = Math.round(cropW / aspect);
+            if (cropH > resultHeight) {
+                cropH = resultHeight;
+                cropW = Math.round(cropH * aspect);
+            }
+            if (cropW !== resultWidth || cropH !== resultHeight) {
+                transformer = cropTransformer(
+                    transformer,
+                    gravityRect(resultWidth, resultHeight, cropW, cropH, options.gravity),
+                );
             }
         }
     }
 
-    const cropX = Math.round((bestX * originalWidth) / meta.width);
-    const cropY = Math.round((bestY * originalHeight) / meta.height);
     return {
-        x: Math.min(cropX, originalWidth - cropWidth),
-        y: Math.min(cropY, originalHeight - cropHeight),
-        width: cropWidth,
-        height: cropHeight,
+        transformer,
+        target: { width: targetWidth, height: targetHeight },
+        result: { width: resultWidth, height: resultHeight },
     };
 }
 
-function clamp(value: number, min: number, max: number): number {
-    return Math.min(max, Math.max(min, value));
+function mapResizeFilter(filter?: TransformOptions["resizeFilter"]): FastResizeFilter {
+    switch (filter) {
+        case "nearest":
+            return FastResizeFilter.Box;
+        case "linear":
+            return FastResizeFilter.Bilinear;
+        case "cubic":
+            return FastResizeFilter.CatmullRom;
+        case "lanczos2":
+        case "lanczos3":
+        default:
+            return FastResizeFilter.Lanczos3;
+    }
 }
 
-function applyFilters(transformer: Transformer, options: TransformOptions): void {
-    if (options.flipHorizontal) transformer.rotate(Orientation.MirrorHorizontal);
-    if (options.flipVertical) transformer.rotate(Orientation.MirrorVertical);
-    if (options.rotateDeg !== undefined) {
-        const degrees = ((options.rotateDeg % 360) + 360) % 360;
-        if (degrees === 90) transformer.rotate(Orientation.Rotate90Cw);
-        else if (degrees === 180) transformer.rotate(Orientation.Rotate180);
-        else if (degrees === 270) transformer.rotate(Orientation.Rotate270Cw);
+function applyCrop(
+    transformer: Transformer,
+    crop: CropOptions,
+    fallbackGravity?: Gravity,
+    aspectRatio?: number,
+): Transformer {
+    const metadata = transformer.metadataSync();
+    let width = dimensionValue(crop.width, metadata.width);
+    let height = dimensionValue(crop.height, metadata.height);
+    if (aspectRatio && aspectRatio > 0) {
+        if (width / height > aspectRatio) {
+            width = Math.max(1, Math.round(height * aspectRatio));
+        } else {
+            height = Math.max(1, Math.round(width / aspectRatio));
+        }
     }
-    if (options.grayscale) transformer.grayscale();
-    if (options.invert) transformer.invert();
-    if (options.contrast !== undefined && options.contrast !== 0) {
-        transformer.adjustContrast(options.contrast);
-    }
-    if (options.brightness !== undefined && options.brightness !== 0) {
-        transformer.brighten(options.brightness);
-    }
-    if (options.blurSigma !== undefined) transformer.blur(options.blurSigma);
-    if (options.sharpenSigma !== undefined) transformer.unsharpen(options.sharpenSigma, 1);
+    const rect = gravityRect(metadata.width, metadata.height, width, height, crop.gravity ?? fallbackGravity);
+    return cropTransformer(transformer, rect);
 }
 
-function applyWatermarks(
+function dimensionValue(value: number, fullSize: number): number {
+    if (value <= 0) return fullSize;
+    if (value < 1) return Math.max(1, Math.round(fullSize * value));
+    return Math.max(1, Math.min(fullSize, Math.round(value)));
+}
+
+export function encodeImage(
     transformer: Transformer,
     options: TransformOptions,
-    watermarkImage?: Uint8Array,
-): void {
-    if (!options.watermarkText && !watermarkImage) return;
+    decoded?: DecodedImage,
+): ProcessedImage {
+    const format = options.format ?? defaultOutputFormat(decoded?.format);
+    const quality = clamp(Math.round(options.formatQuality?.[format] ?? options.quality), 1, 100);
 
-    const base = transformer.metadataSync();
-
-    if (options.watermarkText) {
-        const overlay = new Transformer(
-            renderTextWatermark(
-                options.watermarkText,
-                options.watermarkFontSize,
-                options.watermarkColor,
-                options.watermarkOpacity,
-            ),
-        );
-        fitOverlay(overlay, base.width, base.height);
-        const overlayMeta = overlay.metadataSync();
-        transformer.composite(new Uint8Array(overlay.pngSync()), {
-            left: anchorOffset(options.watermarkX, base.width, overlayMeta.width),
-            top: anchorOffset(options.watermarkY, base.height, overlayMeta.height),
-            opacity: options.watermarkOpacity,
-            blend: BlendMode.Over,
-        });
-    }
-
-    if (watermarkImage) {
-        const overlay = new Transformer(watermarkImage);
-        if (options.watermarkImageWidth !== undefined || options.watermarkImageHeight !== undefined) {
-            overlay.fastResize({
-                width: options.watermarkImageWidth ?? base.width,
-                height: options.watermarkImageHeight ?? base.height,
-                fit: ResizeFit.Inside,
-            });
+    if (options.maxBytes || options.autoQuality?.method === "size") {
+        const target = options.maxBytes ?? options.autoQuality?.target ?? 0;
+        if (target > 0) {
+            return encodeWithTargetBytes(transformer, options, format, quality, target);
         }
-        fitOverlay(overlay, base.width, base.height);
-        const overlayMeta = overlay.metadataSync();
-        transformer.composite(new Uint8Array(overlay.pngSync()), {
-            left: anchorOffset(options.watermarkX, base.width, overlayMeta.width),
-            top: anchorOffset(options.watermarkY, base.height, overlayMeta.height),
-            opacity: options.watermarkOpacity,
-            blend: BlendMode.Over,
-        });
+    }
+
+    return encodeFormat(transformer, options, format, quality);
+}
+
+function defaultOutputFormat(source?: string): TargetFormat {
+    switch (source) {
+        case "jpeg":
+        case "png":
+        case "webp":
+        case "avif":
+        case "gif":
+        case "bmp":
+        case "tiff":
+        case "ico":
+            return source;
+        default:
+            return "webp";
     }
 }
 
-function fitOverlay(overlay: Transformer, baseWidth: number, baseHeight: number): void {
-    const meta = overlay.metadataSync();
-    if (meta.width <= baseWidth && meta.height <= baseHeight) return;
-    overlay.fastResize({ width: baseWidth, height: baseHeight, fit: ResizeFit.Inside });
-}
-
-function encodeImage(transformer: Transformer, options: TransformOptions): ProcessedImage {
-    const quality = Math.min(100, Math.max(1, Math.round(options.quality)));
-    switch (options.format ?? "webp") {
+function encodeFormat(
+    transformer: Transformer,
+    options: TransformOptions,
+    format: TargetFormat,
+    quality: number,
+): ProcessedImage {
+    switch (format) {
         case "avif":
             return {
-                bytes: new Uint8Array(transformer.avifSync({ quality, speed: 6 })),
+                bytes: new Uint8Array(transformer.avifSync({
+                    quality,
+                    speed: 6,
+                    ...(options.avifOptions?.subsample?.includes("420")
+                        ? { chromaSubsampling: ChromaSubsampling.Yuv420 }
+                        : {}),
+                })),
                 contentType: "image/avif",
             };
         case "jpeg":
             return {
-                bytes: new Uint8Array(transformer.jpegSync(quality)),
+                bytes: new Uint8Array(flattenImage(transformer, options.background).jpegSync(quality)),
                 contentType: "image/jpeg",
             };
         case "png": {
             const png = transformer.pngSync();
             let output = png;
-            if (quality < 100) {
+            if (options.pngOptions?.quantize === true || options.pngOptions?.quantizationColors !== undefined) {
                 try {
                     output = pngQuantizeSync(png, {
                         minQuality: Math.max(0, quality - 20),
                         maxQuality: quality,
                         speed: 5,
+                        ...(options.pngOptions?.quantizationColors
+                            ? { colors: clamp(options.pngOptions.quantizationColors, 2, 256) }
+                            : {}),
                     });
                 } catch {
                     // Tiny or unusual images can be rejected by the quantizer; keep the PNG.
@@ -445,15 +492,25 @@ function encodeImage(transformer: Transformer, options: TransformOptions): Proce
             }
             return { bytes: new Uint8Array(output), contentType: "image/png" };
         }
+        case "gif":
+            return {
+                bytes: encodeGif(transformer),
+                contentType: "image/gif",
+            };
         case "bmp":
             return {
-                bytes: new Uint8Array(transformer.bmpSync()),
+                bytes: new Uint8Array(flattenImage(transformer, options.background).bmpSync()),
                 contentType: "image/bmp",
             };
         case "tiff":
             return {
-                bytes: new Uint8Array(transformer.tiffSync()),
+                bytes: new Uint8Array(flattenImage(transformer, options.background).tiffSync()),
                 contentType: "image/tiff",
+            };
+        case "ico":
+            return {
+                bytes: new Uint8Array(transformer.icoSync()),
+                contentType: "image/x-icon",
             };
         case "webp":
         default:
@@ -462,4 +519,20 @@ function encodeImage(transformer: Transformer, options: TransformOptions): Proce
                 contentType: "image/webp",
             };
     }
+}
+
+function encodeWithTargetBytes(
+    transformer: Transformer,
+    options: TransformOptions,
+    format: TargetFormat,
+    quality: number,
+    targetBytes: number,
+): ProcessedImage {
+    let currentQuality = quality;
+    let output = encodeFormat(transformer, options, format, currentQuality);
+    while (output.bytes.byteLength > targetBytes && currentQuality > 10) {
+        currentQuality = Math.max(10, currentQuality - 5);
+        output = encodeFormat(transformer, options, format, currentQuality);
+    }
+    return output;
 }
