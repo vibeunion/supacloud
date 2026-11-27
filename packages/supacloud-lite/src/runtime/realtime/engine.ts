@@ -367,7 +367,7 @@ export class RealtimeEngine {
       const encoded =
         conn.vsn === '2.0.0'
           ? JSON.stringify([msg.join_ref ?? null, msg.ref ?? null, msg.topic, msg.event, msg.payload])
-          : JSON.stringify(msg)
+          : JSON.stringify({ ...msg, join_ref: msg.join_ref ?? null })
       conn.socket.send(encoded)
     } catch {
       // transport already closed
@@ -802,13 +802,15 @@ export class RealtimeEngine {
     })
 
     // initial presence snapshot
-    const state = this.presence.get(msg.topic)
-    this.send(conn, {
-      topic: msg.topic,
-      event: 'presence_state',
-      payload: state ? Object.fromEntries(state) : {},
-      ref: null,
-    })
+    if (channel.presenceEnabled) {
+      const state = this.presence.get(msg.topic)
+      this.send(conn, {
+        topic: msg.topic,
+        event: 'presence_state',
+        payload: state ? Object.fromEntries(state) : {},
+        ref: null,
+      })
+    }
 
     // postgres_changes readiness signal (realtime-js listens for this)
     if (bindings.length > 0) {
@@ -938,7 +940,7 @@ export class RealtimeEngine {
 
   private handlePresence(conn: Connection, msg: PhoenixMessage): void {
     const channel = conn.channels.get(msg.topic)
-    if (!channel) return
+    if (!channel || !channel.presenceEnabled) return
     const event = String((msg.payload?.['event'] ?? '')).toLowerCase()
 
     if (event === 'track') {

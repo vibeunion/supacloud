@@ -1,6 +1,7 @@
 # Lite 单文件发行与 Rust Realtime 核心嵌入
 
-状态：第一、二阶段已落地（Rust core + `bun:ffi` 绑定 + standalone 资源管线 + `RealtimeEngine` 可选注入）。
+状态：第一、二阶段已落地（Rust core + `bun:ffi` 绑定 + standalone 资源管线 + `RealtimeEngine` 可选注入）；
+parity vectors、真实库 lifecycle 回归、跨目标嵌入与同步 FFI 压测已补全。
 默认仍使用 TypeScript Realtime 引擎；设置 `SUPACLOUD_LITE_REALTIME_CORE_MODE=rust`
 才启用 Rust core，且启用后缺失或校验失败会直接报错，不会静默回退。
 
@@ -148,8 +149,27 @@ SUPACLOUD_LITE_SKIP_REALTIME_CORE=1 bun run build:standalone:host
 3. 执行 `Bun.build({ compile })`，让库成为单文件内嵌资源。
 4. 在 `finally` 中恢复 `embedded-core.ts` 为 `null`，保持工作树干净。
 
-跨平台发行仍需为每个目标平台提供对应 cdylib；当前管线只自动嵌入 host 目标，
-跨目标构建需要预编译产物，避免在单一 CI runner 上隐式交叉编译。
+跨平台发行需要为每个目标 triple 提供对应 cdylib，暂存布局为
+`dist/native/<rust-triple>/<library>`。匹配 host 的目标会自动 cargo build，
+其他目标从暂存目录解析预编译产物：
+
+```bash
+# 在 macos-arm64 主机上为两个 macOS 目标准备 core
+bun run build:realtime-core --target x86_64-apple-darwin
+
+# 缺失跨目标 core 时构建失败；SUPACLOUD_LITE_SKIP_REALTIME_CORE=1 可显式跳过
+SUPACLOUD_LITE_REQUIRE_REALTIME_CORE=1 bun run build:standalone:macos
+```
+
+对应关系与暂存解析见 `packages/supacloud-lite/scripts/realtime-core-targets.ts`；
+`dist/native` 可用 `SUPACLOUD_LITE_REALTIME_CORE_DIR` 重定向。CI 通过
+`.github/workflows/lite-rust-core.yml` 的三平台矩阵（linux x64/arm64、macos
+x64/arm64、windows x64）在每个 OS 上构建匹配 triple 的 core 并以
+`REQUIRE=1` 打包 standalone，再用 rust core 模式跑 `gen types` 冒烟。
+
+`release-please.yml` 的 standalone 发布任务仍在单一 Linux runner 上构建全矩阵；
+跨目标在缺少暂存 core 时会告警并产出不含 core 的二进制（运行期 fail-closed）。
+正式发布跨目标单文件前需要把该任务拆到各 OS，或先暂存预编译 core。
 
 ### 5.1 运行时启用
 
@@ -187,11 +207,46 @@ new RealtimeEngine(db, jwtSecret, resolver, { core: opened.core })
 | `bun:ffi` 加载、ABI 校验、缓冲区释放、错误映射 | 已完成，5 个 Bun FFI 测试 |
 | SHA-256 校验、`0700` 临时解包、退出清理、fail-closed | 已完成 |
 | standalone 构建自动嵌入 host cdylib | 已完成 |
+| 跨目标构建消费暂存 cdylib（`dist/native/<triple>/`） | 已完成，5 个构建目标测试 |
 | `RealtimeEngine` 显式 `core` 注入点（默认关闭） | 已完成，7 个引擎集成测试 |
 | RLS 授权 effect、CDC 逐订阅者可见性、token 刷新同步 | 已完成 |
 | 环境变量灰度 `SUPACLOUD_LITE_REALTIME_CORE_MODE=rust` | 已完成 |
-| 全量 parity 向量与默认切换 | 未开始 |
+| TypeScript/Rust 全量 parity vectors | 已完成，29 个测试纳入 CI |
+| 真实 PGlite / native PostgreSQL lifecycle 回归 | 已完成，各 3 个测试纳入 CI |
+| 同步 FFI 压测脚本与 CI 守门 | 已完成 |
+| 默认切换 | 未开始，见压测结论 |
 | Postrust sidecar | 不在本阶段 |
+
+## 6.1 同步 FFI 压测
+
+`bun run benchmark:realtime-core` 用同一组 socket/帧分别压
+`core.call`（JSON 编码 → FFI → JSON 解码）、TS 引擎与 Rust 引擎端到端路径，
+并用 1ms `setInterval` 观测 Bun 事件循环被同步调用阻塞的时长。
+`--quick` 为 CI 守门，`--json --assert-max-lag <ms>` 可断言最大阻塞预算。
+数字是合成场景（无真实 socket I/O），作为回归护栏而不是生产 SLA。
+
+参考值：darwin-arm64（10 核）、Bun 1.4.5、release core、200 连接 / 200 次迭代。
+
+| 场景 | Rust core p50 | Rust core 最大事件循环阻塞 | TS 引擎 p50 |
+| --- | --- | --- | --- |
+| heartbeat | 0.01 ms | ~1 ms（timer 粒度） | - |
+| join + 50 bindings | 0.18 ms | ~1 ms | - |
+| broadcast 1 KiB × 200 | 0.87 ms | ~1.5 ms | 0.06 ms |
+| broadcast 64 KiB × 200 | 15.08 ms | 79.16 ms（阻塞占比 82%） | 1.88 ms |
+| broadcast 1 MiB × 20 | 23.09 ms | 48.39 ms（阻塞占比 88%） | 2.90 ms |
+| CDC 1 MiB × 20 | 30.24 ms | 288.37 ms（阻塞占比 93%） | 2.29 ms |
+| Rust 引擎端到端 64 KiB × 200 | 18.13 ms | 22.07 ms | 1.88 ms |
+| Rust 引擎端到端 1 MiB × 20 | 48.60 ms | 242.75 ms | 2.90 ms |
+| Rust 引擎端到端 CDC 1 MiB × 20 | 53.13 ms | 231.97 ms | 2.29 ms |
+
+结论：
+
+- 小 payload（≤1 KiB）下 Rust core 的同步调用无感知，协议一致性收益成立。
+- 大 fan-out / 大 payload 时，JSON 同步桥是主要成本：每次调用要把请求
+  JSON 化、在 Rust 侧复制并序列化整个响应、再在 Bun 侧解码和逐帧序列化，
+  p50 达到几十毫秒、长尾数百毫秒，期间 Bun 完全停摆。
+- 因此默认路径保持 TypeScript 引擎；切换默认前需要二进制或批量 FFI 协议，
+  或把大 fan-out 保留在 TS 路径并对 core 模式设置 payload/扇出上限。
 
 ## 7. 验收标准
 
@@ -218,8 +273,10 @@ Scenario: 资源缺失时失败关闭
 
 ## 8. 后续工作
 
-1. 用同一组 parity vectors 同时跑 TypeScript 引擎与 Rust core，并纳入 CI。
-2. 覆盖 `broadcast` effect 的跨实例持久化（当前 Lite 单进程无需）。
-3. 在真实 PGlite/native PostgreSQL 项目上跑长连接与断线重连回归。
-4. 通过开关灰度后，再决定是否设为默认路径。
-5. 评估 native 模式下 Postrust 作为可选 sidecar 的内嵌发行。
+1. `broadcast` effect 的跨实例持久化（当前 Lite 单进程无需）。
+2. 发布管线：`release-please.yml` 的 standalone 矩阵拆到各 OS（或暂存预编译 core），
+   让正式发行也默认携带跨目标嵌入 core。
+3. 大 payload 场景的二进制/批量 FFI 协议，消除 JSON 同步桥的编码/解码与复制成本。
+4. 真实 WebSocket 客户端的长时间 soak：断线重连风暴、presence 抖动、token 刷新并发。
+5. 灰度稳定后，再决定是否设为默认路径。
+6. 评估 native 模式下 Postrust 作为可选 sidecar 的内嵌发行。

@@ -37,6 +37,8 @@ struct Binding {
 #[derive(Debug, Clone)]
 struct Channel {
     join_ref: Option<String>,
+    /// Client ref of the latest join push, echoed on the join reply.
+    reference: Option<String>,
     private: bool,
     pending_authz: Option<String>,
     can_broadcast: bool,
@@ -51,6 +53,8 @@ struct Channel {
 struct Connection {
     vsn: Vsn,
     channels: HashMap<String, Channel>,
+    /// Join order, so disconnect-time presence leaves match the TypeScript engine.
+    channel_order: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -234,14 +238,20 @@ impl Session {
             .or_insert_with(|| Connection {
                 vsn: Vsn::V1,
                 channels: HashMap::new(),
+                channel_order: Vec::new(),
             })
+    }
+
+    fn take_channel(&mut self, connection_id: &str, topic: &str) -> Option<Channel> {
+        let conn = self.connections.get_mut(connection_id)?;
+        conn.channel_order.retain(|joined| joined != topic);
+        conn.channels.remove(topic)
     }
 
     fn on_frame(&mut self, connection_id: &str, raw: Value) -> Result<Outcome, String> {
         let frame = Frame::from_value(raw).map_err(|e: FrameError| e.to_string())?;
         let vsn = frame.vsn;
         self.connection_mut(connection_id).vsn = vsn;
-        let topic = frame.topic.clone();
         let mut out = Outcome::default();
 
         match frame.event.as_str() {
@@ -270,20 +280,8 @@ impl Session {
                 Ok(out)
             }
             "access_token" => Ok(out),
-            other => {
-                out.frames.push(OutgoingFrame {
-                    connection_id: connection_id.to_string(),
-                    frame: Frame::error(
-                        vsn,
-                        frame.join_ref,
-                        frame.reference,
-                        topic,
-                        &format!("unsupported event: {other}"),
-                    )
-                    .encode(vsn),
-                });
-                Ok(out)
-            }
+            // Unknown events are ignored, exactly like the TypeScript engine.
+            _ => Ok(out),
         }
     }
 
@@ -335,6 +333,7 @@ impl Session {
 
         let channel = Channel {
             join_ref: frame.join_ref.clone(),
+            reference: frame.reference.clone(),
             private,
             pending_authz: request_id.clone(),
             can_broadcast: !private,
@@ -344,9 +343,11 @@ impl Session {
             presence_key,
             bindings,
         };
-        self.connection_mut(connection_id)
-            .channels
-            .insert(topic.clone(), channel);
+        let conn = self.connection_mut(connection_id);
+        if !conn.channel_order.iter().any(|joined| joined == &topic) {
+            conn.channel_order.push(topic.clone());
+        }
+        conn.channels.insert(topic.clone(), channel);
 
         if let Some(request_id) = request_id {
             out.effects.push(Effect::Authorize {
@@ -401,7 +402,7 @@ impl Session {
     }
 
     fn send_join_ok(&mut self, connection_id: &str, topic: &str, out: &mut Outcome) {
-        let (vsn, join_ref, bindings, presence_enabled) = {
+        let (vsn, join_ref, reference, bindings, presence_enabled) = {
             let Some(conn) = self.connections.get(connection_id) else {
                 return;
             };
@@ -423,7 +424,13 @@ impl Session {
                     Value::Object(map)
                 })
                 .collect::<Vec<_>>();
-            (conn.vsn, ch.join_ref.clone(), bindings, ch.presence_enabled)
+            (
+                conn.vsn,
+                ch.join_ref.clone(),
+                ch.reference.clone(),
+                bindings,
+                ch.presence_enabled,
+            )
         };
 
         out.frames.push(OutgoingFrame {
@@ -431,7 +438,7 @@ impl Session {
             frame: Frame::ok(
                 vsn,
                 join_ref,
-                None,
+                reference,
                 topic,
                 json!({ "postgres_changes": bindings }),
             )
@@ -467,20 +474,15 @@ impl Session {
 
         if !read {
             let vsn = self.connections[connection_id].vsn;
-            let join_ref = self.connections[connection_id].channels[&topic]
-                .join_ref
-                .clone();
-            self.connections
-                .get_mut(connection_id)
-                .unwrap()
-                .channels
-                .remove(&topic);
+            let channel = &self.connections[connection_id].channels[&topic];
+            let (join_ref, reference) = (channel.join_ref.clone(), channel.reference.clone());
+            self.take_channel(connection_id, &topic);
             out.frames.push(OutgoingFrame {
                 connection_id: connection_id.to_string(),
                 frame: Frame::error(
                     vsn,
                     join_ref,
-                    None,
+                    reference,
                     topic,
                     reason.as_deref().unwrap_or("Unauthorized"),
                 )
@@ -530,9 +532,7 @@ impl Session {
         let vsn = frame.vsn;
         let topic = frame.topic.clone();
         let removed = self
-            .connections
-            .get_mut(connection_id)
-            .and_then(|c| c.channels.remove(&topic));
+            .take_channel(connection_id, &topic);
         if removed.is_some() {
             self.broadcast_presence_leave(&topic, connection_id, out);
         }
@@ -562,29 +562,21 @@ impl Session {
                     ch.broadcast_ack,
                     ch.broadcast_self,
                 ),
-                None => {
-                    out.frames.push(OutgoingFrame {
-                        connection_id: connection_id.to_string(),
-                        frame: Frame::error(
-                            vsn,
-                            frame.join_ref,
-                            frame.reference,
-                            topic,
-                            "Not joined",
-                        )
-                        .encode(vsn),
-                    });
-                    return Ok(());
-                }
+                // Phoenix drops messages for topics without a joined channel.
+                None => return Ok(()),
             }
         };
 
         if private && !can_broadcast {
-            out.frames.push(OutgoingFrame {
-                connection_id: connection_id.to_string(),
-                frame: Frame::error(vsn, frame.join_ref, frame.reference, topic, "Unauthorized")
-                    .encode(vsn),
-            });
+            // Match the TypeScript engine: only an acked broadcast with a ref
+            // gets an error reply, and the reason is the lowercase "unauthorized".
+            if ack && frame.reference.is_some() {
+                out.frames.push(OutgoingFrame {
+                    connection_id: connection_id.to_string(),
+                    frame: Frame::error(vsn, frame.join_ref, frame.reference, topic, "unauthorized")
+                        .encode(vsn),
+                });
+            }
             return Ok(());
         }
 
@@ -761,10 +753,19 @@ impl Session {
 
     fn on_disconnect(&mut self, connection_id: &str) -> Result<Outcome, String> {
         let mut out = Outcome::default();
-        if self.connections.remove(connection_id).is_none() {
+        let Some(conn) = self.connections.remove(connection_id) else {
             return Ok(out);
+        };
+        let mut diffs = Vec::new();
+        for topic in &conn.channel_order {
+            if let Some(diff) = self.presence.untrack(topic, connection_id) {
+                if !diff.is_empty() {
+                    diffs.push((topic.clone(), diff));
+                }
+            }
         }
-        for (topic, diff) in self.presence.untrack_all(connection_id) {
+        diffs.extend(self.presence.untrack_all(connection_id));
+        for (topic, diff) in diffs {
             let diff_value = json!({ "joins": diff.joins, "leaves": diff.leaves });
             self.fan_out_presence(&topic, "presence_diff", diff_value, &mut out);
         }

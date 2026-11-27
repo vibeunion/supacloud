@@ -46,6 +46,12 @@ impl PresenceManager {
         let resolved = key.unwrap_or_else(|| derive_key(connection_id, &payload));
         let connection_key = (topic.to_string(), connection_id.to_string());
         let previous = self.by_connection.remove(&connection_key).unwrap_or_default();
+        // Retracking mirrors the TypeScript engine: the new join meta points
+        // back at the meta it replaces for the same presence key.
+        let previous_ref = previous
+            .iter()
+            .find(|(old_key, _)| old_key == &resolved)
+            .map(|(_, old_meta)| old_meta.phx_ref.clone());
         let mut leaves_by_key: HashMap<String, Vec<Value>> = HashMap::new();
 
         if let Some(topic_map) = self.by_topic.get_mut(topic) {
@@ -73,6 +79,9 @@ impl PresenceManager {
             _ => Map::new(),
         };
         meta.insert("phx_ref".into(), Value::String(phx_ref.clone()));
+        if let Some(previous_ref) = previous_ref {
+            meta.insert("phx_ref_prev".into(), Value::String(previous_ref));
+        }
         let meta_value = Value::Object(meta);
 
         let entry = PresenceMeta {
@@ -142,6 +151,8 @@ impl PresenceManager {
             .filter(|(_, conn)| conn == connection_id)
             .map(|(topic, _)| topic.clone())
             .collect();
+        let mut topics = topics;
+        topics.sort();
 
         let mut diffs = Vec::new();
         for topic in topics {
@@ -226,6 +237,7 @@ mod tests {
         assert_eq!(manager.state("t")["u"]["metas"][0]["name"], json!("grace"));
         assert_eq!(diff.leaves["u"]["metas"][0]["name"], json!("ada"));
         assert_eq!(diff.joins["u"]["metas"][0]["name"], json!("grace"));
+        assert_eq!(diff.joins["u"]["metas"][0]["phx_ref_prev"], json!("F1"));
     }
 
     #[test]

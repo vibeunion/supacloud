@@ -1,0 +1,244 @@
+name: SupaCloud Lite Rust Realtime core
+
+# Rust protocol core, bun:ffi bridge, TypeScript/Rust parity vectors,
+# lifecycle regression against real databases, per-target standalone
+# embedding and the synchronous FFI benchmark. The TypeScript engine stays
+# the default; every Rust path exercised here is opt-in.
+
+on:
+  pull_request:
+    paths:
+      - "crates/realtime-core/**"
+      - "packages/supacloud-lite/src/runtime/realtime/**"
+      - "packages/supacloud-lite/src/project-runtime.ts"
+      - "packages/supacloud-lite/src/standalone.ts"
+      - "packages/supacloud-lite/scripts/build-realtime-core.ts"
+      - "packages/supacloud-lite/scripts/build-standalone.ts"
+      - "packages/supacloud-lite/scripts/realtime-core-targets.ts"
+      - "packages/supacloud-lite/scripts/benchmark-realtime-core.ts"
+      - "packages/supacloud-lite/test/realtime-core-*.test.ts"
+      - "packages/supacloud-lite/package.json"
+      - "packages/supacloud-lite/bun.lock"
+      - ".github/workflows/lite-rust-core.yml"
+  push:
+    branches: ["main"]
+    paths:
+      - "crates/realtime-core/**"
+      - "packages/supacloud-lite/src/runtime/realtime/**"
+      - "packages/supacloud-lite/src/project-runtime.ts"
+      - "packages/supacloud-lite/src/standalone.ts"
+      - "packages/supacloud-lite/scripts/build-realtime-core.ts"
+      - "packages/supacloud-lite/scripts/build-standalone.ts"
+      - "packages/supacloud-lite/scripts/realtime-core-targets.ts"
+      - "packages/supacloud-lite/scripts/benchmark-realtime-core.ts"
+      - "packages/supacloud-lite/test/realtime-core-*.test.ts"
+      - "packages/supacloud-lite/package.json"
+      - "packages/supacloud-lite/bun.lock"
+      - ".github/workflows/lite-rust-core.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lite-rust-core-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUN_VERSION: "1.4.4"
+
+jobs:
+  rust:
+    name: Rust core tests and clippy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: cargo test
+        run: cargo test --manifest-path crates/realtime-core/Cargo.toml
+      - name: cargo clippy
+        run: cargo clippy --manifest-path crates/realtime-core/Cargo.toml --all-targets -- -D warnings
+
+  parity:
+    name: Bun FFI, engine and TS/Rust parity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Prepare workspace dependencies
+        working-directory: packages/supacloud-lite
+        run: bun run ../../scripts/build-command-dependencies.ts supacloud-lite
+      - name: Install dependencies
+        working-directory: packages/supacloud-lite
+        run: bun install --frozen-lockfile
+      - name: Build the Realtime core
+        working-directory: packages/supacloud-lite
+        run: bun run build:realtime-core
+      # The native test suites skip silently when no library is present, so the
+      # artifact itself is part of the gate.
+      - name: Assert the core artifact exists
+        run: test -f crates/realtime-core/target/release/libsupacloud_realtime_core.so
+      - name: FFI, engine and build-target tests
+        working-directory: packages/supacloud-lite
+        run: bun test test/realtime-core-ffi.test.ts test/realtime-core-engine.test.ts test/realtime-core-targets.test.ts --timeout 120000
+      - name: TypeScript/Rust parity vectors
+        working-directory: packages/supacloud-lite
+        run: bun run parity:realtime-core
+
+  lifecycle:
+    name: Lifecycle regression (native PostgreSQL ${{ matrix.native && 'on' || 'off' }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        native: [false, true]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Prepare workspace dependencies
+        working-directory: packages/supacloud-lite
+        run: bun run ../../scripts/build-command-dependencies.ts supacloud-lite
+      - name: Install dependencies
+        working-directory: packages/supacloud-lite
+        run: bun install --frozen-lockfile
+      - name: Build the Realtime core
+        working-directory: packages/supacloud-lite
+        run: bun run build:realtime-core
+      - name: Cache embedded PostgreSQL binaries
+        if: matrix.native
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/supacloud-lite
+          key: ${{ runner.os }}-lite-native-postgres-${{ hashFiles('packages/supacloud-lite/src/runtime/node/native/engine.ts') }}
+      - name: Run lifecycle regression
+        working-directory: packages/supacloud-lite
+        env:
+          SUPACLOUD_LITE_TEST_NATIVE: ${{ matrix.native && '1' || '' }}
+        run: bun test test/realtime-core-lifecycle.test.ts --timeout 180000
+
+  standalone:
+    name: Standalone with embedded core (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux
+            rust-targets: x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu
+            build-script: build:standalone:linux
+            extension: ""
+          - os: macos-15
+            platform: macos
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            build-script: build:standalone:macos
+            extension: ""
+          - os: windows-2025
+            platform: windows
+            rust-targets: x86_64-pc-windows-msvc
+            build-script: build:standalone:windows
+            extension: ".exe"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+      - name: Install the Linux arm64 cross linker
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Prepare workspace dependencies
+        working-directory: packages/supacloud-lite
+        run: bun run ../../scripts/build-command-dependencies.ts supacloud-lite
+      - name: Install dependencies
+        working-directory: packages/supacloud-lite
+        run: bun install --frozen-lockfile
+      # Each target needs a cdylib built for its own Rust triple. Linux arm64
+      # is cross-compiled with the GNU linker; macOS x64 builds from the arm64
+      # runner with the universal Apple toolchain.
+      - name: Stage the Realtime core for every target
+        working-directory: packages/supacloud-lite
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: |
+          IFS=',' read -ra targets <<< "${{ matrix.rust-targets }}"
+          for target in "${targets[@]}"; do
+            bun run build:realtime-core --target "$target"
+          done
+      - name: Build standalone binaries with the core embedded
+        working-directory: packages/supacloud-lite
+        env:
+          SUPACLOUD_LITE_REQUIRE_REALTIME_CORE: "1"
+        run: bun run ${{ matrix.build-script }}
+      - name: The embedded module must be reset after the build
+        run: git diff --exit-code -- packages/supacloud-lite/src/runtime/realtime/embedded-core.ts
+      - name: Smoke the host-architecture binary with the Rust core enabled
+        working-directory: packages/supacloud-lite
+        env:
+          SUPACLOUD_LITE_REALTIME_CORE_MODE: rust
+        run: |
+          case "$(uname -m)" in
+            arm64|aarch64) arch=arm64 ;;
+            *) arch=x64 ;;
+          esac
+          binary="$GITHUB_WORKSPACE/packages/supacloud-lite/dist/standalone/supacloud-lite-${{ matrix.platform }}-${arch}${{ matrix.extension }}"
+          test -x "$binary"
+          smoke_dir=$(mktemp -d)
+          cd "$smoke_dir"
+          "$binary" gen types --output types.ts
+          test -s types.ts
+      - uses: actions/upload-artifact@v7
+        with:
+          name: supacloud-lite-rust-core-${{ matrix.platform }}
+          path: packages/supacloud-lite/dist/standalone/*
+          if-no-files-found: error
+
+  benchmark:
+    name: Synchronous FFI benchmark guard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Prepare workspace dependencies
+        working-directory: packages/supacloud-lite
+        run: bun run ../../scripts/build-command-dependencies.ts supacloud-lite
+      - name: Install dependencies
+        working-directory: packages/supacloud-lite
+        run: bun install --frozen-lockfile
+      - name: Build the Realtime core
+        working-directory: packages/supacloud-lite
+        run: bun run build:realtime-core
+      # A coarse guard against gross regressions of the sync JSON bridge; the
+      # recorded baseline lives in docs/lite-single-file-rust-core.md and the
+      # report artifact is the number that matters.
+      - name: Benchmark (quick, event loop lag budget)
+        working-directory: packages/supacloud-lite
+        run: bun run benchmark:realtime-core --quick --json --assert-max-lag 1500 > realtime-core-benchmark.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: supacloud-lite-realtime-core-benchmark
+          path: packages/supacloud-lite/realtime-core-benchmark.json
+          if-no-files-found: error
