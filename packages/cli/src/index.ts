@@ -64,7 +64,7 @@ interface ProjectStatusChecks {
     configuration: { ok: boolean; missing: string[] };
     connectivity: { ok: boolean | null; reachable: boolean | null; httpStatus: number | null; error: string | null };
     authentication: { ok: boolean | null; httpStatus: number | null };
-    project: { ok: boolean | null };
+    project: { ok: boolean | null; error: string | null };
 }
 
 interface ProjectStatusProbePlan {
@@ -117,9 +117,25 @@ function missingProjectContextFields(context: ResolvedContext): string[] {
     ].filter((field): field is string => Boolean(field));
 }
 
-function authenticatedByProbe(authentication: EndpointProbe | null): boolean | null {
+function authenticatedByProbe(
+    scope: ContextCredentialScope,
+    authentication: EndpointProbe | null,
+): boolean | null {
     if (!authentication) return null;
-    return authentication.reachable && authentication.ok;
+    if (!authentication.reachable) return false;
+    if (authentication.ok) return true;
+    if (scope !== "project_application" && authentication.httpStatus === 404) return null;
+    return false;
+}
+
+function projectProbeError(
+    scope: ContextCredentialScope,
+    authentication: EndpointProbe | null,
+): string | null {
+    if (!authentication?.reachable || authentication.ok) return null;
+    if (scope !== "project_application" && authentication.httpStatus === 404) return "project_not_found";
+    if ([401, 403].includes(authentication.httpStatus ?? 0)) return "authentication_rejected";
+    return "project_unavailable";
 }
 
 function connectivityProbeIsHealthy(
@@ -160,6 +176,7 @@ function projectStatusProbePlan(context: ResolvedContext): ProjectStatusProbePla
 }
 
 function projectStatusChecks(
+    scope: ContextCredentialScope,
     missing: string[],
     connectivity: EndpointProbe | null,
     authentication: EndpointProbe | null,
@@ -173,8 +190,14 @@ function projectStatusChecks(
             httpStatus: connectivity?.httpStatus ?? null,
             error: connectivity?.error ?? null,
         },
-        authentication: { ok: authenticatedByProbe(authentication), httpStatus: authentication?.httpStatus ?? null },
-        project: { ok: authentication?.ok ?? null },
+        authentication: {
+            ok: authenticatedByProbe(scope, authentication),
+            httpStatus: authentication?.httpStatus ?? null,
+        },
+        project: {
+            ok: authentication?.ok ?? null,
+            error: projectProbeError(scope, authentication),
+        },
     };
 }
 
@@ -192,7 +215,7 @@ async function collectProjectStatusChecks(context: ResolvedContext): Promise<Pro
             context.insecureTls,
         )
         : null;
-    return projectStatusChecks(missing, connectivity, authentication, connectivityOk);
+    return projectStatusChecks(context.credentialScope, missing, connectivity, authentication, connectivityOk);
 }
 
 function projectStatusIsHealthy(checks: ProjectStatusChecks): boolean {

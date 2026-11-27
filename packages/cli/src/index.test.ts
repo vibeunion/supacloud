@@ -3156,8 +3156,41 @@ describe("supacloud process contract", () => {
         expect(status.checks.configuration.ok).toBe(true);
         expect(status.checks.connectivity.ok).toBe(true);
         expect(status.checks.authentication.ok).toBe(authenticated);
+        expect(status.checks.project).toEqual({
+            ok: authenticated,
+            error: authenticated ? null : "authentication_rejected",
+        });
         expect(requestedPaths).toEqual(["/health", "/v1/projects/abc123/health"]);
         expect(authorizationHeaders).toEqual([null, "Bearer test-token"]);
+    });
+
+    test("status reports an unknown project instead of an authentication failure", async () => {
+        const requestedPaths: string[] = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                const path = new URL(request.url).pathname;
+                requestedPaths.push(path);
+                if (path === "/health") return Response.json({ status: "ok" });
+                return Response.json({ message: "Project not found", code: "404" }, { status: 404 });
+            },
+        });
+        servers.push(server);
+
+        const result = await runProjectCli(["status"], {
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "test-token",
+            SUPACLOUD_PROJECT_REF: "missing-project",
+        });
+        const status = JSON.parse(result.stdout);
+
+        expect(result.exitCode).toBe(1);
+        expect(status.checks.connectivity).toMatchObject({ ok: true, httpStatus: 200 });
+        expect(status.checks.authentication).toEqual({ ok: null, httpStatus: 404 });
+        expect(status.checks.project).toEqual({ ok: false, error: "project_not_found" });
+        expect(requestedPaths).toEqual(["/health", "/v1/projects/missing-project/health"]);
+        expect(result.stdout + result.stderr).not.toContain("test-token");
     });
 
     test("status reports an unreachable Management API without attempting authentication", async () => {
