@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.142.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.141.2...management-api-v0.142.0) (2026-11-27)
+
+
+### Features
+
+* **image:** add imgproxy-compatible native image service ([#2840](https://github.com/vibeunion/supacloud/issues/2840)) ([d977846](https://github.com/vibeunion/supacloud/commit/d977846f2f88bed9b769ada04e3c184bc7bbdebb))
+
 ## [0.141.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.141.1...management-api-v0.141.2) (2026-11-26)
 
 
