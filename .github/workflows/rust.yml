@@ -1,10 +1,10 @@
 name: Rust Services
 
-# The four crates under crates/ are independent packages with their own lock
+# The crates under crates/ are independent packages with their own lock
 # files and their own deployment scripts, and until now nothing built them
 # automatically: scripts/build_supacloud_*.sh and install.sh were the only
-# callers. That let two committed lock files drift from their manifests, so
-# `cargo build --locked` failed in image-service and realtime-gateway. This job
+# callers. That let committed lock files drift from their manifests, so
+# `cargo build --locked` failed in realtime-gateway. This job
 # makes format, lints, tests and lock-file consistency a gate instead of a
 # convention.
 #
@@ -17,7 +17,6 @@ on:
     paths:
       - "crates/**"
       - "rust-toolchain.toml"
-      - "scripts/build_supacloud_image.sh"
       - "scripts/build_supacloud_jit_gateway.sh"
       - "scripts/build_supacloud_realtime_gateway.sh"
       - ".github/workflows/rust.yml"
@@ -49,7 +48,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        crate: [runtime-core, image-service, jit-gateway, realtime-gateway]
+        crate: [runtime-core, jit-gateway, realtime-gateway]
 
     steps:
       - name: Checkout code
