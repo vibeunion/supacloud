@@ -161,6 +161,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rust-targets }}
+      # rust-toolchain.toml pins the exact toolchain cargo will use; the
+      # targets must be installed into that pinned toolchain, not stable.
+      - name: Install targets for the pinned Rust toolchain
+        run: |
+          rustup toolchain install
+          rustup target add ${{ matrix.rust-targets }}
       - name: Install the Linux arm64 cross linker
         if: runner.os == 'Linux'
         run: |

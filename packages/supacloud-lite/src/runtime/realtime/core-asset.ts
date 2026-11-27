@@ -83,7 +83,19 @@ async function extractEmbedded(
     await chmod(destination, 0o700)
     return {
       path: destination,
-      cleanup: () => rm(directory, { recursive: true, force: true }),
+      cleanup: async () => {
+        try {
+          await rm(directory, { recursive: true, force: true })
+        } catch (error) {
+          // Windows keeps a loaded DLL mapped until process exit, so the
+          // freshly extracted directory stays locked. Cleanup is best effort
+          // there, matching the exit hook: a later start reclaims stale dirs.
+          const code = (error as NodeJS.ErrnoException).code
+          if (process.platform !== 'win32' || (code !== 'EPERM' && code !== 'EBUSY')) {
+            throw error
+          }
+        }
+      },
     }
   } catch (error) {
     await rm(directory, { recursive: true, force: true })
