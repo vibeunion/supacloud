@@ -23,6 +23,10 @@ use std::slice;
 use std::sync::Mutex;
 
 /// Bumped whenever the ABI or the JSON command/response schema changes.
+///
+/// Optional request fields an older core simply ignores (and that only affect
+/// performance, not behaviour) do not need a bump; `record_ref` is one, so a
+/// staged core from before it still produces correct frames, just slower.
 pub const ABI_VERSION: u32 = 1;
 
 /// Owned byte buffer returned to the host. Must be released with
