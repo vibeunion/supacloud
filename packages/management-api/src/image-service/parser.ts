@@ -9,6 +9,8 @@ const TARGET_FORMATS: Record<string, TargetFormat> = {
     bmp: "bmp",
     tiff: "tiff",
     tif: "tiff",
+    gif: "gif",
+    ico: "ico",
 };
 
 const NAMED_COLORS: Record<string, string> = {

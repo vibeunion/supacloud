@@ -1,8 +1,12 @@
-import { ImageEngineError, processImage } from "../engine";
+import { createHash } from "node:crypto";
+import { decodeImage, ImageEngineError, processImage } from "../engine";
+import { detectMediaKind, MediaDependencyError, renderPdfPage, renderVideoFrame } from "../media";
+import { cacheEtag, cacheMatches, createImageCacheKey, ImageResultCache } from "../cache";
 import type { ProcessedImage, TargetFormat, TransformOptions } from "../types";
 import { getImgproxyConfig, type ImgproxyConfig } from "./config";
 import { ImgproxyError } from "./errors";
 import { buildInfoJson } from "./info";
+import { detectObjects, drawDetectionBoxes, withOnnxTimeout } from "./onnx";
 import {
     createInfoRequest,
     parseInfoOptions,
@@ -65,38 +69,121 @@ export async function handleImgproxyRequest(request: Request, url: URL): Promise
             throw new ImgproxyError("Expired URL", 404);
         }
 
-        const source = await resolveSource(parsed.source, imgproxyRequest, config);
+        let source = await resolveSource(parsed.source, imgproxyRequest, config);
         if (imgproxyRequest.raw) {
             return rawResponse(source, imgproxyRequest, config, headers);
         }
         if (!source.bytes) {
             throw new ImgproxyError("Source image has no bytes", 422);
         }
+        const mediaKind = detectMediaKind(source.bytes, parsed.source.extension, source.contentType);
+        if (imgproxyRequest.pdfPage !== undefined && mediaKind !== "pdf") {
+            throw new ImgproxyError("page requires a PDF source", 422);
+        }
+        if (mediaKind === "pdf") {
+            source = {
+                ...source,
+                bytes: await renderPdfPage(source.bytes, imgproxyRequest.pdfPage ?? 1, config),
+                contentType: "image/png",
+            };
+        } else if (mediaKind === "video") {
+            source = {
+                ...source,
+                bytes: await renderVideoFrame(source.bytes, imgproxyRequest.videoThumbnailSecond ?? 0, config),
+                contentType: "image/png",
+            };
+        }
+        if (imgproxyRequest.videoThumbnailSecond !== undefined && mediaKind !== "video") {
+            throw new ImgproxyError("video_thumbnail_second requires a video source", 422);
+        }
+        const sourceBytes = source.bytes;
+        if (!sourceBytes) {
+            throw new ImgproxyError("Source image has no bytes", 422);
+        }
+        const cache = new ImageResultCache({
+            directory: config.resultCacheDir,
+            ttlSeconds: config.resultCacheTtlSeconds,
+            maxBytes: config.resultCacheMaxBytes,
+            maxEntries: config.resultCacheMaxEntries,
+        });
+        const sourceDigest = createHash("sha256").update(sourceBytes).digest("hex");
+        const cacheKey = createImageCacheKey([
+            "image-service-v1",
+            parsed.info ? "info" : "image",
+            parsed.signedPath,
+            source.url,
+            sourceDigest,
+            request.headers.get("accept") ?? "",
+            config.onnxEnabled ? "onnx:enabled" : "onnx:disabled",
+            config.onnxDetectionModel,
+            config.onnxClassificationModel,
+            config.onnxLabelsPath,
+            String(config.onnxThreads),
+            String(config.onnxConfidenceThreshold),
+            String(config.onnxDetectionInputWidth),
+            String(config.onnxDetectionInputHeight),
+            String(config.onnxClassificationInputWidth),
+            String(config.onnxClassificationInputHeight),
+        ]);
+        const cached = await cache.get(cacheKey);
+        if (cached) {
+            return cachedResponse(
+                cached.bytes,
+                cached.contentType,
+                cached.etag,
+                request,
+                imgproxyRequest,
+                config,
+                headers,
+            );
+        }
 
         if (parsed.info) {
-            const json = buildInfoJson(
-                source.bytes,
+            const json = await buildInfoJson(
+                sourceBytes,
                 source.size,
                 imgproxyRequest.infoOptions,
                 imgproxyRequest.maxSrcResolution > 0
                     ? Math.round(imgproxyRequest.maxSrcResolution * 1_000_000)
                     : 0,
+                config,
             );
             const infoHeaders = new Headers(headers);
             infoHeaders.set("Content-Type", "application/json; charset=utf-8");
             infoHeaders.set("Cache-Control", config.cacheControl);
-            return new Response(json, { status: 200, headers: infoHeaders });
+            const bytes = new TextEncoder().encode(json);
+            const etag = cacheEtag(bytes);
+            await cache.set(cacheKey, { bytes, contentType: "application/json; charset=utf-8", etag });
+            if (cacheMatches(request, etag)) {
+                infoHeaders.set("ETag", etag);
+                return new Response(null, { status: 304, headers: infoHeaders });
+            }
+            infoHeaders.set("ETag", etag);
+            return new Response(bytes, { status: 200, headers: infoHeaders });
         }
 
         if (shouldSkipProcessing(imgproxyRequest, source)) {
-            return imageResponse(
-                source.bytes,
+            return await imageResponse(
+                sourceBytes,
                 source.contentType ?? "application/octet-stream",
                 imgproxyRequest,
                 config,
                 headers,
                 source.size,
+                cache,
+                cacheKey,
+                request,
             );
+        }
+
+        let processingBytes = sourceBytes;
+        if (imgproxyRequest.transform.drawDetections) {
+            const detections = await withOnnxTimeout(
+                detectObjects(sourceBytes, config),
+                config.onnxTimeoutMs,
+            );
+            const decoded = decodeImage(sourceBytes, undefined, imgproxyRequest.transform.maxSourcePixels);
+            processingBytes = new Uint8Array(drawDetectionBoxes(decoded.transformer, detections).pngSync());
         }
 
         let watermarkImage: Uint8Array | undefined;
@@ -107,7 +194,7 @@ export async function handleImgproxyRequest(request: Request, url: URL): Promise
 
         const result = await processWithFormat(
             imgproxyRequest,
-            source.bytes,
+            processingBytes,
             watermarkImage,
             request.headers.get("accept"),
             source.contentType,
@@ -117,7 +204,17 @@ export async function handleImgproxyRequest(request: Request, url: URL): Promise
         responseHeaders.set("Cache-Control", config.cacheControl);
         if (result.varyAccept) responseHeaders.set("Vary", "Accept");
         setContentDisposition(responseHeaders, imgproxyRequest, result.result.contentType);
+        const etag = cacheEtag(result.result.bytes);
+        await cache.set(cacheKey, {
+            bytes: result.result.bytes,
+            contentType: result.result.contentType,
+            etag,
+        });
         responseHeaders.set("Content-Length", String(result.result.bytes.byteLength));
+        responseHeaders.set("ETag", etag);
+        if (cacheMatches(request, etag)) {
+            return new Response(null, { status: 304, headers: responseHeaders });
+        }
         if (request.method === "HEAD") {
             return new Response(null, { status: 200, headers: responseHeaders });
         }
@@ -273,7 +370,8 @@ function hasTransformOptions(options: TransformOptions): boolean {
         || options.minHeight !== undefined
         || Boolean(options.autoQuality)
         || options.maxBytes !== undefined
-        || Boolean(options.formatQuality);
+        || Boolean(options.formatQuality)
+        || Boolean(options.drawDetections);
 }
 
 function rawResponse(
@@ -296,19 +394,54 @@ function rawResponse(
     return new Response(blobFromBytes(source.bytes), { status: 200, headers });
 }
 
-function imageResponse(
+async function imageResponse(
     bytes: Uint8Array,
     contentType: string,
-    request: ImgproxyRequest,
+    imgproxyRequest: ImgproxyRequest,
     config: ImgproxyConfig,
     baseHeaders: Headers,
     size?: number,
+    cache?: ImageResultCache,
+    cacheKey?: string,
+    httpRequest?: Request,
+): Promise<Response> {
+    const headers = new Headers(baseHeaders);
+    headers.set("Content-Type", contentType);
+    headers.set("Cache-Control", config.cacheControl);
+    const etag = cacheEtag(bytes);
+    headers.set("Content-Length", String(size ?? bytes.byteLength));
+    headers.set("ETag", etag);
+    setContentDisposition(headers, imgproxyRequest, contentType);
+    if (cache && cacheKey) {
+        await cache.set(cacheKey, { bytes, contentType, etag });
+    }
+    if (httpRequest && cacheMatches(httpRequest, etag)) {
+        return new Response(null, { status: 304, headers });
+    }
+    if (httpRequest?.method === "HEAD") {
+        return new Response(null, { status: 200, headers });
+    }
+    return new Response(blobFromBytes(bytes), { status: 200, headers });
+}
+
+function cachedResponse(
+    bytes: Uint8Array,
+    contentType: string,
+    etag: string,
+    request: Request,
+    imgproxyRequest: ImgproxyRequest,
+    config: ImgproxyConfig,
+    baseHeaders: Headers,
 ): Response {
     const headers = new Headers(baseHeaders);
     headers.set("Content-Type", contentType);
     headers.set("Cache-Control", config.cacheControl);
-    if (size !== undefined) headers.set("Content-Length", String(size));
-    setContentDisposition(headers, request, contentType);
+    headers.set("Content-Length", String(bytes.byteLength));
+    headers.set("ETag", etag);
+    setContentDisposition(headers, imgproxyRequest, contentType);
+    if (request.method === "HEAD" || cacheMatches(request, etag)) {
+        return new Response(null, { status: cacheMatches(request, etag) ? 304 : 200, headers });
+    }
     return new Response(blobFromBytes(bytes), { status: 200, headers });
 }
 
@@ -352,6 +485,9 @@ async function fallbackOrError(
     }
 
     if (!(error instanceof ImgproxyError) && !(error instanceof ImageEngineError)) {
+        if (error instanceof MediaDependencyError) {
+            return errorResponse(error, headers);
+        }
         console.error("[image-service] imgproxy processing error:", error);
         return errorResponse(new ImgproxyError("Internal image processing error", 500), headers);
     }
@@ -359,7 +495,7 @@ async function fallbackOrError(
 }
 
 function errorResponse(error: unknown, baseHeaders: Headers): Response {
-    const status = error instanceof ImgproxyError || error instanceof ImageEngineError
+    const status = error instanceof ImgproxyError || error instanceof ImageEngineError || error instanceof MediaDependencyError
         ? error.status
         : 500;
     const message = error instanceof Error ? error.message : "Internal image processing error";

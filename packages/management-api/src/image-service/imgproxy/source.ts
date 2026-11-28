@@ -4,6 +4,7 @@ import { readFile, stat } from "node:fs/promises";
 import { isIP } from "node:net";
 import path from "node:path";
 import { MAX_PAYLOAD_BYTES } from "../engine";
+import { fetchCloudSource } from "./cloud-source";
 import type { ImgproxyConfig } from "./config";
 import { ImgproxyError } from "./errors";
 import type { Hashsum, ImgproxyRequest } from "./options";
@@ -51,7 +52,7 @@ export async function resolveSource(
         return { bytes, url, size: bytes.byteLength };
     }
 
-    if (!/^https?:\/\//i.test(url)) {
+    if (!/^https?:\/\//i.test(url) && !/^(?:s3|gs|gcs|az|azure|swift):\/\//i.test(url)) {
         let protocol = "unknown";
         try {
             protocol = new URL(url).protocol;
@@ -61,7 +62,6 @@ export async function resolveSource(
         throw new ImgproxyError(`Unsupported source URL scheme: ${protocol}`, 400);
     }
 
-    await assertSafeRemoteUrl(url, config);
     const fetched = await fetchWithRedirects(url, config);
     const { response, url: finalUrl } = fetched;
 
@@ -334,10 +334,24 @@ function isPrivateAddress(address: string): boolean {
 async function fetchWithRedirects(url: string, config: ImgproxyConfig): Promise<RedirectFetch> {
     let current = url;
     for (let redirect = 0; redirect < 5; redirect += 1) {
+        const signal = AbortSignal.timeout(config.timeoutMs);
+        const cloud = await fetchCloudSource(current, config, signal);
+        if (cloud) {
+            const response = cloud.response;
+            if (response.status >= 300 && response.status < 400) {
+                const location = response.headers.get("location");
+                if (!location) {
+                    throw new ImgproxyError("Source image redirect has no Location header", 422);
+                }
+                current = new URL(location, current).toString();
+                continue;
+            }
+            return { response, url: cloud.url };
+        }
         await assertSafeRemoteUrl(current, config);
         const response = await fetch(current, {
             redirect: "manual",
-            signal: AbortSignal.timeout(config.timeoutMs),
+            signal,
             headers: {
                 "User-Agent": "SupaCloud-Image/1.0 (+https://github.com/vibeunion/supacloud)",
                 Accept: "image/*,*/*;q=0.8",

@@ -188,7 +188,12 @@ export type TransformOptions = {
     };
     svgStyle?: string;
     skipProcessing?: boolean;
+    disableAnimation?: boolean;
+    maxAnimationFrames?: number;
+    maxAnimationFrameResolution?: number;
+    videoThumbnailSecond?: number;
     bestFormat?: boolean;
+    drawDetections?: boolean;
     maxSourcePixels?: number;
     maxResultDimension?: number;
 };

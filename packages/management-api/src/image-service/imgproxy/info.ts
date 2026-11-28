@@ -1,5 +1,7 @@
 import { decodeImage } from "../engine";
 import { toRgba } from "../effects";
+import type { ImgproxyConfig } from "./config";
+import { classifyImage, detectObjects, withOnnxTimeout } from "./onnx";
 import type { InfoOptions } from "./options";
 
 const MIME_TYPES: Record<string, string> = {
@@ -17,12 +19,13 @@ const MIME_TYPES: Record<string, string> = {
     heic: "image/heic",
 };
 
-export function buildInfoJson(
+export async function buildInfoJson(
     bytes: Uint8Array,
     size: number | undefined,
     options: InfoOptions,
     maxSourcePixels = 0,
-): string {
+    config?: ImgproxyConfig,
+): Promise<string> {
     const decoded = decodeImage(bytes, undefined, maxSourcePixels);
     const result: Record<string, unknown> = {};
 
@@ -46,6 +49,14 @@ export function buildInfoJson(
     }
     if (options.dominantColors) {
         result.dominant_colors = dominantColors(decoded.transformer);
+    }
+    if (options.detectObjects) {
+        if (!config) throw new Error("ONNX configuration is required for object detection");
+        result.objects = await withOnnxTimeout(detectObjects(bytes, config), config.onnxTimeoutMs);
+    }
+    if (options.classify) {
+        if (!config) throw new Error("ONNX configuration is required for classification");
+        result.classification = await withOnnxTimeout(classifyImage(bytes, config), config.onnxTimeoutMs);
     }
 
     return JSON.stringify(result, null, 2);

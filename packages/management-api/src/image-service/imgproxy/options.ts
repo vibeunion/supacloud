@@ -68,6 +68,7 @@ export type ImgproxyRequest = {
     filename?: string;
     returnAttachment: boolean;
     raw: boolean;
+    disableAnimation: boolean;
     skipProcessing: TargetFormat[];
     hashsum?: Hashsum;
     maxSrcResolution: number;
@@ -75,6 +76,8 @@ export type ImgproxyRequest = {
     maxResultDimension: number;
     maxAnimationFrames: number;
     maxAnimationFrameResolution: number;
+    videoThumbnailSecond?: number;
+    pdfPage?: number;
     fallbackImageUrl?: string;
     watermarkUrl?: string;
     cachebuster?: string;
@@ -280,12 +283,15 @@ export function parseProcessingOptions(
         bestFormat: false,
         returnAttachment: config.returnAttachment,
         raw: false,
+        disableAnimation: false,
         skipProcessing: [],
         maxSrcResolution: config.maxSrcResolution,
         maxSrcFileSize: config.maxSrcFileSize,
         maxResultDimension: config.maxResultDimension,
         maxAnimationFrames: config.maxAnimationFrames,
         maxAnimationFrameResolution: config.maxAnimationFrameResolution,
+        videoThumbnailSecond: undefined,
+        pdfPage: undefined,
     };
 
     for (const segment of applyPresets(segments, config)) {
@@ -507,7 +513,14 @@ export function parseProcessingOptions(
                 break;
             case "draw_detections":
             case "dd":
-                throw new ImgproxyError("draw_detections requires imgproxy Pro object detection", 422);
+                if (!config.onnxEnabled || !config.onnxDetectionModel) {
+                    throw new ImgproxyError(
+                        "draw_detections requires the optional ONNX detection model",
+                        422,
+                    );
+                }
+                transform.drawDetections = true;
+                break;
             case "crop_objects":
             case "c_obj":
                 transform.gravity = { type: "obj" };
@@ -687,9 +700,7 @@ export function parseProcessingOptions(
             }
             case "page":
             case "pg":
-                if (intValue(args[0], 0) > 0) {
-                    throw new ImgproxyError("Animated and multi-page images are not supported", 422);
-                }
+                request.pdfPage = Math.max(1, intValue(args[0], 1));
                 break;
             case "pages":
             case "pgs":
@@ -699,6 +710,8 @@ export function parseProcessingOptions(
                 break;
             case "disable_animation":
             case "da":
+                request.disableAnimation = boolValue(args[0], true);
+                transform.disableAnimation = request.disableAnimation;
                 break;
             case "fallback_image_url":
             case "fiu":
@@ -763,6 +776,8 @@ export function parseProcessingOptions(
                 break;
             case "video_thumbnail_second":
             case "vts":
+                request.videoThumbnailSecond = Math.max(0, floatValue(args[0], 0));
+                break;
             case "video_thumbnail_keyframes":
             case "vtk":
             case "video_thumbnail_tile":
@@ -787,6 +802,9 @@ export function parseProcessingOptions(
         transform.maxSourcePixels = Math.round(request.maxSrcResolution * 1_000_000);
     }
     transform.maxResultDimension = request.maxResultDimension;
+    transform.disableAnimation = request.disableAnimation;
+    transform.maxAnimationFrames = request.maxAnimationFrames;
+    transform.maxAnimationFrameResolution = request.maxAnimationFrameResolution;
 
     return request;
 }
@@ -805,12 +823,15 @@ export function createInfoRequest(source: SourceRef, config: ImgproxyConfig): Im
         bestFormat: false,
         returnAttachment: config.returnAttachment,
         raw: false,
+        disableAnimation: false,
         skipProcessing: [],
         maxSrcResolution: config.maxSrcResolution,
         maxSrcFileSize: config.maxSrcFileSize,
         maxResultDimension: config.maxResultDimension,
         maxAnimationFrames: config.maxAnimationFrames,
         maxAnimationFrameResolution: config.maxAnimationFrameResolution,
+        videoThumbnailSecond: undefined,
+        pdfPage: undefined,
     };
 }
 
@@ -857,17 +878,23 @@ export function parseInfoOptions(segments: string[], config: ImgproxyConfig): In
                 break;
             case "detect_objects":
             case "do":
-                if (enabled) {
-                    throw new ImgproxyError("detect_objects requires imgproxy Pro object detection", 422);
+                if (enabled && (!config.onnxEnabled || !config.onnxDetectionModel)) {
+                    throw new ImgproxyError(
+                        "detect_objects requires the optional ONNX detection model",
+                        422,
+                    );
                 }
-                options.detectObjects = false;
+                options.detectObjects = enabled;
                 break;
             case "classify":
             case "cl":
-                if (enabled) {
-                    throw new ImgproxyError("classify requires imgproxy Pro classification", 422);
+                if (enabled && (!config.onnxEnabled || !config.onnxClassificationModel)) {
+                    throw new ImgproxyError(
+                        "classify requires the optional ONNX classification model",
+                        422,
+                    );
                 }
-                options.classify = false;
+                options.classify = enabled;
                 break;
             case "colorspace":
             case "cs":

@@ -38,6 +38,38 @@ export type ImgproxyConfig = {
     skipProcessingFormats: Set<string>;
     stripMetadata: boolean;
     stripColorProfile: boolean;
+    resultCacheDir: string;
+    resultCacheTtlSeconds: number;
+    resultCacheMaxBytes: number;
+    resultCacheMaxEntries: number;
+    s3Endpoint: string;
+    s3Region: string;
+    s3AccessKeyId: string;
+    s3SecretAccessKey: string;
+    s3SessionToken: string;
+    s3VirtualHostStyle: boolean;
+    gcsEndpoint: string;
+    gcsToken: string;
+    azureEndpoint: string;
+    azureSasToken: string;
+    azureBearerToken: string;
+    swiftEndpoint: string;
+    swiftToken: string;
+    ffmpegPath: string;
+    pdfRendererPath: string;
+    mediaProcessTimeoutMs: number;
+    onnxEnabled: boolean;
+    onnxNativeModule: string;
+    onnxDetectionModel: string;
+    onnxClassificationModel: string;
+    onnxLabelsPath: string;
+    onnxThreads: number;
+    onnxTimeoutMs: number;
+    onnxConfidenceThreshold: number;
+    onnxDetectionInputWidth: number;
+    onnxDetectionInputHeight: number;
+    onnxClassificationInputWidth: number;
+    onnxClassificationInputHeight: number;
 };
 
 function env(name: string, fallback = ""): string {
@@ -171,6 +203,38 @@ export function getImgproxyConfig(): ImgproxyConfig {
         skipProcessingFormats: new Set(env("IMGPROXY_SKIP_PROCESSING_FORMATS").split(",").map((item) => item.trim()).filter(Boolean)),
         stripMetadata: boolEnv("IMGPROXY_STRIP_METADATA", true),
         stripColorProfile: boolEnv("IMGPROXY_STRIP_COLOR_PROFILE", true),
+        resultCacheDir: env("IMGPROXY_RESULT_CACHE_DIR", ""),
+        resultCacheTtlSeconds: Math.max(0, intEnv("IMGPROXY_RESULT_CACHE_TTL", 3600)),
+        resultCacheMaxBytes: Math.max(0, intEnv("IMGPROXY_RESULT_CACHE_MAX_BYTES", 128 * 1024 * 1024)),
+        resultCacheMaxEntries: Math.max(0, intEnv("IMGPROXY_RESULT_CACHE_MAX_ENTRIES", 1024)),
+        s3Endpoint: env("IMGPROXY_S3_ENDPOINT", "https://s3.amazonaws.com"),
+        s3Region: env("IMGPROXY_S3_REGION", "us-east-1"),
+        s3AccessKeyId: env("IMGPROXY_S3_ACCESS_KEY_ID", env("AWS_ACCESS_KEY_ID")),
+        s3SecretAccessKey: env("IMGPROXY_S3_SECRET_ACCESS_KEY", env("AWS_SECRET_ACCESS_KEY")),
+        s3SessionToken: env("IMGPROXY_S3_SESSION_TOKEN", env("AWS_SESSION_TOKEN")),
+        s3VirtualHostStyle: boolEnv("IMGPROXY_S3_VIRTUAL_HOST_STYLE", false),
+        gcsEndpoint: env("IMGPROXY_GCS_ENDPOINT", "https://storage.googleapis.com"),
+        gcsToken: env("IMGPROXY_GCS_TOKEN", env("GOOGLE_ACCESS_TOKEN")),
+        azureEndpoint: env("IMGPROXY_AZURE_ENDPOINT", ""),
+        azureSasToken: env("IMGPROXY_AZURE_SAS", ""),
+        azureBearerToken: env("IMGPROXY_AZURE_BEARER_TOKEN", ""),
+        swiftEndpoint: env("IMGPROXY_SWIFT_ENDPOINT", ""),
+        swiftToken: env("IMGPROXY_SWIFT_TOKEN", ""),
+        ffmpegPath: env("IMGPROXY_FFMPEG_PATH", "ffmpeg"),
+        pdfRendererPath: env("IMGPROXY_PDF_RENDERER_PATH", "pdftocairo"),
+        mediaProcessTimeoutMs: Math.max(1, intEnv("IMGPROXY_MEDIA_PROCESS_TIMEOUT", 30)) * 1000,
+        onnxEnabled: boolEnv("IMGPROXY_ONNX_ENABLED", false),
+        onnxNativeModule: env("IMGPROXY_ONNX_NATIVE_MODULE", "supacloud-image-core"),
+        onnxDetectionModel: env("IMGPROXY_ONNX_DETECTION_MODEL", ""),
+        onnxClassificationModel: env("IMGPROXY_ONNX_CLASSIFICATION_MODEL", ""),
+        onnxLabelsPath: env("IMGPROXY_ONNX_LABELS", ""),
+        onnxThreads: Math.min(32, Math.max(1, intEnv("IMGPROXY_ONNX_THREADS", 1))),
+        onnxTimeoutMs: Math.max(1, intEnv("IMGPROXY_ONNX_TIMEOUT", 5)) * 1000,
+        onnxConfidenceThreshold: Math.min(1, Math.max(0, floatEnv("IMGPROXY_ONNX_CONFIDENCE", 0.25))),
+        onnxDetectionInputWidth: Math.max(1, intEnv("IMGPROXY_ONNX_DETECTION_INPUT_WIDTH", 640)),
+        onnxDetectionInputHeight: Math.max(1, intEnv("IMGPROXY_ONNX_DETECTION_INPUT_HEIGHT", 640)),
+        onnxClassificationInputWidth: Math.max(1, intEnv("IMGPROXY_ONNX_CLASSIFICATION_INPUT_WIDTH", 224)),
+        onnxClassificationInputHeight: Math.max(1, intEnv("IMGPROXY_ONNX_CLASSIFICATION_INPUT_HEIGHT", 224)),
     };
 
     parsePresets(config);
