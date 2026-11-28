@@ -14,7 +14,7 @@ they are decoded, resized, and transcoded like the other raster formats.
 
 ```text
 pdf  -> pdfium-render adapter
-onnx -> ort adapter
+onnx -> ort adapter (opt-in)
 c2pa -> c2pa-rs adapter
 icc  -> moxcms adapter
 napi -> Node/Bun N-API exports
@@ -24,3 +24,19 @@ The first integration point is `capability_report()` and
 `process_raster_buffer()` when built with `--features napi`. Keeping the
 feature boundary explicit means the normal SupaCloud image binary does not
 download or load PDFium, ONNX Runtime, C2PA, or color-management runtimes.
+
+## Optional ONNX adapter
+
+ONNX is intentionally excluded from the default build. To produce the
+optional N-API adapter, build this crate with:
+
+```sh
+cargo build --release --features onnx,napi
+```
+
+The adapter expects image tensors in `NCHW` RGB float format, normalized to
+`0..1`. Detection models must return rows of
+`[x1, y1, x2, y2, score, class_id]`; classification models must return pairs
+of `[class_id, score]`. Detection coordinates are converted back to source
+image pixels and clipped to the image bounds. No model or label file is
+bundled by SupaCloud.

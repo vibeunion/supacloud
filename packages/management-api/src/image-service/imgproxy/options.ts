@@ -513,7 +513,14 @@ export function parseProcessingOptions(
                 break;
             case "draw_detections":
             case "dd":
-                throw new ImgproxyError("draw_detections requires imgproxy Pro object detection", 422);
+                if (!config.onnxEnabled || !config.onnxDetectionModel) {
+                    throw new ImgproxyError(
+                        "draw_detections requires the optional ONNX detection model",
+                        422,
+                    );
+                }
+                transform.drawDetections = true;
+                break;
             case "crop_objects":
             case "c_obj":
                 transform.gravity = { type: "obj" };
@@ -871,17 +878,23 @@ export function parseInfoOptions(segments: string[], config: ImgproxyConfig): In
                 break;
             case "detect_objects":
             case "do":
-                if (enabled) {
-                    throw new ImgproxyError("detect_objects requires imgproxy Pro object detection", 422);
+                if (enabled && (!config.onnxEnabled || !config.onnxDetectionModel)) {
+                    throw new ImgproxyError(
+                        "detect_objects requires the optional ONNX detection model",
+                        422,
+                    );
                 }
-                options.detectObjects = false;
+                options.detectObjects = enabled;
                 break;
             case "classify":
             case "cl":
-                if (enabled) {
-                    throw new ImgproxyError("classify requires imgproxy Pro classification", 422);
+                if (enabled && (!config.onnxEnabled || !config.onnxClassificationModel)) {
+                    throw new ImgproxyError(
+                        "classify requires the optional ONNX classification model",
+                        422,
+                    );
                 }
-                options.classify = false;
+                options.classify = enabled;
                 break;
             case "colorspace":
             case "cs":

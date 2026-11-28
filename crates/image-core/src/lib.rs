@@ -12,6 +12,9 @@ use image::{DynamicImage, GenericImageView, ImageEncoder, ImageFormat, ImageRead
 use serde::Serialize;
 use std::io::Cursor;
 
+#[cfg(feature = "onnx")]
+pub mod onnx;
+
 pub const MAX_IMAGE_WIDTH: u32 = 10_000;
 pub const MAX_IMAGE_HEIGHT: u32 = 10_000;
 pub const MAX_IMAGE_PIXELS: u64 = 50_000_000;
@@ -167,6 +170,7 @@ pub fn optional_feature_status() -> Vec<serde_json::Value> {
 }
 
 #[cfg(feature = "napi")]
+#[allow(dead_code)]
 mod napi_exports {
     use super::{capabilities, optional_feature_status, process_raster, RasterOptions};
     use napi::bindgen_prelude::{Buffer, Error, Result};
@@ -201,6 +205,48 @@ mod napi_exports {
         .map(Buffer::from)
         .map_err(|error| Error::from_reason(error.to_string()))
     }
+
+    #[cfg(feature = "onnx")]
+    #[napi]
+    pub fn onnx_detect_buffer(
+        input: Buffer,
+        model_path: String,
+        input_width: Option<u32>,
+        input_height: Option<u32>,
+        threads: Option<u32>,
+        confidence_threshold: Option<f64>,
+    ) -> Result<String> {
+        let detections = crate::onnx::detect(
+            input.as_ref(),
+            &model_path,
+            input_width.unwrap_or(640),
+            input_height.unwrap_or(640),
+            threads.unwrap_or(1) as usize,
+            confidence_threshold.unwrap_or(0.25) as f32,
+        )
+        .map_err(|error| Error::from_reason(error.to_string()))?;
+        serde_json::to_string(&detections).map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    #[cfg(feature = "onnx")]
+    #[napi]
+    pub fn onnx_classify_buffer(
+        input: Buffer,
+        model_path: String,
+        input_width: Option<u32>,
+        input_height: Option<u32>,
+        threads: Option<u32>,
+    ) -> Result<String> {
+        let classes = crate::onnx::classify(
+            input.as_ref(),
+            &model_path,
+            input_width.unwrap_or(224),
+            input_height.unwrap_or(224),
+            threads.unwrap_or(1) as usize,
+        )
+        .map_err(|error| Error::from_reason(error.to_string()))?;
+        serde_json::to_string(&classes).map_err(|error| Error::from_reason(error.to_string()))
+    }
 }
 
 #[cfg(test)]
@@ -213,6 +259,9 @@ mod tests {
         let report = capabilities();
         assert!(report.raster);
         assert!(!report.pdf);
+        #[cfg(feature = "onnx")]
+        assert!(report.onnx);
+        #[cfg(not(feature = "onnx"))]
         assert!(!report.onnx);
         assert!(!report.c2pa);
         assert!(!report.icc);
@@ -261,7 +310,10 @@ mod tests {
                 .unwrap_or_else(|error| {
                     panic!("{input_format:?} -> {output_format} failed: {error}")
                 });
-                assert!(!output.is_empty(), "{input_format:?} -> {output_format} empty");
+                assert!(
+                    !output.is_empty(),
+                    "{input_format:?} -> {output_format} empty"
+                );
                 if output_format != "avif" {
                     let decoded = image::load_from_memory(&output).unwrap();
                     assert_eq!(

@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
-import { ImageEngineError, processImage } from "../engine";
+import { decodeImage, ImageEngineError, processImage } from "../engine";
 import { detectMediaKind, MediaDependencyError, renderPdfPage, renderVideoFrame } from "../media";
 import { cacheEtag, cacheMatches, createImageCacheKey, ImageResultCache } from "../cache";
 import type { ProcessedImage, TargetFormat, TransformOptions } from "../types";
 import { getImgproxyConfig, type ImgproxyConfig } from "./config";
 import { ImgproxyError } from "./errors";
 import { buildInfoJson } from "./info";
+import { detectObjects, drawDetectionBoxes, withOnnxTimeout } from "./onnx";
 import {
     createInfoRequest,
     parseInfoOptions,
@@ -113,6 +114,16 @@ export async function handleImgproxyRequest(request: Request, url: URL): Promise
             source.url,
             sourceDigest,
             request.headers.get("accept") ?? "",
+            config.onnxEnabled ? "onnx:enabled" : "onnx:disabled",
+            config.onnxDetectionModel,
+            config.onnxClassificationModel,
+            config.onnxLabelsPath,
+            String(config.onnxThreads),
+            String(config.onnxConfidenceThreshold),
+            String(config.onnxDetectionInputWidth),
+            String(config.onnxDetectionInputHeight),
+            String(config.onnxClassificationInputWidth),
+            String(config.onnxClassificationInputHeight),
         ]);
         const cached = await cache.get(cacheKey);
         if (cached) {
@@ -128,13 +139,14 @@ export async function handleImgproxyRequest(request: Request, url: URL): Promise
         }
 
         if (parsed.info) {
-            const json = buildInfoJson(
+            const json = await buildInfoJson(
                 sourceBytes,
                 source.size,
                 imgproxyRequest.infoOptions,
                 imgproxyRequest.maxSrcResolution > 0
                     ? Math.round(imgproxyRequest.maxSrcResolution * 1_000_000)
                     : 0,
+                config,
             );
             const infoHeaders = new Headers(headers);
             infoHeaders.set("Content-Type", "application/json; charset=utf-8");
@@ -164,6 +176,16 @@ export async function handleImgproxyRequest(request: Request, url: URL): Promise
             );
         }
 
+        let processingBytes = sourceBytes;
+        if (imgproxyRequest.transform.drawDetections) {
+            const detections = await withOnnxTimeout(
+                detectObjects(sourceBytes, config),
+                config.onnxTimeoutMs,
+            );
+            const decoded = decodeImage(sourceBytes, undefined, imgproxyRequest.transform.maxSourcePixels);
+            processingBytes = new Uint8Array(drawDetectionBoxes(decoded.transformer, detections).pngSync());
+        }
+
         let watermarkImage: Uint8Array | undefined;
         if (imgproxyRequest.watermarkUrl) {
             watermarkImage = await fetchWatermark(imgproxyRequest.watermarkUrl, config);
@@ -172,7 +194,7 @@ export async function handleImgproxyRequest(request: Request, url: URL): Promise
 
         const result = await processWithFormat(
             imgproxyRequest,
-            sourceBytes,
+            processingBytes,
             watermarkImage,
             request.headers.get("accept"),
             source.contentType,
@@ -348,7 +370,8 @@ function hasTransformOptions(options: TransformOptions): boolean {
         || options.minHeight !== undefined
         || Boolean(options.autoQuality)
         || options.maxBytes !== undefined
-        || Boolean(options.formatQuality);
+        || Boolean(options.formatQuality)
+        || Boolean(options.drawDetections);
 }
 
 function rawResponse(

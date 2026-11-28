@@ -193,6 +193,7 @@ export type TransformOptions = {
     maxAnimationFrameResolution?: number;
     videoThumbnailSecond?: number;
     bestFormat?: boolean;
+    drawDetections?: boolean;
     maxSourcePixels?: number;
     maxResultDimension?: number;
 };

@@ -58,6 +58,18 @@ export type ImgproxyConfig = {
     ffmpegPath: string;
     pdfRendererPath: string;
     mediaProcessTimeoutMs: number;
+    onnxEnabled: boolean;
+    onnxNativeModule: string;
+    onnxDetectionModel: string;
+    onnxClassificationModel: string;
+    onnxLabelsPath: string;
+    onnxThreads: number;
+    onnxTimeoutMs: number;
+    onnxConfidenceThreshold: number;
+    onnxDetectionInputWidth: number;
+    onnxDetectionInputHeight: number;
+    onnxClassificationInputWidth: number;
+    onnxClassificationInputHeight: number;
 };
 
 function env(name: string, fallback = ""): string {
@@ -211,6 +223,18 @@ export function getImgproxyConfig(): ImgproxyConfig {
         ffmpegPath: env("IMGPROXY_FFMPEG_PATH", "ffmpeg"),
         pdfRendererPath: env("IMGPROXY_PDF_RENDERER_PATH", "pdftocairo"),
         mediaProcessTimeoutMs: Math.max(1, intEnv("IMGPROXY_MEDIA_PROCESS_TIMEOUT", 30)) * 1000,
+        onnxEnabled: boolEnv("IMGPROXY_ONNX_ENABLED", false),
+        onnxNativeModule: env("IMGPROXY_ONNX_NATIVE_MODULE", "supacloud-image-core"),
+        onnxDetectionModel: env("IMGPROXY_ONNX_DETECTION_MODEL", ""),
+        onnxClassificationModel: env("IMGPROXY_ONNX_CLASSIFICATION_MODEL", ""),
+        onnxLabelsPath: env("IMGPROXY_ONNX_LABELS", ""),
+        onnxThreads: Math.min(32, Math.max(1, intEnv("IMGPROXY_ONNX_THREADS", 1))),
+        onnxTimeoutMs: Math.max(1, intEnv("IMGPROXY_ONNX_TIMEOUT", 5)) * 1000,
+        onnxConfidenceThreshold: Math.min(1, Math.max(0, floatEnv("IMGPROXY_ONNX_CONFIDENCE", 0.25))),
+        onnxDetectionInputWidth: Math.max(1, intEnv("IMGPROXY_ONNX_DETECTION_INPUT_WIDTH", 640)),
+        onnxDetectionInputHeight: Math.max(1, intEnv("IMGPROXY_ONNX_DETECTION_INPUT_HEIGHT", 640)),
+        onnxClassificationInputWidth: Math.max(1, intEnv("IMGPROXY_ONNX_CLASSIFICATION_INPUT_WIDTH", 224)),
+        onnxClassificationInputHeight: Math.max(1, intEnv("IMGPROXY_ONNX_CLASSIFICATION_INPUT_HEIGHT", 224)),
     };
 
     parsePresets(config);

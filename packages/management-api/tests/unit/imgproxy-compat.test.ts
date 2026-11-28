@@ -187,6 +187,25 @@ describe("imgproxy URL compatibility", () => {
         expect(options.dominantColors).toBe(true);
         expect(options.colorspace).toBe(true);
     });
+
+    test("keeps ONNX disabled unless explicitly configured", () => {
+        configure();
+        const config = getImgproxyConfig();
+        expect(config.onnxEnabled).toBe(false);
+        expect(config.onnxDetectionModel).toBe("");
+        expect(config.onnxClassificationModel).toBe("");
+    });
+
+    test("accepts ONNX info options only with an explicit model", () => {
+        configure({
+            IMGPROXY_ONNX_ENABLED: "true",
+            IMGPROXY_ONNX_DETECTION_MODEL: "/models/detection.onnx",
+            IMGPROXY_ONNX_CLASSIFICATION_MODEL: "/models/classification.onnx",
+        });
+        const options = parseInfoOptions(["detect_objects:1", "classify:1"], getImgproxyConfig());
+        expect(options.detectObjects).toBe(true);
+        expect(options.classify).toBe(true);
+    });
 });
 
 describe("imgproxy request handling", () => {
@@ -261,6 +280,18 @@ describe("imgproxy request handling", () => {
 
     test("reports unsupported Pro info options as 422", async () => {
         configure({ IMGPROXY_KEY: TEST_KEY, IMGPROXY_SALT: TEST_SALT });
+        const source = base64Source(makePng(10, 10), "image/png", "png");
+        const response = await call(signed(`/detect_objects:1/${source}`, true));
+        expect(response.status).toBe(422);
+    });
+
+    test("reports a missing optional ONNX adapter as 422", async () => {
+        configure({
+            IMGPROXY_KEY: TEST_KEY,
+            IMGPROXY_SALT: TEST_SALT,
+            IMGPROXY_ONNX_ENABLED: "true",
+            IMGPROXY_ONNX_DETECTION_MODEL: "/models/detection.onnx",
+        });
         const source = base64Source(makePng(10, 10), "image/png", "png");
         const response = await call(signed(`/detect_objects:1/${source}`, true));
         expect(response.status).toBe(422);

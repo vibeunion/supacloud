@@ -12,7 +12,7 @@ SupaCloud 图片服务已经实现 imgproxy 的核心 URL 协议和绝大多数�
 - 支持 JPEG、PNG、WebP、AVIF、GIF、BMP、TIFF、ICO 输出，并对这些格式执行真实解码、缩放、裁剪和转码；支持 JPEG/PNG/WebP/AVIF/JXL/BMP/TIFF/ICO/SVG/GIF 输入。
 - 保留原有 Thumbor 风格 POST API 和管理 API，不改变现有调用方。
 
-它适合作为 imgproxy OSS 的日常替代，尤其是“对象存储 + CDN + 签名缩略图”的场景。PDF 和视频单帧缩略图通过可选外部命令适配；ONNX 物体检测/分类、C2PA 等能力仍不在当前实现范围内，相关选项会返回 `422`，不会静默产出错误结果。
+它适合作为 imgproxy OSS 的日常替代，尤其是“对象存储 + CDN + 签名缩略图”的场景。PDF 和视频单帧缩略图通过可选外部命令适配；ONNX 物体检测/分类也提供独立可选适配器，默认关闭，未配置时相关选项返回 `422`。
 
 ## URL 与签名
 
@@ -202,18 +202,18 @@ const signature = createHmac("sha256", key)
 | `dominant_colors` | 是 | 是 | 是 | 量化近似 |
 | `iptc` / `xmp` | 视版本 | 是 | 否 | |
 | `video_meta` | 否 | 是 | 否 | 尚未实现，返回 422 |
-| `detect_objects` / `classify` | 否 | 是 | 否 | 返回 422 |
+| `detect_objects` / `classify` | 否 | 是 | 可选 ONNX | 未显式启用或缺少模型时返回 422 |
 | `blurhash` | 视版本 | 是 | 否 | 返回 422 |
 
 ### imgproxy Pro 专属能力
 
 | 能力 | SupaCloud | 行为 |
 | --- | --- | --- |
-| ONNX 物体检测 / 分类 | 否 | `detect_objects`、`classify` 返回 422 |
+| ONNX 物体检测 / 分类 | 可选 | 设置 `IMGPROXY_ONNX_ENABLED=true`、模型路径和可选 N-API adapter 后启用；否则相关请求返回 422 |
 | `gravity:obj` / `objw` | 近似 | 使用 saliency，不支持类别和权重 |
 | `crop_objects` | 近似 | 等价于 `gravity:obj` |
 | `blur_detections` | 近似 | 当前为全图模糊 |
-| `draw_detections` | 否 | 返回 422 |
+| `draw_detections` | 可选 | ONNX 检测模型启用后绘制检测框，否则返回 422 |
 | 视频缩略图 | 部分 | `vts` 使用可选 `ffmpeg` 抽取单帧；keyframes/tile/animation 仍返回 422 |
 | PDF 缩略图 | 是 | PDF 源默认渲染第 1 页；可用 `page:<n>` 选择页码，需要 `pdftocairo` |
 | C2PA | 否 | 参数被忽略 |
@@ -334,7 +334,7 @@ systemctl restart supacloud-image
 3. 保持签名算法和路径格式不变，现有 imgproxy 客户端通常无需改动。
 4. 用 `/info` 和签名 URL 做冒烟测试。
 5. 如果使用了 S3/GCS/Azure/Swift 原生源，改成预签名 URL，或保留 imgproxy 作为源适配层。
-6. 如果使用了 ONNX、C2PA 或视频 keyframes/tile/animation，保留 imgproxy Pro 或增加对应适配器；PDF 和视频单帧可直接启用本服务的可选命令适配。
+6. 如果使用了 C2PA 或视频 keyframes/tile/animation，保留 imgproxy Pro 或增加对应适配器；ONNX 可按需构建 `image-core` 的 `onnx,napi` feature 并配置模型，PDF 和视频单帧可直接启用本服务的可选命令适配。
 
 ### 常用 URL
 
@@ -363,11 +363,11 @@ systemctl restart supacloud-image
 以下能力当前不提供，需要保留 imgproxy Pro 或在外围补齐：
 
 - 视频 keyframes/tile/animation、PSD。
-- ONNX 物体检测、分类、`draw_detections`、真实 `blur_detections`。
+- `blur_detections` 仍未实现真实检测；ONNX 物体检测、分类和 `draw_detections` 为可选能力。
 - C2PA 内容凭证。
 - 动画 WebP、多页 TIFF、动画帧数和帧分辨率限制。
 - ICC 色彩管理、HDR 保留、DPI 元数据、IPTC/XMP。
 - 缓存标签、Prometheus 指标。
 - Pango 富文本水印。
 
-这些差距不影响最常见的“缩放、裁剪、格式转换、质量、水印、签名、Info”工作流。若业务强依赖 ONNX 或视频高级能力，建议按路由分流：普通图片、PDF 和视频单帧走 SupaCloud 图片服务，ONNX/视频高级能力继续走 imgproxy Pro。
+这些差距不影响最常见的“缩放、裁剪、格式转换、质量、水印、签名、Info”工作流。若业务强依赖视频高级能力，建议按路由分流：普通图片、PDF、视频单帧和已启用 ONNX 的请求走 SupaCloud 图片服务，其余视频高级能力继续走 imgproxy Pro。
