@@ -55,6 +55,9 @@ export type ImgproxyConfig = {
     azureBearerToken: string;
     swiftEndpoint: string;
     swiftToken: string;
+    ffmpegPath: string;
+    pdfRendererPath: string;
+    mediaProcessTimeoutMs: number;
 };
 
 function env(name: string, fallback = ""): string {
@@ -205,6 +208,9 @@ export function getImgproxyConfig(): ImgproxyConfig {
         azureBearerToken: env("IMGPROXY_AZURE_BEARER_TOKEN", ""),
         swiftEndpoint: env("IMGPROXY_SWIFT_ENDPOINT", ""),
         swiftToken: env("IMGPROXY_SWIFT_TOKEN", ""),
+        ffmpegPath: env("IMGPROXY_FFMPEG_PATH", "ffmpeg"),
+        pdfRendererPath: env("IMGPROXY_PDF_RENDERER_PATH", "pdftocairo"),
+        mediaProcessTimeoutMs: Math.max(1, intEnv("IMGPROXY_MEDIA_PROCESS_TIMEOUT", 30)) * 1000,
     };
 
     parsePresets(config);

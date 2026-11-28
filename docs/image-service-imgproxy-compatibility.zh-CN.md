@@ -12,7 +12,7 @@ SupaCloud 图片服务已经实现 imgproxy 的核心 URL 协议和绝大多数�
 - 支持 JPEG、PNG、WebP、AVIF、GIF、BMP、TIFF、ICO 输出，并对这些格式执行真实解码、缩放、裁剪和转码；支持 JPEG/PNG/WebP/AVIF/JXL/BMP/TIFF/ICO/SVG/GIF 输入。
 - 保留原有 Thumbor 风格 POST API 和管理 API，不改变现有调用方。
 
-它适合作为 imgproxy OSS 的日常替代，尤其是“对象存储 + CDN + 签名缩略图”的场景。imgproxy Pro 的视频缩略图、PDF、ONNX 物体检测/分类、C2PA 等能力不在当前实现范围内，相关选项会返回 `422`，不会静默产出错误结果。
+它适合作为 imgproxy OSS 的日常替代，尤其是“对象存储 + CDN + 签名缩略图”的场景。PDF 和视频单帧缩略图通过可选外部命令适配；ONNX 物体检测/分类、C2PA 等能力仍不在当前实现范围内，相关选项会返回 `422`，不会静默产出错误结果。
 
 ## URL 与签名
 
@@ -179,8 +179,8 @@ const signature = createHmac("sha256", key)
 | HEIC 输出 | 是 | 是 | 平台相关 | Linux 通常不可用 |
 | JXL 输出 | 是 | 是 | 否 | 仅解码 |
 | SVG 输入 | 是 | 是 | 是 | 可注入 CSS |
-| PDF 输入 | 否 | 是 | 否 | |
-| 视频输入 | 否 | 是 | 否 | |
+| PDF 输入 | 否 | 是 | 是 | 需要 `pdftocairo`，默认渲染第 1 页 |
+| 视频输入 | 否 | 是 | 部分 | 需要 `ffmpeg`，当前支持单帧 `vts` |
 | `quality` / `format_quality` | 是 | 是 | 是 | |
 | `autoquality` | 是 | 是 | 部分 | 基于 `max_bytes` 的质量递减 |
 | `max_bytes` | 是 | 是 | 是 | |
@@ -201,7 +201,7 @@ const signature = createHmac("sha256", key)
 | `colorspace` | 是 | 是 | 近似 | 固定返回 sRGB |
 | `dominant_colors` | 是 | 是 | 是 | 量化近似 |
 | `iptc` / `xmp` | 视版本 | 是 | 否 | |
-| `video_meta` | 否 | 是 | 否 | 返回 422 |
+| `video_meta` | 否 | 是 | 否 | 尚未实现，返回 422 |
 | `detect_objects` / `classify` | 否 | 是 | 否 | 返回 422 |
 | `blurhash` | 视版本 | 是 | 否 | 返回 422 |
 
@@ -214,8 +214,8 @@ const signature = createHmac("sha256", key)
 | `crop_objects` | 近似 | 等价于 `gravity:obj` |
 | `blur_detections` | 近似 | 当前为全图模糊 |
 | `draw_detections` | 否 | 返回 422 |
-| 视频缩略图 | 否 | `video_thumbnail_*` 返回 422 |
-| PDF 缩略图 | 否 | |
+| 视频缩略图 | 部分 | `vts` 使用可选 `ffmpeg` 抽取单帧；keyframes/tile/animation 仍返回 422 |
+| PDF 缩略图 | 是 | PDF 源默认渲染第 1 页；可用 `page:<n>` 选择页码，需要 `pdftocairo` |
 | C2PA | 否 | 参数被忽略 |
 | `max_animation_frames` / `max_animation_frame_resolution` | 部分 | 解析参数，但只处理首帧，未强制限制 |
 
@@ -223,10 +223,10 @@ const signature = createHmac("sha256", key)
 
 | 能力 | SupaCloud | 说明 |
 | --- | --- | --- |
-| GIF 解码 | 是 | 只取第一帧 |
+| GIF 解码 | 是 | 保留多帧、帧延迟和 disposal |
 | 动画 WebP 解码 | 部分 | 由 napi-rs 行为决定，通常取首帧 |
 | GIF 编码 | 是 | 单帧 |
-| `page` / `pages` | 部分 | `page > 0` 或 `pages != 1` 返回 422 |
+| `page` / `pages` | 部分 | PDF 支持 `page:<n>`；非 PDF 的页码请求返回 422 |
 | `disable_animation` | 是 | 接受参数，输出仍是单帧 |
 | 多页 TIFF | 部分 | 由 napi-rs 行为决定 |
 
@@ -275,6 +275,9 @@ const signature = createHmac("sha256", key)
 | `IMGPROXY_AZURE_BEARER_TOKEN` | 空 | Azure Blob Bearer token |
 | `IMGPROXY_SWIFT_ENDPOINT` | 空 | OpenStack Swift object endpoint |
 | `IMGPROXY_SWIFT_TOKEN` | 空 | Swift `X-Auth-Token` |
+| `IMGPROXY_FFMPEG_PATH` | `ffmpeg` | 视频抽帧命令路径 |
+| `IMGPROXY_PDF_RENDERER_PATH` | `pdftocairo` | PDF 渲染命令路径 |
+| `IMGPROXY_MEDIA_PROCESS_TIMEOUT` | `30` | PDF/视频子进程超时秒数 |
 | `IMGPROXY_AUTO_ROTATE` | `true` | 自动旋转 |
 | `IMGPROXY_RETURN_ATTACHMENT` | `false` | 默认作为附件下载 |
 | `IMGPROXY_ALLOW_ORIGIN` | 空 | CORS Origin |
@@ -331,7 +334,7 @@ systemctl restart supacloud-image
 3. 保持签名算法和路径格式不变，现有 imgproxy 客户端通常无需改动。
 4. 用 `/info` 和签名 URL 做冒烟测试。
 5. 如果使用了 S3/GCS/Azure/Swift 原生源，改成预签名 URL，或保留 imgproxy 作为源适配层。
-6. 如果使用了视频、PDF、ONNX、C2PA，保留 imgproxy Pro 或增加对应适配器。
+6. 如果使用了 ONNX、C2PA 或视频 keyframes/tile/animation，保留 imgproxy Pro 或增加对应适配器；PDF 和视频单帧可直接启用本服务的可选命令适配。
 
 ### 常用 URL
 
@@ -359,13 +362,12 @@ systemctl restart supacloud-image
 
 以下能力当前不提供，需要保留 imgproxy Pro 或在外围补齐：
 
-- S3、GCS、Azure Blob、Swift 原生源适配。
-- 视频缩略图、PDF 缩略图、PSD。
+- 视频 keyframes/tile/animation、PSD。
 - ONNX 物体检测、分类、`draw_detections`、真实 `blur_detections`。
 - C2PA 内容凭证。
-- 完整动画 GIF/WebP、多页 TIFF、动画帧数和帧分辨率限制。
+- 动画 WebP、多页 TIFF、动画帧数和帧分辨率限制。
 - ICC 色彩管理、HDR 保留、DPI 元数据、IPTC/XMP。
-- 内部结果缓存、缓存标签、Prometheus 指标。
+- 缓存标签、Prometheus 指标。
 - Pango 富文本水印。
 
-这些差距不影响最常见的“缩放、裁剪、格式转换、质量、水印、签名、Info”工作流。若业务强依赖上述 Pro 能力，建议按路由分流：普通图片走 SupaCloud 图片服务，视频/PDF/ONNX 继续走 imgproxy Pro。
+这些差距不影响最常见的“缩放、裁剪、格式转换、质量、水印、签名、Info”工作流。若业务强依赖 ONNX 或视频高级能力，建议按路由分流：普通图片、PDF 和视频单帧走 SupaCloud 图片服务，ONNX/视频高级能力继续走 imgproxy Pro。

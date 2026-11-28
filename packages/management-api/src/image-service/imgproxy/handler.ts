@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { ImageEngineError, processImage } from "../engine";
+import { detectMediaKind, MediaDependencyError, renderPdfPage, renderVideoFrame } from "../media";
 import { cacheEtag, cacheMatches, createImageCacheKey, ImageResultCache } from "../cache";
 import type { ProcessedImage, TargetFormat, TransformOptions } from "../types";
 import { getImgproxyConfig, type ImgproxyConfig } from "./config";
@@ -67,11 +68,35 @@ export async function handleImgproxyRequest(request: Request, url: URL): Promise
             throw new ImgproxyError("Expired URL", 404);
         }
 
-        const source = await resolveSource(parsed.source, imgproxyRequest, config);
+        let source = await resolveSource(parsed.source, imgproxyRequest, config);
         if (imgproxyRequest.raw) {
             return rawResponse(source, imgproxyRequest, config, headers);
         }
         if (!source.bytes) {
+            throw new ImgproxyError("Source image has no bytes", 422);
+        }
+        const mediaKind = detectMediaKind(source.bytes, parsed.source.extension, source.contentType);
+        if (imgproxyRequest.pdfPage !== undefined && mediaKind !== "pdf") {
+            throw new ImgproxyError("page requires a PDF source", 422);
+        }
+        if (mediaKind === "pdf") {
+            source = {
+                ...source,
+                bytes: await renderPdfPage(source.bytes, imgproxyRequest.pdfPage ?? 1, config),
+                contentType: "image/png",
+            };
+        } else if (mediaKind === "video") {
+            source = {
+                ...source,
+                bytes: await renderVideoFrame(source.bytes, imgproxyRequest.videoThumbnailSecond ?? 0, config),
+                contentType: "image/png",
+            };
+        }
+        if (imgproxyRequest.videoThumbnailSecond !== undefined && mediaKind !== "video") {
+            throw new ImgproxyError("video_thumbnail_second requires a video source", 422);
+        }
+        const sourceBytes = source.bytes;
+        if (!sourceBytes) {
             throw new ImgproxyError("Source image has no bytes", 422);
         }
         const cache = new ImageResultCache({
@@ -80,7 +105,7 @@ export async function handleImgproxyRequest(request: Request, url: URL): Promise
             maxBytes: config.resultCacheMaxBytes,
             maxEntries: config.resultCacheMaxEntries,
         });
-        const sourceDigest = createHash("sha256").update(source.bytes).digest("hex");
+        const sourceDigest = createHash("sha256").update(sourceBytes).digest("hex");
         const cacheKey = createImageCacheKey([
             "image-service-v1",
             parsed.info ? "info" : "image",
@@ -104,7 +129,7 @@ export async function handleImgproxyRequest(request: Request, url: URL): Promise
 
         if (parsed.info) {
             const json = buildInfoJson(
-                source.bytes,
+                sourceBytes,
                 source.size,
                 imgproxyRequest.infoOptions,
                 imgproxyRequest.maxSrcResolution > 0
@@ -127,7 +152,7 @@ export async function handleImgproxyRequest(request: Request, url: URL): Promise
 
         if (shouldSkipProcessing(imgproxyRequest, source)) {
             return await imageResponse(
-                source.bytes,
+                sourceBytes,
                 source.contentType ?? "application/octet-stream",
                 imgproxyRequest,
                 config,
@@ -147,7 +172,7 @@ export async function handleImgproxyRequest(request: Request, url: URL): Promise
 
         const result = await processWithFormat(
             imgproxyRequest,
-            source.bytes,
+            sourceBytes,
             watermarkImage,
             request.headers.get("accept"),
             source.contentType,
@@ -437,6 +462,9 @@ async function fallbackOrError(
     }
 
     if (!(error instanceof ImgproxyError) && !(error instanceof ImageEngineError)) {
+        if (error instanceof MediaDependencyError) {
+            return errorResponse(error, headers);
+        }
         console.error("[image-service] imgproxy processing error:", error);
         return errorResponse(new ImgproxyError("Internal image processing error", 500), headers);
     }
@@ -444,7 +472,7 @@ async function fallbackOrError(
 }
 
 function errorResponse(error: unknown, baseHeaders: Headers): Response {
-    const status = error instanceof ImgproxyError || error instanceof ImageEngineError
+    const status = error instanceof ImgproxyError || error instanceof ImageEngineError || error instanceof MediaDependencyError
         ? error.status
         : 500;
     const message = error instanceof Error ? error.message : "Internal image processing error";

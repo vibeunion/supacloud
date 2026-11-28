@@ -255,7 +255,7 @@ describe("imgproxy request handling", () => {
     test("reports unsupported Pro video options as 422", async () => {
         configure({ IMGPROXY_KEY: TEST_KEY, IMGPROXY_SALT: TEST_SALT });
         const source = base64Source(makePng(10, 10), "image/png", "png");
-        const response = await call(signed(`/vts:1/${source}`));
+        const response = await call(signed(`/vtt:1/${source}`));
         expect(response.status).toBe(422);
     });
 

@@ -76,6 +76,8 @@ export type ImgproxyRequest = {
     maxResultDimension: number;
     maxAnimationFrames: number;
     maxAnimationFrameResolution: number;
+    videoThumbnailSecond?: number;
+    pdfPage?: number;
     fallbackImageUrl?: string;
     watermarkUrl?: string;
     cachebuster?: string;
@@ -288,6 +290,8 @@ export function parseProcessingOptions(
         maxResultDimension: config.maxResultDimension,
         maxAnimationFrames: config.maxAnimationFrames,
         maxAnimationFrameResolution: config.maxAnimationFrameResolution,
+        videoThumbnailSecond: undefined,
+        pdfPage: undefined,
     };
 
     for (const segment of applyPresets(segments, config)) {
@@ -689,9 +693,7 @@ export function parseProcessingOptions(
             }
             case "page":
             case "pg":
-                if (intValue(args[0], 0) > 0) {
-                    throw new ImgproxyError("Animated and multi-page images are not supported", 422);
-                }
+                request.pdfPage = Math.max(1, intValue(args[0], 1));
                 break;
             case "pages":
             case "pgs":
@@ -767,6 +769,8 @@ export function parseProcessingOptions(
                 break;
             case "video_thumbnail_second":
             case "vts":
+                request.videoThumbnailSecond = Math.max(0, floatValue(args[0], 0));
+                break;
             case "video_thumbnail_keyframes":
             case "vtk":
             case "video_thumbnail_tile":
@@ -819,6 +823,8 @@ export function createInfoRequest(source: SourceRef, config: ImgproxyConfig): Im
         maxResultDimension: config.maxResultDimension,
         maxAnimationFrames: config.maxAnimationFrames,
         maxAnimationFrameResolution: config.maxAnimationFrameResolution,
+        videoThumbnailSecond: undefined,
+        pdfPage: undefined,
     };
 }
 
