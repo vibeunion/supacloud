@@ -6,7 +6,7 @@
       "name": "@supacloud/lite",
       "dependencies": {
         "@electric-sql/pglite": "0.6.0",
-        "@electric-sql/pglite-pg_textsearch": "0.0.18",
+        "@electric-sql/pglite-pg_textsearch": "0.1.0",
         "@electric-sql/pglite-pgmq": "0.1.0",
         "@electric-sql/pglite-pgvector": "0.0.17",
         "@electric-sql/pglite-postgis": "0.3.0",
@@ -64,7 +64,7 @@
 
     "@electric-sql/pglite": ["@electric-sql/pglite@0.6.0", "", {}, "sha512-g3tAPFjRLEdN1g5FvawTl4ETo9LtmVwBRUJYnH6Erl6mhlKFRGB2mYhPABffIuXMYxki64mX0Al8U4UFUhuYDQ=="],
 
-    "@electric-sql/pglite-pg_textsearch": ["@electric-sql/pglite-pg_textsearch@0.0.18", "https://registry.npmmirror.com/@electric-sql/pglite-pg_textsearch/-/pglite-pg_textsearch-0.0.18.tgz", { "peerDependencies": { "@electric-sql/pglite": "0.5.16" } }, "sha512-Fb7Aw8H+XsiwfojJsXSMHBX4lWANU8M2aHKe5hQkEUzm56DZYnMhKTJjDx84lmmRw4wb4MbZMQOa4dT32EbGAQ=="],
+    "@electric-sql/pglite-pg_textsearch": ["@electric-sql/pglite-pg_textsearch@0.1.0", "https://registry.npmmirror.com/@electric-sql/pglite-pg_textsearch/-/pglite-pg_textsearch-0.1.0.tgz", { "peerDependencies": { "@electric-sql/pglite": "0.6.0" } }, "sha512-8W68wLODJV4tmx9V4PN8uw0SKKaYApIi4rl8GiR3jLeQyBynWyTEGhRHPfA4R5aDgwjJXzc8jG93RoudqjORrg=="],
 
     "@electric-sql/pglite-pgmq": ["@electric-sql/pglite-pgmq@0.1.0", "", { "peerDependencies": { "@electric-sql/pglite": "0.6.0" } }, "sha512-mqN9zFyaz9oDaZfvFw5zxrCPSqmSQQxW53l6bVVBh1VqTvcgg8Ey4Sk42f+RB33+IDWNyZ1P2Lk1+yT5YM92IA=="],
 
