@@ -65,11 +65,11 @@
     "typecheck": "bun x tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@electric-sql/pglite": "0.5.16",
-    "@electric-sql/pglite-pg_textsearch": "0.0.18",
-    "@electric-sql/pglite-pgmq": "0.0.14",
-    "@electric-sql/pglite-pgvector": "0.0.17",
-    "@electric-sql/pglite-postgis": "0.2.16",
+    "@electric-sql/pglite": "0.6.0",
+    "@electric-sql/pglite-pg_textsearch": "0.1.0",
+    "@electric-sql/pglite-pgmq": "0.1.0",
+    "@electric-sql/pglite-pgvector": "0.1.0",
+    "@electric-sql/pglite-postgis": "0.3.0",
     "@supacloud/db": "file:../db",
     "exact-mirror": "1.2.7",
     "graphql": "16.14.2",

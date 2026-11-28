@@ -177,6 +177,7 @@ supacloud-lite start
 | `realtime.messages` RLS 授权 | Bun（core 发 `authorize` effect） |
 | CDC 触发器、列元数据、逐订阅者 RLS 可见性 | Bun |
 | Phoenix 二进制广播 | Bun（不进 JSON core） |
+| 16 KiB 以上的广播 payload 与 CDC record | Bun 堆；core 只收 marker，帧里原样带回，写 socket 前拼回 |
 | PGlite / native PostgreSQL | Bun |
 
 嵌入式调用方可直接注入自定义实现，不依赖环境变量：

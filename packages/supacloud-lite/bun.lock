@@ -5,11 +5,11 @@
     "": {
       "name": "@supacloud/lite",
       "dependencies": {
-        "@electric-sql/pglite": "0.5.16",
-        "@electric-sql/pglite-pg_textsearch": "0.0.18",
-        "@electric-sql/pglite-pgmq": "0.0.14",
-        "@electric-sql/pglite-pgvector": "0.0.17",
-        "@electric-sql/pglite-postgis": "0.2.16",
+        "@electric-sql/pglite": "0.6.0",
+        "@electric-sql/pglite-pg_textsearch": "0.1.0",
+        "@electric-sql/pglite-pgmq": "0.1.0",
+        "@electric-sql/pglite-pgvector": "0.1.0",
+        "@electric-sql/pglite-postgis": "0.3.0",
         "@supacloud/db": "file:../db",
         "exact-mirror": "1.2.7",
         "fast-xml-parser": "5.12.1",
@@ -62,15 +62,15 @@
 
     "@chevrotain/utils": ["@chevrotain/utils@12.0.0", "https://registry.npmmirror.com/@chevrotain/utils/-/utils-12.0.0.tgz", {}, "sha512-lB59uJoaGIfOOL9knQqQRfhl9g7x8/wqFkp13zTdkRu1huG9kg6IJs1O8hqj9rs6h7orGxHJUKb+mX3rPbWGhA=="],
 
-    "@electric-sql/pglite": ["@electric-sql/pglite@0.5.16", "https://registry.npmmirror.com/@electric-sql/pglite/-/pglite-0.5.16.tgz", {}, "sha512-Nj8KcIsJL748W408U2N8q4+9IlONdpRIU8MJypIAAINMJ5nqKyqpX7Mgg/5XKkXiAib3AoZGR6hnJFlrlLBrcg=="],
+    "@electric-sql/pglite": ["@electric-sql/pglite@0.6.0", "", {}, "sha512-g3tAPFjRLEdN1g5FvawTl4ETo9LtmVwBRUJYnH6Erl6mhlKFRGB2mYhPABffIuXMYxki64mX0Al8U4UFUhuYDQ=="],
 
-    "@electric-sql/pglite-pg_textsearch": ["@electric-sql/pglite-pg_textsearch@0.0.18", "https://registry.npmmirror.com/@electric-sql/pglite-pg_textsearch/-/pglite-pg_textsearch-0.0.18.tgz", { "peerDependencies": { "@electric-sql/pglite": "0.5.16" } }, "sha512-Fb7Aw8H+XsiwfojJsXSMHBX4lWANU8M2aHKe5hQkEUzm56DZYnMhKTJjDx84lmmRw4wb4MbZMQOa4dT32EbGAQ=="],
+    "@electric-sql/pglite-pg_textsearch": ["@electric-sql/pglite-pg_textsearch@0.1.0", "https://registry.npmmirror.com/@electric-sql/pglite-pg_textsearch/-/pglite-pg_textsearch-0.1.0.tgz", { "peerDependencies": { "@electric-sql/pglite": "0.6.0" } }, "sha512-8W68wLODJV4tmx9V4PN8uw0SKKaYApIi4rl8GiR3jLeQyBynWyTEGhRHPfA4R5aDgwjJXzc8jG93RoudqjORrg=="],
 
-    "@electric-sql/pglite-pgmq": ["@electric-sql/pglite-pgmq@0.0.14", "https://registry.npmmirror.com/@electric-sql/pglite-pgmq/-/pglite-pgmq-0.0.14.tgz", { "peerDependencies": { "@electric-sql/pglite": "0.5.16" } }, "sha512-8ZUD9r8hqlESssQTbITeZ729LLINEPefYHCpi+YkS+RuQ7++VyU2ZnONjhWaeC70+E9IMQZxCo7twHYzf76a1A=="],
+    "@electric-sql/pglite-pgmq": ["@electric-sql/pglite-pgmq@0.1.0", "", { "peerDependencies": { "@electric-sql/pglite": "0.6.0" } }, "sha512-mqN9zFyaz9oDaZfvFw5zxrCPSqmSQQxW53l6bVVBh1VqTvcgg8Ey4Sk42f+RB33+IDWNyZ1P2Lk1+yT5YM92IA=="],
 
-    "@electric-sql/pglite-pgvector": ["@electric-sql/pglite-pgvector@0.0.17", "https://registry.npmmirror.com/@electric-sql/pglite-pgvector/-/pglite-pgvector-0.0.17.tgz", { "peerDependencies": { "@electric-sql/pglite": "0.5.16" } }, "sha512-tOFBigmwl+6qqZ5y2wOUeDngKeO22lLslSQjmaZri5WAh7V3bDUQaxxlT9MJLSPmdwPjR0NRHqk2V5yFtgLUYQ=="],
+    "@electric-sql/pglite-pgvector": ["@electric-sql/pglite-pgvector@0.1.0", "https://registry.npmmirror.com/@electric-sql/pglite-pgvector/-/pglite-pgvector-0.1.0.tgz", { "peerDependencies": { "@electric-sql/pglite": "0.6.0" } }, "sha512-2iSQwI8av+BI8rnsq6NUT6coXX/Yrc6Qu5unfS9Z4znkUQjk3KS31DsCoU+uQKsb73YUPQ60e8+ZsFAcTecX/A=="],
 
-    "@electric-sql/pglite-postgis": ["@electric-sql/pglite-postgis@0.2.16", "https://registry.npmmirror.com/@electric-sql/pglite-postgis/-/pglite-postgis-0.2.16.tgz", { "peerDependencies": { "@electric-sql/pglite": "0.5.16" } }, "sha512-1MiwGtFW8o0Jkwe3SVAbbm4Lqn9uelELktn/SfHMz4NT7a/m3xmFULqNwdfM3xmDHPf+YTq0XC+tELcRSsZq1A=="],
+    "@electric-sql/pglite-postgis": ["@electric-sql/pglite-postgis@0.3.0", "", { "peerDependencies": { "@electric-sql/pglite": "0.6.0" } }, "sha512-oYimDQudOBFikKclyVa+ZY5jUNlVaDyy3lB08OI2e16d/VcpEGcAyUrL3REIFRk6Pua86g4ySKsK/+qtVLW8CA=="],
 
     "@graphql-codegen/core": ["@graphql-codegen/core@6.2.2", "https://registry.npmmirror.com/@graphql-codegen/core/-/core-6.2.2.tgz", { "dependencies": { "@graphql-codegen/plugin-helpers": "^7.4.2", "@graphql-tools/schema": "^10.1.3", "@graphql-tools/utils": "^12.0.3", "tslib": "^2.8.0" }, "peerDependencies": { "graphql": "^0.8.0 || ^0.9.0 || ^0.10.0 || ^0.11.0 || ^0.12.0 || ^0.13.0 || ^14.0.0 || ^15.0.0 || ^16.0.0 || ^17.0.0" } }, "sha512-bClqhA2ZITWKiEYd5A87KaU93YBC8o1++B3Y0FpYIZPZfGEWEwbhyvUkrSKrXqUagwM7c0h77f7DB4oR6vBgpQ=="],
 
