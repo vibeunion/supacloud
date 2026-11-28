@@ -15,6 +15,17 @@ and `examples/document-conversion-worker.ts` for the authorization/private
 artifact integration boundary. Run `bun run test:document-conversion` for
 focused local transport tests; real document layout acceptance is separate.
 
+## Optional Legacy Office Conversion
+
+The independent `@supacloud/worker/office-conversion` entry point provides a
+default-off Rust/`office_oxide` adapter for `.doc`/`.xls`/`.ppt` to
+`.docx`/`.xlsx`/`.pptx`. It uses a short-lived helper process, not a native
+Node binding or a daemon. Build/install it explicitly with
+`scripts/build_supacloud_office.sh` and `scripts/install_supacloud_office.sh`;
+the Worker still owns queue authorization, idempotency and private artifact
+publication. See [configuration and acceptance](../../docs/optional-office-conversion.md)
+and `examples/office-conversion-worker.ts`.
+
 ## Resource Delivery
 
 Use the optional `@supacloud/worker/delivery` entry point to bootstrap a queue

@@ -1,0 +1,10 @@
+[package]
+name = "supacloud-office-converter"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+license = "Apache-2.0"
+description = "Optional SupaCloud legacy Office to OOXML converter"
+
+[dependencies]
+office_oxide = "0.1.17"
