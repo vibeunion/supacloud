@@ -202,6 +202,14 @@
       "fingerprint": "402f60f7a45b046b0edbbbb7f7e970f2788af4337cd9364d26268eded99265d5",
       "count": 1,
       "reason": "Existing runtime-selected loader. Static ownership is unverified; affected must remain conservative until explicit impact metadata is reviewed."
+    },
+    {
+      "code": "WS_DYNAMIC_IMPORT",
+      "file": "packages/management-api/src/image-service/imgproxy/onnx.ts",
+      "specifier": null,
+      "fingerprint": "b77cf775cccda19d71041251a5fa79f08aa0018c5f3da643907af0f6a44c72e7",
+      "count": 1,
+      "reason": "Optional ONNX adapter is loaded only when explicitly configured; keep the runtime-selected import lazy so the default image path does not load ONNX."
     }
   ]
 }
