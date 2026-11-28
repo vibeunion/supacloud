@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Transformer } from "@napi-rs/image";
 import { processImage } from "../../src/image-service/engine";
-import { encodeGif } from "../../src/image-service/gif";
+import { decodeGifFrames, encodeGif, encodeGifFrames } from "../../src/image-service/gif";
 import {
     getImgproxyConfig,
     resetImgproxyConfigCache,
@@ -310,6 +310,112 @@ describe("imgproxy request handling", () => {
         }
     });
 
+    test("serves a cached result with ETag and conditional 304", async () => {
+        const cacheDir = mkdtempSync(join(tmpdir(), "supacloud-imgproxy-cache-"));
+        configure({
+            IMGPROXY_KEY: TEST_KEY,
+            IMGPROXY_SALT: TEST_SALT,
+            IMGPROXY_RESULT_CACHE_DIR: cacheDir,
+            IMGPROXY_RESULT_CACHE_TTL: "3600",
+        });
+        try {
+            const source = base64Source(makePng(12, 8), "image/png", "png");
+            const path = signed(`/rs:fit:6:6/fn:download.png/${source}`);
+            const first = await call(path);
+            expect(first.status).toBe(200);
+            const etag = first.headers.get("etag");
+            expect(etag).toMatch(/^"[0-9a-f]{64}"$/);
+            expect(first.headers.get("content-disposition")).toContain("download.png");
+
+            const second = await call(path, { headers: { "If-None-Match": etag ?? "" } });
+            expect(second.status).toBe(304);
+            expect(second.headers.get("etag")).toBe(etag);
+            expect(second.headers.get("content-disposition")).toContain("download.png");
+        } finally {
+            rmSync(cacheDir, { recursive: true, force: true });
+        }
+    });
+
+    test("continues serving when the result cache is unavailable", async () => {
+        const cachePath = join(mkdtempSync(join(tmpdir(), "supacloud-imgproxy-cache-file-")), "cache");
+        writeFileSync(cachePath, "not a directory");
+        configure({
+            IMGPROXY_KEY: TEST_KEY,
+            IMGPROXY_SALT: TEST_SALT,
+            IMGPROXY_RESULT_CACHE_DIR: cachePath,
+            IMGPROXY_RESULT_CACHE_TTL: "3600",
+        });
+        const source = base64Source(makePng(8, 8), "image/png", "png");
+        const response = await call(signed(`/rs:fit:4:4/${source}`));
+        expect(response.status).toBe(200);
+    });
+
+    test("loads native cloud object sources", async () => {
+        const png = makePng(8, 8);
+        const previousFetch = globalThis.fetch;
+        globalThis.fetch = (async (input: RequestInfo | URL) => {
+            expect(String(input)).toBe("https://s3.example.test/assets/test.png");
+            return new Response(png, { status: 200, headers: { "content-type": "image/png" } });
+        }) as typeof fetch;
+        configure({
+            IMGPROXY_KEY: TEST_KEY,
+            IMGPROXY_SALT: TEST_SALT,
+            IMGPROXY_S3_ENDPOINT: "https://s3.example.test",
+        });
+        try {
+            const response = await call(signed(`/rs:fit:4:4/plain/s3://assets/test.png`));
+            expect(response.status).toBe(200);
+            expect(response.headers.get("content-type")).toBe("image/png");
+            const metadata = new Transformer(new Uint8Array(await response.arrayBuffer())).metadataSync();
+            expect(metadata.width).toBe(4);
+            expect(metadata.height).toBe(4);
+        } finally {
+            globalThis.fetch = previousFetch;
+        }
+    });
+
+    test("loads GCS, Azure Blob, and Swift object sources", async () => {
+        const png = makePng(8, 8);
+        const previousFetch = globalThis.fetch;
+        const requests: Array<{ url: string; token?: string }> = [];
+        globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+            requests.push({
+                url: String(input),
+                token: new Headers(init?.headers).get("authorization")
+                    ?? new Headers(init?.headers).get("x-auth-token")
+                    ?? undefined,
+            });
+            return new Response(png, { status: 200, headers: { "content-type": "image/png" } });
+        }) as typeof fetch;
+        try {
+            configure({
+                IMGPROXY_KEY: TEST_KEY,
+                IMGPROXY_SALT: TEST_SALT,
+                IMGPROXY_GCS_ENDPOINT: "https://gcs.example.test",
+                IMGPROXY_GCS_TOKEN: "gcs-token",
+                IMGPROXY_AZURE_ENDPOINT: "https://azure.example.test",
+                IMGPROXY_AZURE_SAS: "sig=azure",
+                IMGPROXY_SWIFT_ENDPOINT: "https://swift.example.test/v1/account",
+                IMGPROXY_SWIFT_TOKEN: "swift-token",
+            });
+            for (const source of [
+                "gs://bucket/path/to/image.png",
+                "az://container/path/to/image.png",
+                "swift://container/path/to/image.png",
+            ]) {
+                const response = await call(signed(`/rs:fit:4:4/plain/${source}`));
+                expect(response.status).toBe(200);
+            }
+            expect(requests).toEqual([
+                { url: "https://gcs.example.test/bucket/path/to/image.png", token: "Bearer gcs-token" },
+                { url: "https://azure.example.test/container/path/to/image.png?sig=azure" },
+                { url: "https://swift.example.test/v1/account/container/path/to/image.png", token: "swift-token" },
+            ]);
+        } finally {
+            globalThis.fetch = previousFetch;
+        }
+    });
+
     test("decodes GIF and encodes GIF output", async () => {
         configure({ IMGPROXY_KEY: TEST_KEY, IMGPROXY_SALT: TEST_SALT });
         const gif = encodeGif(Transformer.fromRgbaPixels(gradient(8, 8), 8, 8));
@@ -322,6 +428,24 @@ describe("imgproxy request handling", () => {
         expect(gifResponse.headers.get("content-type")).toBe("image/gif");
         const bytes = new Uint8Array(await gifResponse.arrayBuffer());
         expect(String.fromCharCode(...bytes.slice(0, 3))).toBe("GIF");
+    });
+
+    test("preserves animated GIF frames, delays, and transforms", async () => {
+        configure({ IMGPROXY_KEY: TEST_KEY, IMGPROXY_SALT: TEST_SALT });
+        const frames = [
+            { data: gradient(8, 8), width: 8, height: 8, delayMs: 80 },
+            { data: gradient(8, 8).map((value, index) => index % 4 === 0 ? 255 - value : value), width: 8, height: 8, delayMs: 160 },
+        ];
+        const gif = encodeGifFrames(frames);
+        const response = await call(signed(`/rs:fit:4:4/f:gif/${base64Source(gif, "image/gif", "gif")}`));
+        expect(response.status).toBe(200);
+        const output = new Uint8Array(await response.arrayBuffer());
+        const decoded = decodeGifFrames(output);
+        expect(decoded).toHaveLength(2);
+        expect(decoded[0]?.delayMs).toBeGreaterThanOrEqual(80);
+        expect(decoded[1]?.delayMs).toBeGreaterThanOrEqual(160);
+        expect(decoded[0]?.width).toBe(4);
+        expect(decoded[0]?.height).toBe(4);
     });
 
     test("rasterizes SVG sources", async () => {

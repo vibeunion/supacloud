@@ -1,0 +1,28 @@
+[package]
+name = "supacloud-image-core"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Optional Rust media core for the SupaCloud image service"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[features]
+default = []
+napi = ["dep:napi", "dep:napi-derive"]
+pdf = []
+onnx = []
+c2pa = []
+icc = []
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["avif", "bmp", "gif", "ico", "jpeg", "png", "tiff", "webp"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+napi = { version = "3", default-features = false, features = ["napi4"], optional = true }
+napi-derive = { version = "3", optional = true }
+
+[package.metadata.napi]
+name = "supacloud-image-core"

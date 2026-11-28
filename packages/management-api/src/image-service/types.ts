@@ -188,6 +188,9 @@ export type TransformOptions = {
     };
     svgStyle?: string;
     skipProcessing?: boolean;
+    disableAnimation?: boolean;
+    maxAnimationFrames?: number;
+    maxAnimationFrameResolution?: number;
     bestFormat?: boolean;
     maxSourcePixels?: number;
     maxResultDimension?: number;

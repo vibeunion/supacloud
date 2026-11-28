@@ -48,7 +48,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        crate: [runtime-core, jit-gateway, realtime-gateway]
+        crate: [image-core, runtime-core, jit-gateway, realtime-gateway]
 
     steps:
       - name: Checkout code
@@ -80,6 +80,7 @@ jobs:
         run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Locate the PostgreSQL server binaries and the wal2json plugin
+        if: matrix.crate == 'realtime-gateway'
         # The realtime gateway's CDC fixtures start a throwaway PostgreSQL and
         # decode a real replication slot, so they need the server binaries and
         # the wal2json output plugin. The runner image ships the binaries but not

@@ -8,8 +8,8 @@ SupaCloud 图片服务已经实现 imgproxy 的核心 URL 协议和绝大多数�
 
 - 兼容 `/:signature/:options/:source`、`/info/:signature/:options/:source`、`plain`、Base64、`enc` 和 `@ext` / `.ext` 扩展名。
 - 兼容 HMAC-SHA256 签名、多组 key/salt、`IMGPROXY_TRUSTED_SIGNATURES`、签名长度、Bearer 鉴权、CORS、`expires`、`hashsum`、`fallback_image_url`、`presets`。
-- 支持 HTTP(S)、data URI、本地文件和加密源，不支持 S3/GCS/Azure/Swift 原生源，但可以通过预签名 URL 间接访问。
-- 支持 JPEG、PNG、WebP、AVIF、GIF、BMP、TIFF、ICO 输出，支持 JPEG/PNG/WebP/AVIF/JXL/BMP/TIFF/ICO/SVG/GIF 输入。
+- 支持 HTTP(S)、data URI、本地文件、加密源和 `s3://`、`gs://`、`gcs://`、`az://`、`azure://`、`swift://` 云对象源。
+- 支持 JPEG、PNG、WebP、AVIF、GIF、BMP、TIFF、ICO 输出，并对这些格式执行真实解码、缩放、裁剪和转码；支持 JPEG/PNG/WebP/AVIF/JXL/BMP/TIFF/ICO/SVG/GIF 输入。
 - 保留原有 Thumbor 风格 POST API 和管理 API，不改变现有调用方。
 
 它适合作为 imgproxy OSS 的日常替代，尤其是“对象存储 + CDN + 签名缩略图”的场景。imgproxy Pro 的视频缩略图、PDF、ONNX 物体检测/分类、C2PA 等能力不在当前实现范围内，相关选项会返回 `422`，不会静默产出错误结果。
@@ -92,10 +92,10 @@ const signature = createHmac("sha256", key)
 | data URI 源 | 是 | 是 | 是 | |
 | 本地文件源 | 是 | 是 | 是 | 需 `IMGPROXY_LOCAL_FILESYSTEM_ROOT` |
 | `plain` / Base64 / `enc` 源 | 是 | 是 | 是 | `enc` 使用 AES-CBC |
-| S3 原生源 | 是 | 是 | 否 | 可用预签名 URL |
-| GCS 原生源 | 是 | 是 | 否 | |
-| Azure Blob 原生源 | 否 | 是 | 否 | |
-| OpenStack Swift 原生源 | 否 | 是 | 否 | |
+| S3 原生源 | 是 | 是 | 是 | `s3://bucket/key`，支持 SigV4、S3/MinIO endpoint |
+| GCS 原生源 | 是 | 是 | 是 | `gs://bucket/key` 或 `gcs://bucket/key`，支持 Bearer token |
+| Azure Blob 原生源 | 否 | 是 | 是 | `az://container/blob`，支持 endpoint、SAS 或 Bearer token |
+| OpenStack Swift 原生源 | 否 | 是 | 是 | `swift://container/object`，支持 endpoint 和 token |
 | `IMGPROXY_BASE_URL` | 是 | 是 | 是 | |
 | `IMGPROXY_ALLOWED_SOURCES` | 是 | 是 | 是 | 支持 `*` 通配 |
 | 环回/私网/链路本地 SSRF 开关 | 是 | 是 | 是 | 默认允许私网，便于内网 MinIO |
@@ -122,7 +122,7 @@ const signature = createHmac("sha256", key)
 | `cachebuster` | 是 | 是 | 是 | 参与签名，不做缓存键 |
 | `bypass_cache` / `cache_tags` | 是 | 是 | 否 | 无内部结果缓存 |
 | `Cache-Control` | 是 | 是 | 是 | `IMGPROXY_CACHE_CONTROL` |
-| 内部结果缓存 | 是 | 是 | 否 | 建议交给 CDN |
+| 内部结果缓存 | 是 | 是 | 是 | 磁盘 LRU，支持 TTL、容量/条目上限、ETag/304 |
 | Prometheus 指标 | 是 | 是 | 否 | |
 
 ### 尺寸与几何
@@ -174,7 +174,7 @@ const signature = createHmac("sha256", key)
 | PNG 输出 | 是 | 是 | 是 | |
 | WebP 输出 | 是 | 是 | 是 | |
 | AVIF 输出 | 是 | 是 | 是 | |
-| GIF 输出 | 是 | 是 | 是 | 单帧 |
+| GIF 输出 | 是 | 是 | 是 | 保留多帧、帧延迟和 disposal |
 | BMP / TIFF / ICO 输出 | 是 | 是 | 是 | |
 | HEIC 输出 | 是 | 是 | 平台相关 | Linux 通常不可用 |
 | JXL 输出 | 是 | 是 | 否 | 仅解码 |
@@ -257,8 +257,24 @@ const signature = createHmac("sha256", key)
 | `IMGPROXY_MAX_SRC_RESOLUTION` | `0` | 源最大百万像素，0 表示不限制 |
 | `IMGPROXY_MAX_SRC_FILE_SIZE` | `0` | 源最大字节数 |
 | `IMGPROXY_MAX_RESULT_DIMENSION` | `0` | 结果最大宽高 |
-| `IMGPROXY_MAX_ANIMATION_FRAMES` | `0` | 解析但未强制 |
-| `IMGPROXY_MAX_ANIMATION_FRAME_RESOLUTION` | `0` | 解析但未强制 |
+| `IMGPROXY_MAX_ANIMATION_FRAMES` | `0` | 多帧处理上限 |
+| `IMGPROXY_MAX_ANIMATION_FRAME_RESOLUTION` | `0` | 每帧百万像素上限 |
+| `IMGPROXY_RESULT_CACHE_DIR` | 空 | 磁盘结果缓存目录；systemd 默认 `/var/cache/supacloud-image` |
+| `IMGPROXY_RESULT_CACHE_TTL` | `3600` | 结果缓存 TTL 秒数 |
+| `IMGPROXY_RESULT_CACHE_MAX_BYTES` | `134217728` | 缓存最大字节数 |
+| `IMGPROXY_RESULT_CACHE_MAX_ENTRIES` | `1024` | 缓存最大条目数 |
+| `IMGPROXY_S3_ENDPOINT` | `https://s3.amazonaws.com` | S3/MinIO endpoint |
+| `IMGPROXY_S3_REGION` | `us-east-1` | S3 SigV4 区域 |
+| `IMGPROXY_S3_ACCESS_KEY_ID` / `IMGPROXY_S3_SECRET_ACCESS_KEY` | 空 | S3 凭据；为空时读取公开对象 |
+| `IMGPROXY_S3_SESSION_TOKEN` | 空 | S3 临时会话 token |
+| `IMGPROXY_S3_VIRTUAL_HOST_STYLE` | `false` | 使用 `bucket.endpoint` 虚拟主机风格 |
+| `IMGPROXY_GCS_ENDPOINT` | `https://storage.googleapis.com` | GCS JSON API endpoint |
+| `IMGPROXY_GCS_TOKEN` | 空 | GCS Bearer token，也可使用 `GOOGLE_ACCESS_TOKEN` |
+| `IMGPROXY_AZURE_ENDPOINT` | 空 | Azure Blob endpoint |
+| `IMGPROXY_AZURE_SAS` | 空 | Azure SAS 查询参数 |
+| `IMGPROXY_AZURE_BEARER_TOKEN` | 空 | Azure Blob Bearer token |
+| `IMGPROXY_SWIFT_ENDPOINT` | 空 | OpenStack Swift object endpoint |
+| `IMGPROXY_SWIFT_TOKEN` | 空 | Swift `X-Auth-Token` |
 | `IMGPROXY_AUTO_ROTATE` | `true` | 自动旋转 |
 | `IMGPROXY_RETURN_ATTACHMENT` | `false` | 默认作为附件下载 |
 | `IMGPROXY_ALLOW_ORIGIN` | 空 | CORS Origin |

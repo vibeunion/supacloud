@@ -94,6 +94,21 @@ describe("image engine", () => {
     expect(output.bytes.length).toBeGreaterThan(0);
   });
 
+  test("transcodes BMP and TIFF inputs", () => {
+    const rgba = new Uint8ClampedArray(6 * 4 * 4).fill(255);
+    const source = Transformer.fromRgbaPixels(rgba, 6, 4);
+    for (const input of [source.bmpSync(), source.tiffSync()]) {
+      for (const format of ["jpeg", "png", "webp", "avif", "gif", "bmp", "tiff", "ico"] as const) {
+        const output = processImage(
+          new Uint8Array(input),
+          parsePath(`/fit-in/3x2/filters:format(${format}):quality(80)/`),
+        );
+        expect(output.contentType).toContain(format === "jpeg" ? "jpeg" : format);
+        expect(output.bytes.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
   test("returns metadata JSON", () => {
     const output = processImage(jpegBytes, parsePath("/meta/"));
     expect(output.contentType).toBe("application/json");

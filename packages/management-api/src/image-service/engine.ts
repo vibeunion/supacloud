@@ -21,8 +21,9 @@ import {
     hasAlphaChannel,
     smartCropRect,
     trimImage,
+    toRgba,
 } from "./effects";
-import { decodeGif, encodeGif } from "./gif";
+import { decodeGif, decodeGifFrames, encodeGif, encodeGifFrames } from "./gif";
 import type {
     CropOptions,
     Gravity,
@@ -173,6 +174,9 @@ export function processImage(
     options: TransformOptions,
     watermarkImage?: Uint8Array,
 ): ProcessedImage {
+    if (isGif(input) && !options.disableAnimation && !options.isMeta) {
+        return processAnimatedGif(input, options, watermarkImage);
+    }
     const decoded = decodeImage(input, options.svgStyle, options.maxSourcePixels ?? 0);
     if (options.isMeta) {
         return {
@@ -194,6 +198,69 @@ export function processImage(
         options.maxResultDimension,
     );
     return encodeImage(transformer, options, decoded);
+}
+
+function processAnimatedGif(
+    input: Uint8Array,
+    options: TransformOptions,
+    watermarkImage?: Uint8Array,
+): ProcessedImage {
+    let frames: ReturnType<typeof decodeGifFrames>;
+    try {
+        frames = decodeGifFrames(
+            input,
+            options.maxAnimationFrames ?? 0,
+            options.maxAnimationFrameResolution && options.maxAnimationFrameResolution > 0
+                ? Math.round(options.maxAnimationFrameResolution * 1_000_000)
+                : MAX_IMAGE_PIXELS,
+        );
+    } catch (error) {
+        throw new ImageEngineError(`Failed to decode animated image: ${errorMessage(error)}`, 415);
+    }
+    if (frames.length === 0) {
+        throw new ImageEngineError("Animated image contains no frames", 415);
+    }
+
+    const outputFormat = options.format ?? "gif";
+    if (outputFormat !== "gif") {
+        const first = Transformer.fromRgbaPixels(frames[0].data, frames[0].width, frames[0].height);
+        const decoded: DecodedImage = {
+            transformer: first,
+            metadata: first.metadataSync(),
+            input,
+            format: "gif",
+        };
+        return encodeImage(
+            applyMaxResultDimension(applyPipeline(decoded, options, watermarkImage), options.maxResultDimension),
+            options,
+            decoded,
+        );
+    }
+
+    const outputFrames = frames.map((frame) => {
+        const transformer = Transformer.fromRgbaPixels(frame.data, frame.width, frame.height);
+        const decoded: DecodedImage = {
+            transformer,
+            metadata: transformer.metadataSync(),
+            input,
+            format: "gif",
+        };
+        const processed = applyMaxResultDimension(
+            applyPipeline(decoded, { ...options, format: "png" }, watermarkImage),
+            options.maxResultDimension,
+        );
+        const rgba = toRgba(processed);
+        return {
+            data: rgba.data,
+            width: rgba.width,
+            height: rgba.height,
+            delayMs: frame.delayMs,
+        };
+    });
+    return {
+        bytes: encodeGifFrames(outputFrames),
+        contentType: "image/gif",
+    };
 }
 
 function applyMaxResultDimension(

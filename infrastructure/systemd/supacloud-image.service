@@ -9,6 +9,7 @@ Type=simple
 Environment=IMAGE_SERVICE_HOST=127.0.0.1
 Environment=IMAGE_SERVICE_PORT=9010
 EnvironmentFile=-/etc/supabase/image-service.env
+CacheDirectory=supacloud-image
 ExecStartPre=/bin/sh -ec 'test -x /usr/local/bin/supacloud-image'
 ExecStart=/usr/local/bin/supacloud-image
 Restart=on-failure

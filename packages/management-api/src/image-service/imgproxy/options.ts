@@ -68,6 +68,7 @@ export type ImgproxyRequest = {
     filename?: string;
     returnAttachment: boolean;
     raw: boolean;
+    disableAnimation: boolean;
     skipProcessing: TargetFormat[];
     hashsum?: Hashsum;
     maxSrcResolution: number;
@@ -280,6 +281,7 @@ export function parseProcessingOptions(
         bestFormat: false,
         returnAttachment: config.returnAttachment,
         raw: false,
+        disableAnimation: false,
         skipProcessing: [],
         maxSrcResolution: config.maxSrcResolution,
         maxSrcFileSize: config.maxSrcFileSize,
@@ -699,6 +701,8 @@ export function parseProcessingOptions(
                 break;
             case "disable_animation":
             case "da":
+                request.disableAnimation = boolValue(args[0], true);
+                transform.disableAnimation = request.disableAnimation;
                 break;
             case "fallback_image_url":
             case "fiu":
@@ -787,6 +791,9 @@ export function parseProcessingOptions(
         transform.maxSourcePixels = Math.round(request.maxSrcResolution * 1_000_000);
     }
     transform.maxResultDimension = request.maxResultDimension;
+    transform.disableAnimation = request.disableAnimation;
+    transform.maxAnimationFrames = request.maxAnimationFrames;
+    transform.maxAnimationFrameResolution = request.maxAnimationFrameResolution;
 
     return request;
 }
@@ -805,6 +812,7 @@ export function createInfoRequest(source: SourceRef, config: ImgproxyConfig): Im
         bestFormat: false,
         returnAttachment: config.returnAttachment,
         raw: false,
+        disableAnimation: false,
         skipProcessing: [],
         maxSrcResolution: config.maxSrcResolution,
         maxSrcFileSize: config.maxSrcFileSize,

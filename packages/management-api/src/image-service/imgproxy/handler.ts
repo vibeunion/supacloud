@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import { ImageEngineError, processImage } from "../engine";
+import { cacheEtag, cacheMatches, createImageCacheKey, ImageResultCache } from "../cache";
 import type { ProcessedImage, TargetFormat, TransformOptions } from "../types";
 import { getImgproxyConfig, type ImgproxyConfig } from "./config";
 import { ImgproxyError } from "./errors";
@@ -72,6 +74,33 @@ export async function handleImgproxyRequest(request: Request, url: URL): Promise
         if (!source.bytes) {
             throw new ImgproxyError("Source image has no bytes", 422);
         }
+        const cache = new ImageResultCache({
+            directory: config.resultCacheDir,
+            ttlSeconds: config.resultCacheTtlSeconds,
+            maxBytes: config.resultCacheMaxBytes,
+            maxEntries: config.resultCacheMaxEntries,
+        });
+        const sourceDigest = createHash("sha256").update(source.bytes).digest("hex");
+        const cacheKey = createImageCacheKey([
+            "image-service-v1",
+            parsed.info ? "info" : "image",
+            parsed.signedPath,
+            source.url,
+            sourceDigest,
+            request.headers.get("accept") ?? "",
+        ]);
+        const cached = await cache.get(cacheKey);
+        if (cached) {
+            return cachedResponse(
+                cached.bytes,
+                cached.contentType,
+                cached.etag,
+                request,
+                imgproxyRequest,
+                config,
+                headers,
+            );
+        }
 
         if (parsed.info) {
             const json = buildInfoJson(
@@ -85,17 +114,28 @@ export async function handleImgproxyRequest(request: Request, url: URL): Promise
             const infoHeaders = new Headers(headers);
             infoHeaders.set("Content-Type", "application/json; charset=utf-8");
             infoHeaders.set("Cache-Control", config.cacheControl);
-            return new Response(json, { status: 200, headers: infoHeaders });
+            const bytes = new TextEncoder().encode(json);
+            const etag = cacheEtag(bytes);
+            await cache.set(cacheKey, { bytes, contentType: "application/json; charset=utf-8", etag });
+            if (cacheMatches(request, etag)) {
+                infoHeaders.set("ETag", etag);
+                return new Response(null, { status: 304, headers: infoHeaders });
+            }
+            infoHeaders.set("ETag", etag);
+            return new Response(bytes, { status: 200, headers: infoHeaders });
         }
 
         if (shouldSkipProcessing(imgproxyRequest, source)) {
-            return imageResponse(
+            return await imageResponse(
                 source.bytes,
                 source.contentType ?? "application/octet-stream",
                 imgproxyRequest,
                 config,
                 headers,
                 source.size,
+                cache,
+                cacheKey,
+                request,
             );
         }
 
@@ -117,7 +157,17 @@ export async function handleImgproxyRequest(request: Request, url: URL): Promise
         responseHeaders.set("Cache-Control", config.cacheControl);
         if (result.varyAccept) responseHeaders.set("Vary", "Accept");
         setContentDisposition(responseHeaders, imgproxyRequest, result.result.contentType);
+        const etag = cacheEtag(result.result.bytes);
+        await cache.set(cacheKey, {
+            bytes: result.result.bytes,
+            contentType: result.result.contentType,
+            etag,
+        });
         responseHeaders.set("Content-Length", String(result.result.bytes.byteLength));
+        responseHeaders.set("ETag", etag);
+        if (cacheMatches(request, etag)) {
+            return new Response(null, { status: 304, headers: responseHeaders });
+        }
         if (request.method === "HEAD") {
             return new Response(null, { status: 200, headers: responseHeaders });
         }
@@ -296,19 +346,54 @@ function rawResponse(
     return new Response(blobFromBytes(source.bytes), { status: 200, headers });
 }
 
-function imageResponse(
+async function imageResponse(
     bytes: Uint8Array,
     contentType: string,
-    request: ImgproxyRequest,
+    imgproxyRequest: ImgproxyRequest,
     config: ImgproxyConfig,
     baseHeaders: Headers,
     size?: number,
+    cache?: ImageResultCache,
+    cacheKey?: string,
+    httpRequest?: Request,
+): Promise<Response> {
+    const headers = new Headers(baseHeaders);
+    headers.set("Content-Type", contentType);
+    headers.set("Cache-Control", config.cacheControl);
+    const etag = cacheEtag(bytes);
+    headers.set("Content-Length", String(size ?? bytes.byteLength));
+    headers.set("ETag", etag);
+    setContentDisposition(headers, imgproxyRequest, contentType);
+    if (cache && cacheKey) {
+        await cache.set(cacheKey, { bytes, contentType, etag });
+    }
+    if (httpRequest && cacheMatches(httpRequest, etag)) {
+        return new Response(null, { status: 304, headers });
+    }
+    if (httpRequest?.method === "HEAD") {
+        return new Response(null, { status: 200, headers });
+    }
+    return new Response(blobFromBytes(bytes), { status: 200, headers });
+}
+
+function cachedResponse(
+    bytes: Uint8Array,
+    contentType: string,
+    etag: string,
+    request: Request,
+    imgproxyRequest: ImgproxyRequest,
+    config: ImgproxyConfig,
+    baseHeaders: Headers,
 ): Response {
     const headers = new Headers(baseHeaders);
     headers.set("Content-Type", contentType);
     headers.set("Cache-Control", config.cacheControl);
-    if (size !== undefined) headers.set("Content-Length", String(size));
-    setContentDisposition(headers, request, contentType);
+    headers.set("Content-Length", String(bytes.byteLength));
+    headers.set("ETag", etag);
+    setContentDisposition(headers, imgproxyRequest, contentType);
+    if (request.method === "HEAD" || cacheMatches(request, etag)) {
+        return new Response(null, { status: cacheMatches(request, etag) ? 304 : 200, headers });
+    }
     return new Response(blobFromBytes(bytes), { status: 200, headers });
 }
 
