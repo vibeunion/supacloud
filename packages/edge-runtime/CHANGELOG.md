@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.39.3](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.39.2...edge-runtime-v0.39.3) (2026-11-28)
+
+
+### Bug Fixes
+
+* **deps:** bump @supabase/supabase-js in /packages/edge-runtime ([#2851](https://github.com/vibeunion/supacloud/issues/2851)) ([5810c40](https://github.com/vibeunion/supacloud/commit/5810c40c3ce492e4c79c434eb806632bf2327f36))
+* **deps:** bump exact-mirror in /packages/edge-runtime ([#2843](https://github.com/vibeunion/supacloud/issues/2843)) ([1e73208](https://github.com/vibeunion/supacloud/commit/1e732081a63daafdb747bba4de2e6f80fcb4d262))
+* **deps:** realign CI dependency pins after dependabot drift ([#2868](https://github.com/vibeunion/supacloud/issues/2868)) ([672fb3b](https://github.com/vibeunion/supacloud/commit/672fb3bd465f0644b9143d40eeef54940cc88c78))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump elysia to 2.0.0-rc.5 ([#2849](https://github.com/vibeunion/supacloud/issues/2849)) ([a26f353](https://github.com/vibeunion/supacloud/commit/a26f353beac6ed41dd52607001a35be5ff324ccf))
+* **deps:** bump jose to 6.2.18 ([#2846](https://github.com/vibeunion/supacloud/issues/2846)) ([31f2175](https://github.com/vibeunion/supacloud/commit/31f217525d431f72a63dff26fdaa8719f5614864))
+
 ## [0.39.2](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.39.1...edge-runtime-v0.39.2) (2026-11-21)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.143.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.142.0...management-api-v0.143.0) (2026-11-28)
+
+
+### Features
+
+* **image:** add PDF, video thumbnails, and optional ONNX ([#2869](https://github.com/vibeunion/supacloud/issues/2869)) ([0e72513](https://github.com/vibeunion/supacloud/commit/0e725130de20544d7039b6c47b727bdc61e347b9))
+
 ## [0.142.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.141.2...management-api-v0.142.0) (2026-11-27)
 
 

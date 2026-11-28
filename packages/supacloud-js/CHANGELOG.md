@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.48.7](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.48.6...supacloud-js-v0.48.7) (2026-11-28)
+
+
+### Bug Fixes
+
+* **deps-dev:** bump @supabase/supabase-js in /packages/supacloud-js ([#2848](https://github.com/vibeunion/supacloud/issues/2848)) ([32ba622](https://github.com/vibeunion/supacloud/commit/32ba6227bef7a5d55dba97865e5c56c0662a1897))
+* **deps-dev:** bump @tanstack/svelte-query in /packages/supacloud-js ([#2842](https://github.com/vibeunion/supacloud/issues/2842)) ([cab5406](https://github.com/vibeunion/supacloud/commit/cab540623a7124a328d63787f5ea6767ed66aa9a))
+* **deps-dev:** bump svelte in /packages/supacloud-js ([#2845](https://github.com/vibeunion/supacloud/issues/2845)) ([c823cbe](https://github.com/vibeunion/supacloud/commit/c823cbe5e52ec3f39c721367bda9569f5b98e795))
+* **deps:** realign CI dependency pins after dependabot drift ([#2868](https://github.com/vibeunion/supacloud/issues/2868)) ([672fb3b](https://github.com/vibeunion/supacloud/commit/672fb3bd465f0644b9143d40eeef54940cc88c78))
+
 ## [0.48.6](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.48.5...supacloud-js-v0.48.6) (2026-11-20)
 
 
