@@ -12,7 +12,7 @@
       "devDependencies": {
         "@supabase/supabase-js": "^2.118.0",
         "@tanstack/query-core": "5.107.2",
-        "@tanstack/svelte-query": "6.4.2",
+        "@tanstack/svelte-query": "6.4.7",
         "@types/bun": "^1.4.5",
         "svelte": "5.59.1",
         "typebox": "1.4.7",
@@ -60,7 +60,7 @@
 
     "@tanstack/query-core": ["@tanstack/query-core@5.107.2", "", {}, "sha512-npIQ9T9CpaEHgwCeqmazMtiBePlaSxfzt5qee2C8KLJnA9Kmiri0Rxls9bCdd0GXu9xCvdWA16t4GWP/bcOXbw=="],
 
-    "@tanstack/svelte-query": ["@tanstack/svelte-query@6.4.2", "", { "dependencies": { "@tanstack/query-core": "5.107.2" }, "peerDependencies": { "svelte": "^5.25.0" } }, "sha512-2PP8cXOX1bPj25MHvXcnXAeauqieRZhCAr5NL15k6f6GX+T14OQ0hZ+uPc/Ieq1d31ntd1iRNVqwdlz3k8tnxg=="],
+    "@tanstack/svelte-query": ["@tanstack/svelte-query@6.4.7", "", { "dependencies": { "@tanstack/query-core": "5.108.4" }, "peerDependencies": { "svelte": "^5.25.0" } }, "sha512-PkKz/OXE+BGb5rsrepDElCiXaVjq7Q4POKrvo27n5dg1yKhso7P3s/uScBmci5gTyMUac7b2n6LWkl0c9KRhAQ=="],
 
     "@types/bun": ["@types/bun@1.4.5", "https://registry.npmmirror.com/@types/bun/-/bun-1.4.5.tgz", { "dependencies": { "bun-types": "1.4.5" } }, "sha512-DpgwNI9z0L1S0gtb45QLCWgwCUcMLnsHYMJHQvpNj7erGiCGBvpggltAIeARrtobNMKMuy0UP7i56tKKgwFs/Q=="],
 
@@ -147,6 +147,8 @@
     "undici-types": ["undici-types@8.12.3", "https://registry.npmmirror.com/undici-types/-/undici-types-8.12.3.tgz", {}, "sha512-EXE4ydL3S76dFb27UFjNVZHTyv/TLdATj/KUe29ptdcg6qXL48J2tZ3126E5kICj5jn781OR+XlVH1N6Mz8jbA=="],
 
     "zimmerframe": ["zimmerframe@1.1.5", "https://registry.npmmirror.com/zimmerframe/-/zimmerframe-1.1.5.tgz", {}, "sha512-msJxIvYDYcoNL+PJsu+7qmpDWsYmAxTY+2TNYXXF0hzBzBk0BMecOqDOG/EckUoKCuKwObfbugIl8QpqHDXeFA=="],
+
+    "@tanstack/svelte-query/@tanstack/query-core": ["@tanstack/query-core@5.108.4", "", {}, "sha512-2Ks5dlLWz4eXJrthOyG0qW3SLt3xx0RrQmAmN0rnmogiaaOYuWiAe6HAm9KE2b2v8nig+vraNz8fsfZ6fF6zFg=="],
 
     "@types/node/undici-types": ["undici-types@8.9.0", "https://registry.npmmirror.com/undici-types/-/undici-types-8.9.0.tgz", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
   }
