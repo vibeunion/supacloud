@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.59.7](https://github.com/vibeunion/supacloud/compare/web-console-v0.59.6...web-console-v0.59.7) (2026-11-28)
+
+
+### Bug Fixes
+
+* **deps-dev:** bump @sveltejs/vite-plugin-svelte ([#2847](https://github.com/vibeunion/supacloud/issues/2847)) ([b20cf45](https://github.com/vibeunion/supacloud/commit/b20cf452b49c89f0538ace097ad410ac614ad673))
+* **deps:** bump @svadmin/core in /packages/web-console ([#2844](https://github.com/vibeunion/supacloud/issues/2844)) ([cde55bb](https://github.com/vibeunion/supacloud/commit/cde55bb42941891726fd1f608405469d744c6f1a))
+* **deps:** bump @tanstack/svelte-query in /packages/web-console ([#2850](https://github.com/vibeunion/supacloud/issues/2850)) ([cec149d](https://github.com/vibeunion/supacloud/commit/cec149dccfb2ad2ad865f7fb80681fb2d91c7967))
+* **deps:** bump monaco-editor in /packages/web-console ([#2841](https://github.com/vibeunion/supacloud/issues/2841)) ([d6eaa85](https://github.com/vibeunion/supacloud/commit/d6eaa85d1825df2a0cd4fb8fa8bc7cea4eae5c16))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump @svadmin/ai-elements to 0.15.7 ([#2852](https://github.com/vibeunion/supacloud/issues/2852)) ([96eaa2b](https://github.com/vibeunion/supacloud/commit/96eaa2b46d7f6a517886b207108cb9b858874d69))
+
 ## [0.59.6](https://github.com/vibeunion/supacloud/compare/web-console-v0.59.5...web-console-v0.59.6) (2026-11-26)
 
 

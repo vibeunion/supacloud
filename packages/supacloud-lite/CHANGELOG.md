@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.45.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.45.0...supacloud-lite-v0.45.1) (2026-11-28)
+
+
+### Bug Fixes
+
+* **deps:** bump @electric-sql/pglite in /packages/supacloud-lite ([#2856](https://github.com/vibeunion/supacloud/issues/2856)) ([4e3398d](https://github.com/vibeunion/supacloud/commit/4e3398d753704d74f204f6abaaced76f7faa0ccb))
+* **deps:** bump @electric-sql/pglite-pgmq in /packages/supacloud-lite ([#2859](https://github.com/vibeunion/supacloud/issues/2859)) ([5474fe3](https://github.com/vibeunion/supacloud/commit/5474fe32f747061f2b5403d452f9daad07365277))
+* **deps:** bump @electric-sql/pglite-postgis in /packages/supacloud-lite ([#2858](https://github.com/vibeunion/supacloud/issues/2858)) ([79bdffa](https://github.com/vibeunion/supacloud/commit/79bdffad1b4a83c39a157175737a013132762b33))
+* **lite:** keep Windows realtime core cleanup best-effort ([#2863](https://github.com/vibeunion/supacloud/issues/2863)) ([5aab4d8](https://github.com/vibeunion/supacloud/commit/5aab4d8579892f36c33f16fa3ec1b62c66872084))
+
+
+### Performance Improvements
+
+* **lite:** keep large Realtime payloads out of the core JSON bridge ([#2867](https://github.com/vibeunion/supacloud/issues/2867)) ([9ec8e60](https://github.com/vibeunion/supacloud/commit/9ec8e60699e6047a122ae69bd3af42b9efa3edea))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump pglite-pg_textsearch to 0.1.0 ([#2857](https://github.com/vibeunion/supacloud/issues/2857)) ([2bf6a74](https://github.com/vibeunion/supacloud/commit/2bf6a746f0fa8a9ad5614b1489f545d839cfc97b))
+* **deps:** bump pglite-pgvector to 0.1.0 ([#2860](https://github.com/vibeunion/supacloud/issues/2860)) ([43948e8](https://github.com/vibeunion/supacloud/commit/43948e8f79df0cdfab2d8a2ac6c92a1105a04d62))
+
 ## [0.45.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.44.0...supacloud-lite-v0.45.0) (2026-11-27)
 
 

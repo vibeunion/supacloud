@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.10.1](https://github.com/vibeunion/supacloud/compare/function-adapter-v0.10.0...function-adapter-v0.10.1) (2026-11-28)
+
+
+### Bug Fixes
+
+* **deps-dev:** bump @sveltejs/kit in /packages/function-adapter ([#2853](https://github.com/vibeunion/supacloud/issues/2853)) ([0fcf5d7](https://github.com/vibeunion/supacloud/commit/0fcf5d7086a90c95843721e10a055c5fc0d2c0be))
+* **deps-dev:** bump @sveltejs/vite-plugin-svelte ([#2855](https://github.com/vibeunion/supacloud/issues/2855)) ([54c5dd2](https://github.com/vibeunion/supacloud/commit/54c5dd22f9d4a3a18432bbf8469f4e16291676e5))
+* **deps-dev:** bump svelte in /packages/function-adapter ([#2854](https://github.com/vibeunion/supacloud/issues/2854)) ([3071f52](https://github.com/vibeunion/supacloud/commit/3071f520c3dd3fd87e97b84eacd378dc75021a2f))
+* **deps:** realign CI dependency pins after dependabot drift ([#2868](https://github.com/vibeunion/supacloud/issues/2868)) ([672fb3b](https://github.com/vibeunion/supacloud/commit/672fb3bd465f0644b9143d40eeef54940cc88c78))
+
 ## [0.10.0](https://github.com/vibeunion/supacloud/compare/function-adapter-v0.9.3...function-adapter-v0.10.0) (2026-11-20)
 
 
